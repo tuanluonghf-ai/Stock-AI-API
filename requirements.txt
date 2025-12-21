@@ -1,3 +1,5 @@
-fastapi
-uvicorn
-pydantic
+streamlit
+openai
+pandas
+openpyxl
+plotly
