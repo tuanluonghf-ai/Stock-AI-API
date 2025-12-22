@@ -578,9 +578,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<p class="big-font">"Sự giản dị chính là đỉnh cao của sự tinh tế"</p>', unsafe_allow_html=True)
-st.markdown('<p class="quote-font" style="text-align: right;">Leonardo da Vinci</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-text">Tôi sẽ gánh phần phức tạp nhưng tinh tế, bạn chỉ cần làm phần giản dị nhất.</p>', unsafe_allow_html=True)
+st.markdown('<p class="big-font">Đơn Giản là đỉnh cao của Phức tạp-    Leonardo da Vinci </p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-text">Tôi là sự phức tạp, còn bạn ..?</p>', unsafe_allow_html=True)
 st.divider()
 
 # 2. Xóa chữ "Control Panel" trong Sidebar
