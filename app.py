@@ -6,7 +6,6 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, List
-import argparse
 
 # ==========================================
 # 1. CẤU HÌNH WEB APP
@@ -32,8 +31,9 @@ VALID_KEYS = {
     "KH04":   {"name": "Khách mời 04", "quota": 5},
     "KH05":   {"name": "Khách mời 05", "quota": 5},
 }
+
 # ==============================================================================
-# 2. KHU VỰC ENGINE LOGIC (GIỮ NGUYÊN BẢN 100% LOGIC TÍNH TOÁN)
+# 2. KHU VỰC ENGINE LOGIC (ĐÃ NÂNG CẤP FIBONACCI)
 # ==============================================================================
 
 # --- Formatting helpers ---
@@ -147,27 +147,175 @@ def macd(close, fast=12, slow=26, signal=9):
     hist = macd_line - signal_line
     return macd_line, signal_line, hist
 
-# --- Fib Logic ---
-def fib_60d_levels(df, lookback=60):
-    tail = df.tail(lookback)
-    if "High" in tail.columns and "Low" in tail.columns:
-        swing_hi = float(tail["High"].max())
-        swing_lo = float(tail["Low"].min())
-    else:
-        swing_hi = float(tail["Close"].max())
-        swing_lo = float(tail["Close"].min())
-    rng = swing_hi - swing_lo
-    if rng <= 0: return {"hi": swing_hi, "lo": swing_lo}
-    ratios = {"23.6%": 0.236, "38.2%": 0.382, "50.0%": 0.500, "61.8%": 0.618, "78.6%": 0.786}
-    levels = {"hi": swing_hi, "lo": swing_lo}
-    for k, r in ratios.items(): levels[k] = swing_lo + r * rng
-    return levels
+# ==============================================================================
+# NEW FIBONACCI MODULE (DUAL TIMEFRAME & DYNAMIC VOLATILITY)
+# ==============================================================================
 
-def fib_support_resistance(fib, close):
+def _compute_atr20(df: pd.DataFrame) -> pd.Series:
+    if not set(['High','Low','Close']).issubset(df.columns):
+        return pd.Series(dtype=float, index=df.index)
+    high = df['High'].astype(float)
+    low  = df['Low'].astype(float)
+    cp   = df['Close'].shift(1).astype(float)
+
+    tr1 = (high - low).abs()
+    tr2 = (high - cp).abs()
+    tr3 = (low  - cp).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr20 = tr.rolling(window=20, min_periods=20).mean()
+    return atr20
+
+def _compute_ma20_dev_vol(df: pd.DataFrame) -> Optional[float]:
+    if 'Close' not in df.columns or len(df) < 20:
+        return None
+    close = df['Close'].astype(float)
+    ma20 = close.rolling(20, min_periods=20).mean()
+    if ma20.isna().all() or ma20.iloc[-1] == 0:
+        return None
+    vol = ((close - ma20).abs() / ma20).tail(20).mean()
+    return float(vol) if pd.notna(vol) else None
+
+def _select_window_length_60_90(vol: float) -> int:
+    pct = vol * 100.0
+    if pct >= 3.0: return 60
+    if 2.0 <= pct < 3.0: return 75
+    return 90
+
+def _fib_levels_from_range(low: float, high: float) -> Dict[str, Dict[float, float]]:
+    rng = high - low
+    if rng <= 0:
+        # Fallback if no range
+        keys = [0.236, 0.382, 0.5, 0.618, 0.786]
+        return {
+            'retracements_from_low': {k: high for k in keys},
+            'retracements_from_high': {k: low for k in keys},
+            'extensions_from_low': {k: high for k in [1.272, 1.618]},
+            'extensions_from_high': {k: low for k in [1.272, 1.618]}
+        }
+    else:
+        return dict(
+            retracements_from_low = {
+                0.236: high - 0.236 * rng, 0.382: high - 0.382 * rng,
+                0.5:   high - 0.5   * rng, 0.618: high - 0.618 * rng,
+                0.786: high - 0.786 * rng,
+            },
+            retracements_from_high = {
+                0.236: low + 0.236 * rng, 0.382: low + 0.382 * rng,
+                0.5:   low + 0.5   * rng, 0.618: low + 0.618 * rng,
+                0.786: low + 0.786 * rng,
+            },
+            extensions_from_low = {
+                1.272: high + 0.272 * rng, 1.618: high + 0.618 * rng,
+            },
+            extensions_from_high = {
+                1.272: low - 0.272 * rng, 1.618: low - 0.618 * rng,
+            }
+        )
+
+def _prepare_df(df: pd.DataFrame, ticker: Optional[str]) -> pd.DataFrame:
+    # Ensure standard format
+    if 'Date' not in df.columns or 'Close' not in df.columns: return df
+    if ticker is not None and 'Ticker' in df.columns:
+        df = df[df['Ticker'].astype(str).str.upper() == str(ticker).upper()].copy()
+    df['Date'] = pd.to_datetime(df['Date'])
+    df.sort_values('Date', inplace=True)
+    return df
+
+def compute_auto_fibonacci_60_90(df: pd.DataFrame, ticker: str = None) -> Dict[str, Any]:
+    df = _prepare_df(df, ticker)
+    close = df['Close'].astype(float)
+    atr20 = _compute_atr20(df)
+
+    if not atr20.empty and pd.notna(atr20.iloc[-1]) and close.iloc[-1] != 0:
+        vol = float(atr20.iloc[-1] / close.iloc[-1])
+        method = 'ATR20/Close'
+    else:
+        vol = _compute_ma20_dev_vol(df)
+        method = 'MeanDev_vs_MA20'
+        if vol is None: vol = 0.02 # fallback default
+
+    L = _select_window_length_60_90(vol)
+    L = min(max(L, 60), 90)
+    
+    if len(df) < L: L = len(df)
+    
+    win = df.tail(L).copy()
+    # Ưu tiên High/Low để chính xác, nếu không có thì dùng Close
+    if 'High' in win.columns and 'Low' in win.columns:
+        swing_high = float(win['High'].max())
+        swing_low  = float(win['Low'].min())
+    else:
+        swing_high = float(win['Close'].max())
+        swing_low  = float(win['Close'].min())
+        
+    levels = _fib_levels_from_range(swing_low, swing_high)
+
+    return {
+        'frame': f'AUTO_{L}D', 'vol': vol, 'window_L': int(L),
+        'swing_low': swing_low, 'swing_high': swing_high,
+        **levels
+    }
+
+def compute_fibonacci_250(df: pd.DataFrame, ticker: str = None) -> Dict[str, Any]:
+    df = _prepare_df(df, ticker)
+    L = 250
+    if len(df) < L: L = len(df)
+    
+    win = df.tail(L).copy()
+    if 'High' in win.columns and 'Low' in win.columns:
+        swing_high = float(win['High'].max())
+        swing_low  = float(win['Low'].min())
+    else:
+        swing_high = float(win['Close'].max())
+        swing_low  = float(win['Close'].min())
+
+    levels = _fib_levels_from_range(swing_low, swing_high)
+
+    return {
+        'frame': 'FIXED_250D', 'window_L': int(L),
+        'swing_low': swing_low, 'swing_high': swing_high,
+        **levels
+    }
+
+def compute_dual_fibonacci(df: pd.DataFrame, ticker: str = None) -> Dict[str, Any]:
+    """Hàm wrapper chính để gọi cả 2 khung thời gian"""
+    auto_short = compute_auto_fibonacci_60_90(df, ticker)
+    fixed_long = compute_fibonacci_250(df, ticker)
+    return {'auto_short': auto_short, 'fixed_long': fixed_long}
+
+def flatten_fib_for_tradeplan(dual_fib):
+    """
+    Adapter chuyển đổi kết quả Dual Fibo phức tạp về dạng đơn giản 
+    để các hàm cũ (Trade Plan) vẫn hoạt động tốt.
+    Ưu tiên lấy khung ngắn hạn (auto_short) để làm Trade Plan.
+    """
+    res = {}
+    short = dual_fib.get('auto_short', {})
+    
+    # Lấy cả Retracement và Extension gộp vào một dict phẳng
+    # Logic: Gom hết các mốc quan trọng lại
+    for k, v in short.get('retracements_from_low', {}).items(): res[f"Retr_L_{k}"] = v
+    for k, v in short.get('retracements_from_high', {}).items(): res[f"Retr_H_{k}"] = v
+    for k, v in short.get('extensions_from_low', {}).items(): res[f"Ext_L_{k}"] = v
+    for k, v in short.get('extensions_from_high', {}).items(): res[f"Ext_H_{k}"] = v
+    
+    # Bổ sung thêm hi/lo để logic cũ tính Breakout không lỗi
+    res['hi'] = short.get('swing_high', 0)
+    res['lo'] = short.get('swing_low', 0)
+    return res
+
+# ==============================================================================
+# END NEW FIB MODULE
+# ==============================================================================
+
+def fib_support_resistance(fib_flat, close):
+    # Hàm này giữ nguyên logic nhưng đầu vào là fib đã được làm phẳng
     levels = []
-    for k, v in (fib or {}).items():
+    for k, v in (fib_flat or {}).items():
         if v is None or np.isnan(float(v)) or float(v) <= 0: continue
+        if k in ['hi', 'lo']: continue # Bỏ qua swing hi/lo khi tính cản
         levels.append((k, float(v)))
+    
     resist = [x for x in levels if x[1] > close]
     supp   = [x for x in levels if x[1] < close]
     resist.sort(key=lambda x: x[1])
@@ -282,12 +430,14 @@ class TradeSetup:
     rr: float
     probability: str
 
-def build_trade_plan(df, fib):
+def build_trade_plan(df, fib_flat):
     close_s = df["Close"]
     last_close = float(close_s.iloc[-1])
     ma20 = float(df["MA20"].iloc[-1]) if pd.notna(df["MA20"].iloc[-1]) else np.nan
     ma50 = float(df["MA50"].iloc[-1]) if pd.notna(df["MA50"].iloc[-1]) else np.nan
-    resist, supp = fib_support_resistance(fib, last_close)
+    
+    # Logic cũ dùng fib_support_resistance
+    resist, supp = fib_support_resistance(fib_flat, last_close)
     res_z = fib_zones(resist, last_close)
     sup_z = fib_zones(supp, last_close)
     near_res = nearest_zone_above(res_z)
@@ -301,7 +451,8 @@ def build_trade_plan(df, fib):
     else: breakout_stop = (ma20 * 0.992) if not np.isnan(ma20) else (breakout_entry * 0.98)
     breakout_stop = round(float(breakout_stop), 2)
     next_res = res_z[1] if res_z and len(res_z) >= 2 else None
-    fib_hi = fib.get("hi", np.nan)
+    
+    fib_hi = fib_flat.get("hi", np.nan)
     if next_res: breakout_tp = round(float(next_res["center"]), 2)
     else: breakout_tp = round(float(fib_hi), 2) if not np.isnan(fib_hi) else round(breakout_entry * 1.06, 2)
     breakout_rr = (breakout_tp - breakout_entry) / max(1e-9, (breakout_entry - breakout_stop))
@@ -360,7 +511,11 @@ def analyze_ticker(ticker: str):
     df["PrevClose"] = df["Close"].shift(1)
     df["ChgPct"] = (df["Close"] / df["PrevClose"] - 1.0) * 100.0
 
-    fib = fib_60d_levels(df, 60)
+    # --- CALL NEW DUAL FIBONACCI ---
+    dual_fib = compute_dual_fibonacci(df, ticker)
+    # Tạo bản phẳng cho Trade Plan dùng (lấy khung ngắn hạn làm chuẩn giao dịch)
+    fib_flat_for_plan = flatten_fib_for_tradeplan(dual_fib)
+    
     last_row = df.iloc[-1]
     last = last_row.to_dict()
 
@@ -373,7 +528,7 @@ def analyze_ticker(ticker: str):
     conviction = tscore + mscore + vscore + sscore
     conv_bd = {"Trend_35": tscore, "Momentum_25": mscore, "Volume_20": vscore, "Structure_20": sscore}
 
-    setups = build_trade_plan(df, fib)
+    setups = build_trade_plan(df, fib_flat_for_plan)
     avg_rr, preferred = weighted_rr(setups)
 
     names = load_ticker_names(TICKER_NAME_PATH)
@@ -399,7 +554,7 @@ def analyze_ticker(ticker: str):
 
     return {
         "Header": {"Ticker": ticker, "CompanyName": company_name, "LastPrice": last["Close"], "ChgPct": last["ChgPct"], "Date": fmt_date(pd.Timestamp(last["Date"]))},
-        "Indicators": {**last, "Fib60D": fib, "Scenario": scenario, "ConvictionScore": conviction, "ConvictionBreakdown": conv_bd},
+        "Indicators": {**last, "DualFib": dual_fib, "Scenario": scenario, "ConvictionScore": conviction, "ConvictionBreakdown": conv_bd},
         "HSC": hsc_row,
         "TradePlan": setups,
         "RRSimulation": {"WeightedAvgRR": avg_rr, "Preferred": preferred},
@@ -411,7 +566,12 @@ def analyze_ticker(ticker: str):
 def render_markdown(res: dict) -> str:
     h = res.get("Header", {})
     ind = res.get("Indicators", {})
-    fib = ind.get("Fib60D", {}) or {}
+    
+    # Lấy Dual Fibo mới
+    dual_fib = ind.get("DualFib", {})
+    auto_short = dual_fib.get("auto_short", {})
+    fixed_long = dual_fib.get("fixed_long", {})
+
     hsc = res.get("HSC", {}) or {}
     tp = res.get("TradePlan", {}) or {}
     rr = res.get("RRSimulation", {}) or {}
@@ -475,7 +635,7 @@ def render_markdown(res: dict) -> str:
         elif rsi14 >= 45: rsi_note.append("RSI 45-55: Trạng thái **Cân bằng**.")
         else: rsi_note.append("RSI <= 45: Động lượng **Yếu**.")
 
-    # Vol logic (Mục 6)
+    # Vol logic
     vol_note = []
     if vol and avg20:
         ratio = vol / avg20
@@ -500,18 +660,33 @@ def render_markdown(res: dict) -> str:
     md.append("\n#### 2. Phân tích RSI")
     md.extend([f"- {x}" for x in rsi_note])
     
-    # 5. Fib
-    md.append("\n#### 5. Các mức Fibonacci (60 phiên)")
-    resist, supp = fib_support_resistance(fib, float(close))
-    res_z = fib_zones(resist, float(close))
-    sup_z = fib_zones(supp, float(close))
+    # 5. Fib Hiển thị Kép
+    md.append("\n#### 5. Cấu trúc Fibonacci (Dual Timeframe)")
     
-    if sup_z:
-        top_sup = sorted(sup_z, key=lambda x: x["center"], reverse=True)[0]
-        md.append(f"- **Hỗ trợ gần nhất:** {top_sup['low']:.2f}-{top_sup['high']:.2f}")
-    if res_z:
-        top_res = sorted(res_z, key=lambda x: x["center"])[0]
-        md.append(f"- **Kháng cự gần nhất:** {top_res['low']:.2f}-{top_res['high']:.2f}")
+    # Short term display
+    s_days = auto_short.get('window_L', 0)
+    s_frame = auto_short.get('frame', 'N/A')
+    s_vol = auto_short.get('vol', 0)
+    s_hi = auto_short.get('swing_high', 0)
+    s_lo = auto_short.get('swing_low', 0)
+    
+    md.append(f"**a) Ngắn hạn ({s_frame} - Volatility {s_vol*100:.1f}%):**")
+    md.append(f"- Range: {_fmt_price(s_lo)} - {_fmt_price(s_hi)} ({s_days} phiên)")
+    # Lấy 1 vài mốc quan trọng (0.382, 0.5, 0.618)
+    retr_h = auto_short.get('retracements_from_high', {})
+    retr_l = auto_short.get('retracements_from_low', {})
+    # Giả định đơn giản để hiển thị: nếu giá gần đỉnh -> show retracement from low, ngược lại
+    # Tuy nhiên, để đầy đủ, ta hiển thị Golden Zone
+    if close > (s_hi + s_lo)/2:
+       md.append(f"- Hỗ trợ (Retr Low): 0.382({_fmt_price(retr_l.get(0.382))}) | 0.5({_fmt_price(retr_l.get(0.5))})")
+    else:
+       md.append(f"- Kháng cự (Retr High): 0.382({_fmt_price(retr_h.get(0.382))}) | 0.5({_fmt_price(retr_h.get(0.5))})")
+
+    # Long term display
+    l_hi = fixed_long.get('swing_high', 0)
+    l_lo = fixed_long.get('swing_low', 0)
+    md.append(f"**b) Dài hạn (FIXED_250D - 1 Năm):**")
+    md.append(f"- Range: {_fmt_price(l_lo)} - {_fmt_price(l_hi)}")
 
     # 6. Việt hóa Volume
     md.append("\n#### 6. Phân tích Khối lượng & Hành động giá")
@@ -557,7 +732,6 @@ def render_markdown(res: dict) -> str:
 # ==========================================
 # 4. GIAO DIỆN WEB STREAMLIT
 # ==========================================
-# 1. Thay đổi tiêu đề theo ý anh
 st.markdown("""
 <style>
 .big-font {
@@ -582,13 +756,10 @@ st.markdown('<p class="big-font">Đơn Giản là đỉnh cao của Phức tạp
 st.markdown('<p class="sub-text">Tôi là sự phức tạp, còn bạn ..?</p>', unsafe_allow_html=True)
 st.divider()
 
-# 2. Xóa chữ "Control Panel" trong Sidebar
+# Sidebar Control
 with st.sidebar:
-    # st.header("Control Panel") -> Đã xóa
     user_key = st.text_input("🔑 Mã VIP:", type="password")
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="HPG").upper()
-    
-    # 3. Đổi nút Run thành XEM
     run_btn = st.button("XEM", type="primary")
 
 # Main Execution
@@ -596,36 +767,45 @@ if run_btn:
     if user_key not in VALID_KEYS:
         st.error("❌ Mã VIP không đúng!")
     else:
-        with st.spinner(f"Đang phân tích {ticker_input}..."):
-            result = analyze_ticker(ticker_input)
+        # Check quota (Logic đơn giản)
+        current_quota = VALID_KEYS[user_key]["quota"]
+        if current_quota <= 0:
+             st.error("⛔ Bạn đã hết lượt sử dụng.")
+        else:
+            # Trừ quota (Lưu ý: trên Streamlit Cloud mỗi lần rerun code sẽ reset biến dict này
+            # Muốn lưu lâu dài cần database, nhưng ở đây ta làm tạm theo session run)
+            VALID_KEYS[user_key]["quota"] -= 1
             
-            if "Error" in result:
-                st.error(f"❌ {result['Error']}")
-            else:
-                engine_report = render_markdown(result)
+            with st.spinner(f"Đang phân tích {ticker_input} (Quota còn: {VALID_KEYS[user_key]['quota']})..."):
+                result = analyze_ticker(ticker_input)
                 
-                # Hiển thị báo cáo
-                st.markdown(engine_report)
-                
-                # Gửi cho AI (GPT)
-                if api_key:
-                    st.divider()
-                    st.info("🤖 **Góc nhìn Chuyên gia (AI Synthesis):**")
-                    try:
-                        client = OpenAI(api_key=api_key)
-                        prompt = f"""
-                        Bạn là Chuyên gia Tài chính cấp cao. Dưới đây là báo cáo kỹ thuật chi tiết:
-                        {engine_report}
-                        
-                        Hãy viết một đoạn nhận định ngắn (khoảng 150 từ) bằng tiếng Việt cho nhà đầu tư cá nhân.
-                        Tập trung vào:
-                        1. Xu hướng chính (Dựa trên Scenario).
-                        2. Hành động cụ thể (Mua/Bán/Chờ) dựa trên Trade Plan.
-                        3. Rủi ro cần lưu ý.
-                        """
-                        res = client.chat.completions.create(
-                            model="gpt-3.5-turbo",
-                            messages=[{"role": "user", "content": prompt}]
-                        )
-                        st.write(res.choices[0].message.content)
-                    except: pass
+                if "Error" in result:
+                    st.error(f"❌ {result['Error']}")
+                else:
+                    engine_report = render_markdown(result)
+                    
+                    # Hiển thị báo cáo
+                    st.markdown(engine_report)
+                    
+                    # Gửi cho AI (GPT)
+                    if api_key:
+                        st.divider()
+                        st.info("🤖 **Góc nhìn Chuyên gia (AI Synthesis):**")
+                        try:
+                            client = OpenAI(api_key=api_key)
+                            prompt = f"""
+                            Bạn là Chuyên gia Tài chính cấp cao. Dưới đây là báo cáo kỹ thuật chi tiết:
+                            {engine_report}
+                            
+                            Hãy viết một đoạn nhận định ngắn (khoảng 300 từ) bằng tiếng Việt cho nhà đầu tư cá nhân.
+                            Tập trung vào:
+                            1. Xu hướng chính (Dựa trên Scenario).
+                            2. Hành động cụ thể (Mua/Bán/Chờ) dựa trên Trade Plan.
+                            3. Rủi ro cần lưu ý.
+                            """
+                            res = client.chat.completions.create(
+                                model="gpt-3.5-turbo",
+                                messages=[{"role": "user", "content": prompt}]
+                            )
+                            st.write(res.choices[0].message.content)
+                        except: pass
