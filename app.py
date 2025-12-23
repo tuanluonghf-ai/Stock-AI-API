@@ -7,6 +7,13 @@ import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, List
 
+# Thêm thư viện tìm kiếm tin tức
+try:
+    from googlesearch import search
+except ImportError:
+    st.warning("⚠️ Chưa cài thư viện tin tức. Vui lòng chạy: pip install googlesearch-python")
+    def search(*args, **kwargs): return []
+
 # ==========================================
 # 1. CẤU HÌNH WEB APP
 # ==========================================
@@ -32,8 +39,38 @@ VALID_KEYS = {
     "KH05":   {"name": "Khách mời 05", "quota": 5},
 }
 
+# ==========================================
+# MODULE TIN TỨC (NEWS ENGINE) - LỌC NGUỒN
+# ==========================================
+def fetch_market_news(ticker):
+    """
+    Tìm kiếm tin tức NHƯNG chỉ trong 4 nguồn uy tín:
+    CafeF, Vietstock, VietnamBiz, FireAnt.
+    """
+    try:
+        # Sử dụng toán tử nâng cao của Google để lọc nguồn
+        query = (
+            f'"{ticker}" tin tức '
+            f'(site:cafef.vn OR site:vietstock.vn OR site:vietnambiz.vn OR site:fireant.vn)'
+        )
+        
+        news_list = []
+        # Lấy 5 kết quả đầu tiên
+        for link in search(query, num_results=5, lang="vi", sleep_interval=1):
+            news_list.append(link)
+        
+        if not news_list:
+            return "Không tìm thấy tin tức mới từ các nguồn chọn lọc (CafeF, Vietstock...)."
+        
+        # Trả về danh sách link dạng Markdown bullet points
+        formatted_news = "\n".join([f"- {link}" for link in news_list])
+        return formatted_news
+
+    except Exception as e:
+        return f"Hệ thống tin tức đang bảo trì hoặc quá tải: {str(e)}"
+
 # ==============================================================================
-# 2. KHU VỰC ENGINE LOGIC (ĐÃ NÂNG CẤP FIBONACCI)
+# 2. KHU VỰC ENGINE LOGIC (GIỮ NGUYÊN FIBO CỦA ANH)
 # ==============================================================================
 
 # --- Formatting helpers ---
@@ -148,7 +185,7 @@ def macd(close, fast=12, slow=26, signal=9):
     return macd_line, signal_line, hist
 
 # ==============================================================================
-# NEW FIBONACCI MODULE (DUAL TIMEFRAME & DYNAMIC VOLATILITY)
+# FIBONACCI MODULE (Code gốc của anh - Không chỉnh sửa logic)
 # ==============================================================================
 
 def _compute_atr20(df: pd.DataFrame) -> pd.Series:
@@ -287,25 +324,22 @@ def flatten_fib_for_tradeplan(dual_fib):
     """
     Adapter chuyển đổi kết quả Dual Fibo phức tạp về dạng đơn giản 
     để các hàm cũ (Trade Plan) vẫn hoạt động tốt.
-    Ưu tiên lấy khung ngắn hạn (auto_short) để làm Trade Plan.
     """
     res = {}
     short = dual_fib.get('auto_short', {})
     
     # Lấy cả Retracement và Extension gộp vào một dict phẳng
-    # Logic: Gom hết các mốc quan trọng lại
     for k, v in short.get('retracements_from_low', {}).items(): res[f"Retr_L_{k}"] = v
     for k, v in short.get('retracements_from_high', {}).items(): res[f"Retr_H_{k}"] = v
     for k, v in short.get('extensions_from_low', {}).items(): res[f"Ext_L_{k}"] = v
     for k, v in short.get('extensions_from_high', {}).items(): res[f"Ext_H_{k}"] = v
     
-    # Bổ sung thêm hi/lo để logic cũ tính Breakout không lỗi
     res['hi'] = short.get('swing_high', 0)
     res['lo'] = short.get('swing_low', 0)
     return res
 
 # ==============================================================================
-# END NEW FIB MODULE
+# END FIB MODULE
 # ==============================================================================
 
 def fib_support_resistance(fib_flat, close):
@@ -552,12 +586,16 @@ def analyze_ticker(ticker: str):
         }
     else: hsc_row = {"Date": "", "CTCK": "HSC", "Recommendation": "", "Target": None, "Link": "", "Upside": 0, "PE_2025": 0}
 
+    # --- LẤY TIN TỨC CHỌN LỌC ---
+    news_data = fetch_market_news(ticker)
+
     return {
         "Header": {"Ticker": ticker, "CompanyName": company_name, "LastPrice": last["Close"], "ChgPct": last["ChgPct"], "Date": fmt_date(pd.Timestamp(last["Date"]))},
         "Indicators": {**last, "DualFib": dual_fib, "Scenario": scenario, "ConvictionScore": conviction, "ConvictionBreakdown": conv_bd},
         "HSC": hsc_row,
         "TradePlan": setups,
         "RRSimulation": {"WeightedAvgRR": avg_rr, "Preferred": preferred},
+        "NewsRaw": news_data # Thêm dữ liệu tin tức vào kết quả trả về
     }
 
 # ==========================================
@@ -575,6 +613,7 @@ def render_markdown(res: dict) -> str:
     hsc = res.get("HSC", {}) or {}
     tp = res.get("TradePlan", {}) or {}
     rr = res.get("RRSimulation", {}) or {}
+    news = res.get("NewsRaw", "Chưa cập nhật tin tức.")
 
     ticker = _safe(h.get("Ticker", ""))
     cname = _safe(h.get("CompanyName", ""))
@@ -647,21 +686,21 @@ def render_markdown(res: dict) -> str:
     md = []
     md.append(header)
     md.append("\n---\n")
-    md.append("### A. Chỉ số Kỹ thuật Nhanh (Indicator Snapshot)")
+    md.append("### A. Chỉ số Kỹ thuật ")
     md.append(f"- **Giá:** {_fmt_price(close)}")
     md.append(f"- **Vol:** {_fmt_int(vol)} | **TB 20 phiên:** {_fmt_int(avg20)}")
     md.append(f"- **MA20 / MA50 / MA200:** {_fmt_price(ma20)} / {_fmt_price(ma50)} / {_fmt_price(ma200)}")
     md.append(f"- **RSI(14):** {_fmt_price(rsi14)}")
     md.append(f"- **MACD:** {_fmt_price(macd_v)}")
 
-    md.append("\n#### 1. Xu hướng MA")
+    md.append("\n#### 1. MA")
     md.extend([f"- {x}" for x in ma_trend])
 
-    md.append("\n#### 2. Phân tích RSI")
+    md.append("\n#### 2. RSI")
     md.extend([f"- {x}" for x in rsi_note])
     
     # 5. Fib Hiển thị Kép
-    md.append("\n#### 5. Cấu trúc Fibonacci (Dual Timeframe)")
+    md.append("\n#### 5. Fibonacci (Dual Timeframe)")
     
     # Short term display
     s_days = auto_short.get('window_L', 0)
@@ -676,7 +715,6 @@ def render_markdown(res: dict) -> str:
     retr_h = auto_short.get('retracements_from_high', {})
     retr_l = auto_short.get('retracements_from_low', {})
     # Giả định đơn giản để hiển thị: nếu giá gần đỉnh -> show retracement from low, ngược lại
-    # Tuy nhiên, để đầy đủ, ta hiển thị Golden Zone
     if close > (s_hi + s_lo)/2:
        md.append(f"- Hỗ trợ (Retr Low): 0.382({_fmt_price(retr_l.get(0.382))}) | 0.5({_fmt_price(retr_l.get(0.5))})")
     else:
@@ -689,7 +727,7 @@ def render_markdown(res: dict) -> str:
     md.append(f"- Range: {_fmt_price(l_lo)} - {_fmt_price(l_hi)}")
 
     # 6. Việt hóa Volume
-    md.append("\n#### 6. Phân tích Khối lượng & Hành động giá")
+    md.append("\n#### 6. Khối lượng & Hành động giá")
     md.extend([f"- {x}" for x in vol_note])
 
     # 7. Việt hóa Scenario
@@ -708,13 +746,13 @@ def render_markdown(res: dict) -> str:
     md.append(f"- **Giá mục tiêu:** {_fmt_price(hsc.get('Target'))} (Upside: {hsc.get('Upside',0)*100:.1f}%)")
     md.append(f"- **P/E 2025F:** {hsc.get('PE_2025', 'N/A')}")
 
-    # C. Tin tức (Placeholder - Giữ nguyên theo yêu cầu)
+    # C. Tin tức & Sự kiện
     md.append("\n---\n")
-    md.append("### C. Tin tức & Sự kiện")
-    md.append("- *(Chức năng đang phát triển - Chưa kết nối dữ liệu thực tế)*")
+    md.append("### C. Tin tức & Sự kiện (Nguồn lọc: CafeF, Vietstock...)")
+    md.append(news) # Đã thay thế placeholder bằng dữ liệu thật
 
     md.append("\n---\n")
-    md.append("### D. Kế hoạch Giao dịch (Gợi ý)")
+    md.append("### D. Chiến Lược Giao dịch (Gợi ý)")
     md.append("| Chiến lược | Vào lệnh (Entry) | Cắt lỗ (Stop) | Chốt lời (TP) | Xác suất |")
     md.append("|---|---|---|---|---|")
     
@@ -752,7 +790,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<p class="big-font">Đơn Giản là đỉnh cao của Phức tạp-    Leonardo da Vinci </p>', unsafe_allow_html=True)
+st.markdown('<p class="big-font">Đơn Giản là đỉnh cao của Phức tạp </p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-text">Tôi là sự phức tạp, còn bạn ..?</p>', unsafe_allow_html=True)
 st.divider()
 
@@ -772,8 +810,7 @@ if run_btn:
         if current_quota <= 0:
              st.error("⛔ Bạn đã hết lượt sử dụng.")
         else:
-            # Trừ quota (Lưu ý: trên Streamlit Cloud mỗi lần rerun code sẽ reset biến dict này
-            # Muốn lưu lâu dài cần database, nhưng ở đây ta làm tạm theo session run)
+            # Trừ quota (Lưu ý: trên Streamlit Cloud mỗi lần rerun code sẽ reset biến dict này)
             VALID_KEYS[user_key]["quota"] -= 1
             
             with st.spinner(f"Đang phân tích {ticker_input} (Quota còn: {VALID_KEYS[user_key]['quota']})..."):
@@ -793,6 +830,7 @@ if run_btn:
                         st.info("🤖 **Góc nhìn Chuyên gia (AI Synthesis):**")
                         try:
                             client = OpenAI(api_key=api_key)
+                            # Giữ nguyên prompt đơn giản như ý anh, chỉ thêm dữ liệu tin tức đã render
                             prompt = f"""
                             Bạn là Chuyên gia Tài chính cấp cao. Dưới đây là báo cáo kỹ thuật chi tiết:
                             {engine_report}
