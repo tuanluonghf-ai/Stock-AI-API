@@ -7,13 +7,6 @@ import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, List
 
-# Thêm thư viện tìm kiếm tin tức
-try:
-    from googlesearch import search
-except ImportError:
-    st.warning("⚠️ Chưa cài thư viện tin tức. Vui lòng chạy: pip install googlesearch-python")
-    def search(*args, **kwargs): return []
-
 # ==========================================
 # 1. CẤU HÌNH WEB APP
 # ==========================================
@@ -40,34 +33,18 @@ VALID_KEYS = {
 }
 
 # ==========================================
-# MODULE TIN TỨC (NEWS ENGINE) - LỌC NGUỒN
+# MODULE TIN TỨC (ĐÃ LOẠI BỎ GOOGLE SEARCH)
 # ==========================================
 def fetch_market_news(ticker):
     """
-    Tìm kiếm tin tức NHƯNG chỉ trong 4 nguồn uy tín:
-    CafeF, Vietstock, VietnamBiz, FireAnt.
+    Đã loại bỏ chức năng cào tin tự động.
+    Thay thế bằng danh sách link trực tiếp đến nguồn tin uy tín.
     """
-    try:
-        # Sử dụng toán tử nâng cao của Google để lọc nguồn
-        query = (
-            f'"{ticker}" tin tức '
-            f'(site:cafef.vn OR site:vietstock.vn OR site:vietnambiz.vn OR site:fireant.vn)'
-        )
-        
-        news_list = []
-        # Lấy 5 kết quả đầu tiên
-        for link in search(query, num_results=5, lang="vi", sleep_interval=1):
-            news_list.append(link)
-        
-        if not news_list:
-            return "Không tìm thấy tin tức mới từ các nguồn chọn lọc (CafeF, Vietstock...)."
-        
-        # Trả về danh sách link dạng Markdown bullet points
-        formatted_news = "\n".join([f"- {link}" for link in news_list])
-        return formatted_news
-
-    except Exception as e:
-        return f"Hệ thống tin tức đang bảo trì hoặc quá tải: {str(e)}"
+    return f"""
+- [Xem chi tiết {ticker} trên CafeF](https://s.cafef.vn/hose/{ticker}-.chn)
+- [Xem chi tiết {ticker} trên Vietstock](https://finance.vietstock.vn/{ticker}/tin-tuc-su-kien.htm)
+- [Xem chi tiết {ticker} trên FireAnt](https://fireant.vn/ma-chung-khoan/{ticker})
+"""
 
 # ==============================================================================
 # 2. KHU VỰC ENGINE LOGIC (GIỮ NGUYÊN FIBO CỦA ANH)
@@ -586,7 +563,7 @@ def analyze_ticker(ticker: str):
         }
     else: hsc_row = {"Date": "", "CTCK": "HSC", "Recommendation": "", "Target": None, "Link": "", "Upside": 0, "PE_2025": 0}
 
-    # --- LẤY TIN TỨC CHỌN LỌC ---
+    # --- LẤY TIN TỨC (Dạng Link, Không cào) ---
     news_data = fetch_market_news(ticker)
 
     return {
@@ -595,7 +572,7 @@ def analyze_ticker(ticker: str):
         "HSC": hsc_row,
         "TradePlan": setups,
         "RRSimulation": {"WeightedAvgRR": avg_rr, "Preferred": preferred},
-        "NewsRaw": news_data # Thêm dữ liệu tin tức vào kết quả trả về
+        "NewsRaw": news_data 
     }
 
 # ==========================================
@@ -748,8 +725,8 @@ def render_markdown(res: dict) -> str:
 
     # C. Tin tức & Sự kiện
     md.append("\n---\n")
-    md.append("### C. Tin tức & Sự kiện (Nguồn lọc: CafeF, Vietstock...)")
-    md.append(news) # Đã thay thế placeholder bằng dữ liệu thật
+    md.append("### C. Tin tức & Sự kiện (Link tra cứu trực tiếp)")
+    md.append(news) 
 
     md.append("\n---\n")
     md.append("### D. Chiến Lược Giao dịch (Gợi ý)")
@@ -824,13 +801,12 @@ if run_btn:
                     # Hiển thị báo cáo
                     st.markdown(engine_report)
                     
-                    # Gửi cho AI (GPT)
+                    # Gửi cho AI (GPT) - GIỮ NGUYÊN PROMPT CŨ CỦA BẠN
                     if api_key:
                         st.divider()
                         st.info("🤖 **Góc nhìn Chuyên gia (AI Synthesis):**")
                         try:
                             client = OpenAI(api_key=api_key)
-                            # Giữ nguyên prompt đơn giản như ý anh, chỉ thêm dữ liệu tin tức đã render
                             prompt = f"""
                             Bạn là Chuyên gia Tài chính cấp cao. Dưới đây là báo cáo kỹ thuật chi tiết:
                             {engine_report}
