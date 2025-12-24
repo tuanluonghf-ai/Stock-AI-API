@@ -7,7 +7,7 @@ from openai import OpenAI
 # ===============================================================
 # 1️⃣ CẤU HÌNH CƠ BẢN
 # ===============================================================
-st.set_page_config(page_title="INCEPTION v4.4 – Professional Research", page_icon="📊", layout="wide")
+st.set_page_config(page_title="INCEPTION v4.5 – Neo Research Dashboard", page_icon="🦅", layout="wide")
 
 api_key = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key) if api_key else None
@@ -79,13 +79,13 @@ def classify_tone(last):
     c, ma20, ma50, ma200 = last["Close"], last["MA20"], last["MA50"], last["MA200"]
     rsi, macd_v, sig = last["RSI"], last["MACD"], last["MACDSignal"]
     if c > ma20 > ma50 > ma200 and rsi > 55 and macd_v > sig:
-        tone, mood = "Uptrend", "Tự tin, chủ động, thể hiện dòng tiền tích cực và động lượng mạnh."
+        tone, mood = "Uptrend", "Giọng văn chủ động, tự tin, phản ánh dòng tiền tích cực."
     elif ma50 < c < ma200 and 45 <= rsi <= 55:
-        tone, mood = "Sideway", "Trung lập, kiên nhẫn, khuyến nghị chờ xác nhận xu hướng."
+        tone, mood = "Sideway", "Giọng trung lập, thận trọng, tập trung quan sát vùng cân bằng cung cầu."
     elif c < ma50 < ma200 and rsi < 45 and macd_v < sig:
-        tone, mood = "Downtrend", "Thận trọng, bảo thủ, tập trung vào bảo toàn vốn."
+        tone, mood = "Downtrend", "Giọng thận trọng, bảo thủ, tập trung vào quản trị rủi ro."
     else:
-        tone, mood = "Neutral", "Cân bằng, phân tích khách quan, chưa thiên về hướng nào."
+        tone, mood = "Neutral", "Giọng trung dung, cân bằng, thiên về phân tích khách quan."
     return tone, mood
 
 def analyze_ticker_logic(ticker: str):
@@ -114,31 +114,20 @@ def analyze_ticker_logic(ticker: str):
     }
 
 # ===============================================================
-# 3️⃣ GPT – INSIGHT PROFESSIONAL PROMPT
+# 3️⃣ GPT PROMPT – STRATEGIC COMMENTARY
 # ===============================================================
 def inception_generate_report(data: dict) -> str:
     tone, mood = data["ToneProfile"]["Trend"], data["ToneProfile"]["Mood"]
     prompt = f"""
-    Bạn là INCEPTION, chuyên gia phân tích tài chính chuyên nghiệp.
-    Viết **báo cáo kỹ thuật chuyên sâu dạng INSIGHT (700–900 từ)** theo cấu trúc sau:
+    Bạn là INCEPTION – chuyên gia phân tích thị trường.
+    Viết báo cáo phân tích cổ phiếu theo **cấu trúc INSIGHT (700–900 từ)** gồm 4 phần:  
+    A. Phân tích Kỹ Thuật (8 mục nhỏ như MA, RSI, MACD, Fibo...)  
+    B. Fundamental Analysis  
+    C. Trade Plan (3 chiến lược)  
+    D. R:R Simulation  
 
-    A. Phân tích Kỹ Thuật:
-    1. MA Trend Analysis
-    2. RSI Analysis
-    3. MACD Analysis
-    4. RSI + MACD Bias Matrix
-    5. Fibonacci Levels (2 khung)
-    6. Volume & Price Action
-    7. 12-Scenario Classification
-    8. Master Integration + Conviction Score
-
-    B. Fundamental Analysis Summary
-    C. Trade Plan (3 chiến lược)
-    D. R:R Simulation
-
-    Giọng văn: {mood}
-    Phong cách: chuyên nghiệp, mượt, có chiều sâu và dẫn dắt tự nhiên.
-    Hãy diễn đạt như đang viết báo cáo cho khách hàng tổ chức.
+    Giọng văn: {mood}  
+    Phong cách: “Strategic Commentary” – mềm mại, giàu chiến lược, gần gũi nhà đầu tư.
 
     Dữ liệu kỹ thuật thật:
     ```json
@@ -146,58 +135,76 @@ def inception_generate_report(data: dict) -> str:
     ```
 
     Kết thúc bằng:
-    “*Chỉ nhằm mục đích cung cấp thông tin — không phải khuyến nghị đầu tư.*”
+    "*Chỉ nhằm mục đích cung cấp thông tin — không phải khuyến nghị đầu tư.*"
     """
     res = client.chat.completions.create(
         model="gpt-4-turbo",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.65, max_tokens=2500
+        temperature=0.7, max_tokens=2500
     )
     return res.choices[0].message.content.strip()
 
 # ===============================================================
-# 4️⃣ GIAO DIỆN STREAMLIT – PROFESSIONAL RESEARCH STYLE
+# 4️⃣ GIAO DIỆN – NEO-RESEARCH 3D
 # ===============================================================
 st.markdown("""
 <style>
-body {background-color: #F9FAFB; color: #111827; font-family: 'Helvetica Neue', sans-serif;}
-h1, h2, h3 {color: #2E86C1;}
-.report-box {
-    background-color: #FFFFFF;
-    padding: 30px;
-    border-radius: 15px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    line-height: 1.7;
-    margin-top: 20px;
+body {
+    background: linear-gradient(135deg, #4B0082 0%, #6C63FF 100%);
+    color: #f5f7fa;
+    font-family: 'Poppins', sans-serif;
 }
-blockquote {
-    color: #1E40AF;
-    border-left: 4px solid #2E86C1;
-    padding-left: 12px;
+h1, h2, h3 { color: #E0E7FF; }
+.report-box {
+    background: rgba(255,255,255,0.9);
+    border-radius: 20px;
+    padding: 35px;
+    box-shadow: 10px 10px 30px rgba(0,0,0,0.15);
+    color: #1E293B;
+    line-height: 1.8;
+}
+.placeholder-card {
+    background: rgba(255,255,255,0.15);
+    border-radius: 20px;
+    text-align: center;
+    padding: 40px;
+    color: #E5E7EB;
     font-style: italic;
+    box-shadow: inset 4px 4px 8px rgba(255,255,255,0.2),
+                inset -4px -4px 8px rgba(0,0,0,0.2);
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1>📊 INCEPTION INSIGHT ENGINE v4.4</h1>", unsafe_allow_html=True)
-st.caption("Chế độ: Professional Research – Giọng văn chuẩn INSIGHT, bố cục nghiên cứu chuyên nghiệp")
+st.markdown("<h1 style='text-align:center;'>🦅 INCEPTION v4.5 – Neo Research Dashboard</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>Báo cáo phân tích kỹ thuật chuyên sâu – giọng Strategic Commentary</p>", unsafe_allow_html=True)
 
-with st.sidebar:
-    user_key = st.text_input("🔑 Mã VIP:", type="password")
+col1, col2, col3 = st.columns([1.1, 3.2, 1.3])
+
+with col1:
+    st.markdown("### ⚙️ Điều khiển")
+    user_key = st.text_input("Mã VIP:", type="password")
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="HPG").upper()
     run_btn = st.button("PHÂN TÍCH", type="primary")
 
-if run_btn:
-    if user_key not in VALID_KEYS:
-        st.error("❌ Mã VIP không đúng!")
-    else:
-        with st.spinner(f"Đang phân tích {ticker_input}..."):
-            data = analyze_ticker_logic(ticker_input)
-            if "Error" in data:
-                st.error(data["Error"])
-            else:
-                if client:
-                    report = inception_generate_report(data)
-                    st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
+with col2:
+    if run_btn:
+        if user_key not in VALID_KEYS:
+            st.error("❌ Mã VIP không đúng!")
+        else:
+            with st.spinner(f"Đang phân tích {ticker_input}..."):
+                data = analyze_ticker_logic(ticker_input)
+                if "Error" in data:
+                    st.error(data["Error"])
                 else:
-                    st.warning("⚠️ Thiếu API Key OPENAI. Hãy cấu hình trước khi chạy.")
+                    if client:
+                        report = inception_generate_report(data)
+                        st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
+                    else:
+                        st.warning("⚠️ Thiếu API Key OPENAI. Hãy cấu hình trước khi chạy.")
+    else:
+        st.markdown("<div class='report-box'>🔎 Nhập mã cổ phiếu để bắt đầu phân tích...</div>", unsafe_allow_html=True)
+
+with col3:
+    st.markdown("### 📊 Khu vực biểu đồ")
+    st.markdown("<div class='placeholder-card'>Biểu đồ kỹ thuật và đồ thị dòng tiền sẽ hiển thị ở đây trong phiên bản tới...</div>", unsafe_allow_html=True)
