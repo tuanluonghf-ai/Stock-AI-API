@@ -1,3 +1,4 @@
+```python
 # ============================================================
 # INCEPTION v4.6 FINAL | Strategic Investor Edition
 # app.py — Streamlit + GPT-4 Turbo
@@ -9,6 +10,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import json
 from datetime import datetime
 from openai import OpenAI
 from dataclasses import dataclass
@@ -72,6 +74,10 @@ def _fmt_pct(x):
     if pd.isna(x): return ""
     return f"{float(x):.1f}%"
 
+def _fmt_thousand(x, ndigits=1):
+    if pd.isna(x): return ""
+    return f"{float(x)/1000:.{ndigits}f}"
+
 def _safe_float(x, default=np.nan) -> float:
     try: return float(x)
     except: return default
@@ -119,12 +125,49 @@ def load_ticker_names(path: str = TICKER_NAME_PATH) -> pd.DataFrame:
 def load_hsc_targets(path: str = HSC_TARGET_PATH) -> pd.DataFrame:
     try:
         df = pd.read_excel(path)
-        df.columns = [c.strip() for c in df.columns]
+        df.columns = [str(c).strip() for c in df.columns]
     except Exception:
-        return pd.DataFrame(columns=["Ticker", "Target", "Upside"])
-    df.rename(columns={"TP (VND)": "Target"}, inplace=True)
-    df["Upside"] = pd.to_numeric(df.get("Upside/Downside", 0), errors="coerce")
-    return df
+        return pd.DataFrame(columns=["Ticker", "Target", "Recommendation"])
+
+    rename_map = {}
+    for c in df.columns:
+        c0 = c.strip()
+        c1 = c0.lower()
+
+        if c1 in ["ticker", "ma", "symbol", "code"]:
+            rename_map[c] = "Ticker"
+
+        if c0 in ["TP (VND)", "Target", "Target Price", "TargetPrice", "TP"]:
+            rename_map[c] = "Target"
+
+        if c1 in ["recommendation", "khuyennghi", "khuyến nghị"]:
+            rename_map[c] = "Recommendation"
+
+    df.rename(columns=rename_map, inplace=True)
+
+    if "Ticker" not in df.columns:
+        for c in df.columns:
+            if "ticker" in c.lower() or c.strip().lower() == "ma":
+                df.rename(columns={c: "Ticker"}, inplace=True)
+                break
+
+    if "Target" not in df.columns:
+        for c in df.columns:
+            c1 = c.lower()
+            if ("tp" in c1) or ("target" in c1) or ("muc tieu" in c1) or ("mục tiêu" in c1):
+                df.rename(columns={c: "Target"}, inplace=True)
+                break
+
+    if "Ticker" not in df.columns or "Target" not in df.columns:
+        return pd.DataFrame(columns=["Ticker", "Target", "Recommendation"])
+
+    if "Recommendation" not in df.columns:
+        df["Recommendation"] = np.nan
+
+    df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
+    df["Target"] = pd.to_numeric(df["Target"], errors="coerce")
+
+    return df[["Ticker", "Target", "Recommendation"]].drop_duplicates(subset=["Ticker"], keep="last")
 
 # ============================================================
 # 5. INDICATORS
@@ -149,7 +192,7 @@ def macd(close, fast=12, slow=26, signal=9):
     return macd_line, signal_line, hist
 
 # ============================================================
-# 6. FIBONACCI DUAL-FRAME
+# 6. FIBONACCI DUAL-FRAME (SHORT SELECTABLE 60/90 + LONG 250)
 # ============================================================
 
 def _fib_levels(low, high):
@@ -163,14 +206,19 @@ def _fib_levels(low, high):
         "161.8": high + 0.618 * rng
     }
 
-def compute_dual_fibonacci(df: pd.DataFrame) -> Dict[str, Any]:
-    L_short = 60 if len(df) >= 60 else len(df)
-    L_long = 250 if len(df) >= 250 else len(df)
+def compute_dual_fibonacci(df: pd.DataFrame, short_window: int = 60, long_window: int = 250) -> Dict[str, Any]:
+    L_short = short_window if len(df) >= short_window else len(df)
+    L_long = long_window if len(df) >= long_window else len(df)
+
     win_short = df.tail(L_short)
     win_long = df.tail(L_long)
+
     s_hi, s_lo = win_short["High"].max(), win_short["Low"].min()
     l_hi, l_lo = win_long["High"].max(), win_long["Low"].min()
+
     return {
+        "short_window": L_short,
+        "long_window": L_long,
         "auto_short": {"swing_high": s_hi, "swing_low": s_lo, "levels": _fib_levels(s_lo, s_hi)},
         "fixed_long": {"swing_high": l_hi, "swing_low": l_lo, "levels": _fib_levels(l_lo, l_hi)}
     }
@@ -186,6 +234,7 @@ def compute_conviction(last: pd.Series) -> float:
     if last["Volume"] > last["Avg20Vol"]: score += 1
     if last["MACD"] > last["MACDSignal"]: score += 0.5
     return min(10.0, score)
+
 # ============================================================
 # 8. TRADE PLAN LOGIC
 # ============================================================
@@ -262,10 +311,256 @@ def classify_scenario(last: pd.Series) -> str:
     return "Neutral / Sideways"
 
 # ============================================================
+# 9B. 12-SCENARIO CLASSIFICATION (PYTHON-ONLY)
+# ============================================================
+
+def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
+    c = _safe_float(last.get("Close"))
+    ma50 = _safe_float(last.get("MA50"))
+    ma200 = _safe_float(last.get("MA200"))
+    rsi = _safe_float(last.get("RSI"))
+    macd_v = _safe_float(last.get("MACD"))
+    sig = _safe_float(last.get("MACDSignal"))
+    vol = _safe_float(last.get("Volume"))
+    avg_vol = _safe_float(last.get("Avg20Vol"))
+
+    rules_hit = []
+
+    # Trend regime (3)
+    trend = "Neutral"
+    if pd.notna(c) and pd.notna(ma50) and pd.notna(ma200):
+        if c >= ma50 and ma50 >= ma200:
+            trend = "Up"
+            rules_hit.append("Trend=Up (Close>=MA50>=MA200)")
+        elif c < ma50 and ma50 < ma200:
+            trend = "Down"
+            rules_hit.append("Trend=Down (Close<MA50<MA200)")
+        else:
+            trend = "Neutral"
+            rules_hit.append("Trend=Neutral (mixed MA structure)")
+
+    # Momentum regime (4)
+    mom = "Neutral"
+    if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
+        if (rsi >= 55) and (macd_v >= sig):
+            mom = "Bull"
+            rules_hit.append("Momentum=Bull (RSI>=55 & MACD>=Signal)")
+        elif (rsi <= 45) and (macd_v < sig):
+            mom = "Bear"
+            rules_hit.append("Momentum=Bear (RSI<=45 & MACD<Signal)")
+        elif (rsi >= 70):
+            mom = "Exhaust"
+            rules_hit.append("Momentum=Exhaust (RSI>=70)")
+        else:
+            mom = "Neutral"
+            rules_hit.append("Momentum=Neutral (between zones)")
+
+    # Volume regime (informational)
+    vol_reg = "N/A"
+    if pd.notna(vol) and pd.notna(avg_vol):
+        vol_reg = "High" if vol > avg_vol else "Low"
+        rules_hit.append(f"Volume={vol_reg} (Vol {'>' if vol>avg_vol else '<='} Avg20Vol)")
+
+    # 12 scenarios = Trend(3) x Momentum(4)
+    trend_order = {"Up": 0, "Neutral": 1, "Down": 2}
+    mom_order = {"Bull": 0, "Neutral": 1, "Bear": 2, "Exhaust": 3}
+
+    code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1  # 1..12
+
+    name_map = {
+        ( "Up","Bull" ): "S1 – Uptrend + Bullish Momentum",
+        ( "Up","Neutral" ): "S2 – Uptrend + Neutral Momentum",
+        ( "Up","Bear" ): "S3 – Uptrend + Bearish Pullback",
+        ( "Up","Exhaust" ): "S4 – Uptrend + Overbought/Exhaust",
+
+        ( "Neutral","Bull" ): "S5 – Range + Bullish Attempt",
+        ( "Neutral","Neutral" ): "S6 – Range + Balanced",
+        ( "Neutral","Bear" ): "S7 – Range + Bearish Pressure",
+        ( "Neutral","Exhaust" ): "S8 – Range + Overbought Risk",
+
+        ( "Down","Bull" ): "S9 – Downtrend + Short-covering Bounce",
+        ( "Down","Neutral" ): "S10 – Downtrend + Weak Stabilization",
+        ( "Down","Bear" ): "S11 – Downtrend + Bearish Momentum",
+        ( "Down","Exhaust" ): "S12 – Downtrend + Overbought Rebound Risk",
+    }
+
+    return {
+        "Code": int(code),
+        "TrendRegime": trend,
+        "MomentumRegime": mom,
+        "VolumeRegime": vol_reg,
+        "Name": name_map.get((trend, mom), "Scenario – N/A"),
+        "RulesHit": rules_hit
+    }
+
+# ============================================================
+# 9C. MASTER INTEGRATION SCORE (PYTHON-ONLY)
+# ============================================================
+
+def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans: Dict[str, TradeSetup], fund_row: Dict[str, Any]) -> Dict[str, Any]:
+    c = _safe_float(last.get("Close"))
+    ma50 = _safe_float(last.get("MA50"))
+    ma200 = _safe_float(last.get("MA200"))
+    rsi = _safe_float(last.get("RSI"))
+    macd_v = _safe_float(last.get("MACD"))
+    sig = _safe_float(last.get("MACDSignal"))
+    vol = _safe_float(last.get("Volume"))
+    avg_vol = _safe_float(last.get("Avg20Vol"))
+
+    target = _safe_float(fund_row.get("Target"))
+    upside_pct = _safe_float(fund_row.get("UpsidePct"))
+
+    # Components (0..2 each), total 0..10-ish
+    comps = {}
+
+    # Trend component
+    trend = 0.0
+    if pd.notna(c) and pd.notna(ma50) and pd.notna(ma200):
+        if (c >= ma50) and (ma50 >= ma200):
+            trend = 2.0
+        elif (c >= ma200):
+            trend = 1.2
+        else:
+            trend = 0.4
+    comps["Trend"] = trend
+
+    # Momentum component
+    mom = 0.0
+    if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
+        if (rsi >= 55) and (macd_v >= sig):
+            mom = 2.0
+        elif (rsi <= 45) and (macd_v < sig):
+            mom = 0.4
+        else:
+            mom = 1.1
+    comps["Momentum"] = mom
+
+    # Volume component
+    vcomp = 0.0
+    if pd.notna(vol) and pd.notna(avg_vol):
+        vcomp = 1.6 if vol > avg_vol else 0.9
+    comps["Volume"] = vcomp
+
+    # Fibonacci positioning component (uses selected short + long)
+    fibc = 0.0
+    try:
+        s_lv = dual_fib.get("auto_short", {}).get("levels", {})
+        l_lv = dual_fib.get("fixed_long", {}).get("levels", {})
+        s_618 = _safe_float(s_lv.get("61.8"))
+        s_382 = _safe_float(s_lv.get("38.2"))
+        l_618 = _safe_float(l_lv.get("61.8"))
+        l_382 = _safe_float(l_lv.get("38.2"))
+
+        if pd.notna(c) and pd.notna(s_618) and pd.notna(s_382):
+            if c >= s_618:
+                fibc += 1.2
+            elif c >= s_382:
+                fibc += 0.8
+            else:
+                fibc += 0.4
+
+        if pd.notna(c) and pd.notna(l_618) and pd.notna(l_382):
+            if c >= l_618:
+                fibc += 0.8
+            elif c >= l_382:
+                fibc += 0.5
+            else:
+                fibc += 0.2
+    except:
+        fibc = 0.0
+    comps["Fibonacci"] = fibc  # 0..2.0
+
+    # TradePlan / RR component
+    best_rr = np.nan
+    if trade_plans:
+        rrs = [s.rr for s in trade_plans.values() if pd.notna(s.rr)]
+        best_rr = max(rrs) if rrs else np.nan
+    rrcomp = 0.0
+    if pd.notna(best_rr):
+        if best_rr >= 4.0:
+            rrcomp = 2.0
+        elif best_rr >= 3.0:
+            rrcomp = 1.5
+        else:
+            rrcomp = 1.0
+    comps["RRQuality"] = rrcomp
+
+    # Fundamental component (Upside)
+    fcomp = 0.0
+    if pd.notna(upside_pct):
+        if upside_pct >= 25:
+            fcomp = 2.0
+        elif upside_pct >= 15:
+            fcomp = 1.5
+        elif upside_pct >= 5:
+            fcomp = 1.0
+        else:
+            fcomp = 0.5
+    comps["FundamentalUpside"] = fcomp
+
+    total = float(sum(comps.values()))
+    # Map to tier & sizing guidance (deterministic)
+    if total >= 9.0:
+        tier = "A+"
+        sizing = "Aggressive (2.0x) if risk control ok"
+    elif total >= 7.5:
+        tier = "A"
+        sizing = "Full size (1.0x) + consider pyramiding"
+    elif total >= 6.0:
+        tier = "B"
+        sizing = "Medium size (0.6–0.8x)"
+    elif total >= 4.5:
+        tier = "C"
+        sizing = "Small / tactical (0.3–0.5x)"
+    else:
+        tier = "D"
+        sizing = "No edge / avoid or hedge"
+
+    return {
+        "Components": comps,
+        "Total": round(total, 2),
+        "Tier": tier,
+        "PositionSizing": sizing,
+        "BestRR": best_rr if pd.notna(best_rr) else np.nan
+    }
+
+# ============================================================
+# 9D. RISK–REWARD SIMULATION PACK (PYTHON-ONLY)
+# ============================================================
+
+def build_rr_sim(trade_plans: Dict[str, TradeSetup]) -> Dict[str, Any]:
+    rows = []
+    best_rr = np.nan
+    for k, s in trade_plans.items():
+        entry = _safe_float(s.entry)
+        stop = _safe_float(s.stop)
+        tp = _safe_float(s.tp)
+        rr = _safe_float(s.rr)
+        risk_pct = ((entry - stop) / entry * 100) if (pd.notna(entry) and pd.notna(stop) and entry != 0) else np.nan
+        reward_pct = ((tp - entry) / entry * 100) if (pd.notna(tp) and pd.notna(entry) and entry != 0) else np.nan
+        rows.append({
+            "Setup": k,
+            "Entry": entry,
+            "Stop": stop,
+            "TP": tp,
+            "RR": rr,
+            "RiskPct": risk_pct,
+            "RewardPct": reward_pct,
+            "Probability": s.probability
+        })
+        if pd.notna(rr):
+            best_rr = rr if pd.isna(best_rr) else max(best_rr, rr)
+
+    return {
+        "Setups": rows,
+        "BestRR": best_rr if pd.notna(best_rr) else np.nan
+    }
+
+# ============================================================
 # 10. MAIN ANALYSIS FUNCTION
 # ============================================================
 
-def analyze_ticker(ticker: str) -> Dict[str, Any]:
+def analyze_ticker(ticker: str, fib_short_window: int = 60) -> Dict[str, Any]:
     df_all = load_price_vol(PRICE_VOL_PATH)
     if df_all.empty:
         return {"Error": "Không đọc được dữ liệu Price_Vol.xlsx"}
@@ -282,7 +577,7 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     m, s, h = macd(df["Close"], 12, 26, 9)
     df["MACD"], df["MACDSignal"], df["MACDHist"] = m, s, h
 
-    dual_fib = compute_dual_fibonacci(df)
+    dual_fib = compute_dual_fibonacci(df, short_window=fib_short_window, long_window=250)
     last = df.iloc[-1]
 
     conviction = compute_conviction(last)
@@ -293,6 +588,59 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     fund = hsc[hsc["Ticker"].str.upper() == ticker.upper()]
     fund_row = fund.iloc[0].to_dict() if not fund.empty else {}
 
+    close = float(last["Close"]) if pd.notna(last["Close"]) else np.nan
+    target = _safe_float(fund_row.get("Target"), np.nan)
+    upside_pct = ((target - close) / close * 100) if (pd.notna(target) and pd.notna(close) and close != 0) else np.nan
+    fund_row["Target"] = target
+    fund_row["UpsidePct"] = upside_pct
+
+    scenario12 = classify_scenario12(last)
+    rrsim = build_rr_sim(trade_plans)
+    master = compute_master_score(last, dual_fib, trade_plans, fund_row)
+
+    analysis_pack = {
+        "Ticker": ticker.upper(),
+        "Last": {
+            "Close": _safe_float(last.get("Close")),
+            "MA20": _safe_float(last.get("MA20")),
+            "MA50": _safe_float(last.get("MA50")),
+            "MA200": _safe_float(last.get("MA200")),
+            "RSI": _safe_float(last.get("RSI")),
+            "MACD": _safe_float(last.get("MACD")),
+            "MACDSignal": _safe_float(last.get("MACDSignal")),
+            "MACDHist": _safe_float(last.get("MACDHist")),
+            "Volume": _safe_float(last.get("Volume")),
+            "Avg20Vol": _safe_float(last.get("Avg20Vol")),
+        },
+        "ScenarioBase": scenario,
+        "Scenario12": scenario12,
+        "Conviction": conviction,
+        "Fibonacci": {
+            "ShortWindow": dual_fib.get("short_window"),
+            "LongWindow": dual_fib.get("long_window"),
+            "Short": dual_fib.get("auto_short", {}),
+            "Long": dual_fib.get("fixed_long", {})
+        },
+        "Fundamental": {
+            "Recommendation": fund_row.get("Recommendation", "N/A") if fund_row else "N/A",
+            "TargetVND": target,
+            "TargetK": (target / 1000) if pd.notna(target) else np.nan,
+            "UpsidePct": upside_pct
+        },
+        "TradePlans": [
+            {
+                "Name": k,
+                "Entry": _safe_float(v.entry),
+                "Stop": _safe_float(v.stop),
+                "TP": _safe_float(v.tp),
+                "RR": _safe_float(v.rr),
+                "Probability": v.probability
+            } for k, v in trade_plans.items()
+        ],
+        "RRSim": rrsim,
+        "MasterScore": master
+    }
+
     return {
         "Ticker": ticker.upper(),
         "Last": last.to_dict(),
@@ -300,7 +648,11 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
         "Conviction": conviction,
         "DualFibo": dual_fib,
         "TradePlans": trade_plans,
-        "Fundamental": fund_row
+        "Fundamental": fund_row,
+        "Scenario12": scenario12,
+        "MasterScore": master,
+        "RRSim": rrsim,
+        "AnalysisPack": analysis_pack
     } # ============================================================
 # 11. GPT-4 TURBO STRATEGIC INSIGHT GENERATION
 # ============================================================
@@ -320,6 +672,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     fund = data["Fundamental"]
     conviction = data["Conviction"]
     scenario = data["Scenario"]
+    analysis_pack = data.get("AnalysisPack", {})
 
     close = _fmt_price(last.get("Close"))
     rsi = _fmt_price(last.get("RSI"))
@@ -338,34 +691,42 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
         tp_text.append(f"{k}: Entry {s.entry}, Stop {s.stop}, TP {s.tp}, R:R {s.rr:.2f}")
     tp_summary = " | ".join(tp_text) if tp_text else "Chưa có chiến lược đạt chuẩn R:R ≥ 2.5"
 
-    # Fundamental
+    # Fundamental (Target displayed in thousand, without unit label)
     fund_text = (
         f"Khuyến nghị: {fund.get('Recommendation', 'N/A')} | "
-        f"Giá mục tiêu: {_fmt_price(fund.get('Target'))} | "
-        f"Upside: {_fmt_pct(fund.get('Upside', 0)*100)}"
+        f"Giá mục tiêu: {_fmt_thousand(fund.get('Target'))} | "
+        f"Upside: {_fmt_pct(fund.get('UpsidePct'))}"
         if fund else "Không có dữ liệu fundamental"
     )
 
     # === Prompt ===
+    pack_json = json.dumps(analysis_pack, ensure_ascii=False)
+
     prompt = f"""
     Bạn là chuyên gia phân tích chiến lược của một công ty chứng khoán cao cấp.
-    Hãy viết báo cáo ngắn gọn (~700-900 từ) theo cấu trúc chuẩn sau, bằng tiếng Việt, 
-    văn phong chuyên nghiệp, gần gũi và có chiều sâu:
+    Hãy viết báo cáo ngắn gọn (~700-900 từ) theo cấu trúc chuẩn sau, bằng tiếng Việt,
+    văn phong chuyên nghiệp, gần gũi và có chiều sâu.
+
+    QUY TẮC BẮT BUỘC (FRAME-LOCK):
+    - Tuyệt đối KHÔNG bịa số liệu.
+    - Tuyệt đối KHÔNG tự tính toán bất kỳ con số nào (kể cả cộng/trừ/nhân/chia).
+    - Chỉ được phép sử dụng đúng dữ liệu trong JSON "AnalysisPack" bên dưới.
+    - Nếu thiếu dữ liệu thì ghi rõ "N/A" và không suy diễn.
 
     1️⃣ **Executive Summary (3–4 câu)**
     - Nhận định tổng thể xu hướng hiện tại của {tick}, dòng tiền, động lượng.
     - Tác động lên chiến lược hành động của nhà đầu tư trung–dài hạn.
 
     2️⃣ **A. Phân tích Kỹ thuật**
-    Bao gồm:
+    Bao gồm (chỉ dùng số trong JSON):
     - MA Trend (MA20, MA50, MA200)
-    - RSI Analysis (động lượng, vùng quá mua/bán)
-    - MACD Analysis (tín hiệu xu hướng)
+    - RSI Analysis
+    - MACD Analysis
     - RSI + MACD Bias
-    - Fibonacci (2 khung 60–90 & 250 ngày): hỗ trợ – kháng cự – vùng chiến lược
+    - Fibonacci (2 khung: ShortWindow & LongWindow): hỗ trợ – kháng cự – vùng chiến lược
     - Volume & Price Action
-    - 12-Scenario Classification
-    - Master Integration + Conviction Score
+    - 12-Scenario Classification (Scenario12)
+    - Master Integration + MasterScore
 
     3️⃣ **B. Fundamental Analysis Summary**
     - Dữ liệu: {fund_text}
@@ -374,14 +735,10 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     - {tp_summary}
 
     5️⃣ **D. Risk–Reward Simulation**
-    - Diễn giải R:R, xác suất, và chiến lược phù hợp khẩu vị lợi nhuận 15–100%, rủi ro 5–8%.
+    - Diễn giải dựa trên RRSim trong JSON (RiskPct, RewardPct, RR, Probability).
 
-    Ngữ điệu cần tự nhiên, chuyên nghiệp, kiểu như chuyên gia phân tích trình bày trước khách hàng tổ chức.
-    Phải đảm bảo:
-    - Không tự bịa số liệu.
-    - Chỉ phân tích dựa trên các giá trị thực sau:
-      MA20={ma20}, MA50={ma50}, MA200={ma200}, RSI={rsi}, MACD={macd_v},
-      Volume={vol}, AvgVol={avg_vol}, Conviction={conviction:.1f}.
+    Dữ liệu (AnalysisPack JSON):
+    {pack_json}
     """
 
     # ============================================================
@@ -416,6 +773,7 @@ with st.sidebar:
     st.markdown("### 🔐 Đăng nhập người dùng")
     user_key = st.text_input("Nhập Mã VIP:", type="password")
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="HPG").upper()
+    fib_short_window = st.selectbox("Fibo short window", [60, 90], index=0)
     run_btn = st.button("🚀 Phân tích ngay", type="primary")
 
 # --- Layout containers ---
@@ -431,7 +789,7 @@ if run_btn:
     else:
         with st.spinner(f"Đang xử lý phân tích {ticker_input}..."):
             try:
-                result = analyze_ticker(ticker_input)
+                result = analyze_ticker(ticker_input, fib_short_window)
                 report = generate_insight_report(result)
                 st.markdown("<hr>", unsafe_allow_html=True)
                 st.markdown(report)
@@ -506,3 +864,4 @@ if not run_btn:
         """,
         unsafe_allow_html=True
     )
+```
