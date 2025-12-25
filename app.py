@@ -9,6 +9,7 @@ import numpy as np
 import os
 from datetime import datetime
 from openai import OpenAI
+from fpdf import FPDF
 from dataclasses import dataclass
 from typing import Dict, Any
 
@@ -189,7 +190,7 @@ def generate_report(data: Dict[str, Any]) -> str:
 
     b_block = f"""
 ### B. Phân tích Cơ bản
-Giá mục tiêu: 42.2 ngàn VND | Upside: 28.7%
+Giá mục tiêu: 42,200 VND | Upside: 28.7%
 """
 
     c_block = f"""
@@ -207,6 +208,21 @@ Giá mục tiêu: 42.2 ngàn VND | Upside: 28.7%
     )
 
     return f"{header}\n{preface}\n\n{a_block}\n{b_block}\n{c_block}\n{summary}"
+
+# ============================================================
+# 6. PDF EXPORT
+# ============================================================
+
+def export_pdf(report_text: str, ticker: str):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_font("Arial", size=11)
+    for line in report_text.split("\n"):
+        pdf.multi_cell(0, 8, txt=line)
+    filename = f"{ticker}_INCEPTIONv5.2_Report.pdf"
+    pdf.output(filename)
+    return filename
 
 # ============================================================
 # 7. SIDEBAR & MAIN LAYOUT
@@ -238,3 +254,7 @@ if tech_btn:
             else:
                 report = generate_report(result)
                 st.markdown(f"<div class='report-text'>{report}</div>", unsafe_allow_html=True)
+                if st.button("📄 Xuất PDF"):
+                    file = export_pdf(report, ticker)
+                    with open(file, "rb") as f:
+                        st.download_button("Tải về PDF", f, file_name=file)
