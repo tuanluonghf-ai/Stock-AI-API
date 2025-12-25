@@ -1,8 +1,8 @@
 # ============================================================
-# INCEPTION v4.9 FINAL | Precision Audit Edition
+# INCEPTION v4.9.1 FINAL | Frame Locked Edition
 # app.py — Streamlit + GPT-4 Turbo
 # Author: INCEPTION AI Research Framework
-# Purpose: Technical–Fundamental Integrated Research Assistant
+# Purpose: Locked-Frame Technical–Fundamental Research Assistant
 # ============================================================
 
 import streamlit as st
@@ -19,7 +19,7 @@ from typing import Dict, Any
 # ============================================================
 
 st.set_page_config(
-    page_title="INCEPTION v4.9 – Precision Audit Edition",
+    page_title="INCEPTION v4.9.1 – Frame Locked Edition",
     layout="wide",
     page_icon="🟣"
 )
@@ -31,12 +31,9 @@ body {
     color: #000000;
     font-family: 'Segoe UI', sans-serif;
 }
-strong {
+strong, h1, h2, h3 {
     color: #000000;
     font-weight: 700;
-}
-h1, h2, h3 {
-    color: #000000;
 }
 table, th, td {
     border: 1px solid #000000;
@@ -190,7 +187,6 @@ def _compute_rr(entry, stop, tp):
 def build_trade_plan(df, dual_fib):
     last = df.iloc[-1]
     close = last["Close"]
-    ma20 = last["MA20"]
     fib_short = dual_fib["short"]["levels"]
     res = fib_short.get("61.8", close * 1.05)
     sup = fib_short.get("38.2", close * 0.95)
@@ -277,20 +273,35 @@ def generate_insight_report(data: Dict[str, Any]):
     rsi, macd_v = _fmt_price(last.get("RSI")), _fmt_price(last.get("MACD"))
     vol, avg_vol = _fmt_int(last.get("Volume")), _fmt_int(last.get("Avg20Vol"))
 
-    tp_text = "\n".join([f"{v.name}: Entry {v.entry}, Stop {v.stop} ({v.stop_pct}%), TP {v.tp} (+{v.tp_pct}%), R:R {v.rr}"
-                         for v in trade_plans.values()])
+    trade_table = "| Chiến lược | Entry (ưu tiên) | Stop-loss | Take-profit | Xác suất | R:R ước tính |\n"
+    trade_table += "|------------|----------------|------------|--------------|-----------|--------------|\n"
+    for v in trade_plans.values():
+        trade_table += f"| {v.name} | {v.entry:.2f} | {v.stop:.2f} ({v.stop_pct}%) | {v.tp:.2f} (+{v.tp_pct}%) | {v.prob} | {v.rr:.2f} |\n"
 
     fund_text = f"Target: {_fmt_price(fund.get('Target'))}, Upside: {_fmt_pct(fund.get('Upside', 0)*100)}" if fund else "Không có dữ liệu định giá"
 
     prompt = f"""
-    Viết báo cáo chiến lược cho mã {tick} bằng tiếng Việt, văn phong chuyên nghiệp, thân thiện, không ký hiệu emoji.
-    Dữ liệu kỹ thuật:
-    Close={close}, MA20={ma20}, MA50={ma50}, MA200={ma200}, RSI={rsi}, MACD={macd_v}, Volume={vol}, AvgVol={avg_vol}, Conviction={conviction:.1f}.
-    Kịch bản: {scenario}
-    Trade Plan:
-    {tp_text}
-    Dữ liệu định giá: {fund_text}
-    """
+Bạn là INCEPTION AI, chuyên gia phân tích chiến lược.
+Hãy viết báo cáo ngắn gọn, định dạng chuẩn như sau, không chèn emoji, không đổi khung:
+
+A. Phân tích Kỹ thuật
+- Close: {close}
+- Volume: {vol} | Avg20 Vol: {avg_vol}
+- MA20 / MA50 / MA200: {ma20} / {ma50} / {ma200}
+- RSI (14): {rsi}
+- MACD: {macd_v}
+- Kịch bản: {scenario}
+Hãy nêu nhận định xu hướng, vùng giá hỗ trợ/kháng cự (dựa trên Fibo), và chiến lược phù hợp.
+
+B. Fundamental Summary
+- {fund_text}
+
+C. Trade Plan & Risk–Reward Simulation
+{trade_table}
+
+Phân tích: Tóm tắt R:R trung bình, chiến lược ưu tiên và điều kiện hành động phù hợp.
+Ngữ điệu chuyên nghiệp, thân thiện, không tự tạo cấu trúc khác.
+"""
 
     try:
         client = OpenAI()
@@ -300,7 +311,7 @@ def generate_insight_report(data: Dict[str, Any]):
                 {"role": "system", "content": "Bạn là INCEPTION AI, chuyên gia phân tích đầu tư chiến lược."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
+            temperature=0.3,
             max_tokens=1800
         )
         content = response.choices[0].message.content
@@ -314,7 +325,7 @@ def generate_insight_report(data: Dict[str, Any]):
 # 10. STREAMLIT UI
 # ============================================================
 
-st.markdown("<h1>INCEPTION v4.9 — Precision Audit Edition</h1>", unsafe_allow_html=True)
+st.markdown("<h1>INCEPTION v4.9.1 — Frame Locked Edition</h1>", unsafe_allow_html=True)
 with st.sidebar:
     st.markdown("### Đăng nhập người dùng")
     user_key = st.text_input("Nhập Mã VIP:", type="password")
@@ -337,6 +348,6 @@ with col2:
 
 st.divider()
 st.markdown(
-    "<p style='text-align:center; font-size:13px;'>© 2025 INCEPTION Research Framework | Version 4.9</p>",
+    "<p style='text-align:center; font-size:13px;'>© 2025 INCEPTION Research Framework | Version 4.9.1</p>",
     unsafe_allow_html=True
 )
