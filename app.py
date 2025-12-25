@@ -1,23 +1,26 @@
 # ============================================================
-# INCEPTION v5.2 | FRAME-LOCK Final Edition
+# INCEPTION v4.6 FINAL | Strategic Investor Edition
+# app.py — Streamlit + GPT-4 Turbo
 # Author: INCEPTION AI Research Framework
+# Purpose: Technical–Fundamental Integrated Research Assistant
 # ============================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import os
-import unicodedata
 from datetime import datetime
 from openai import OpenAI
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, Tuple, List, Optional
 
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
 
-st.set_page_config(page_title="INCEPTION v5.2", layout="wide", page_icon="🟣")
+st.set_page_config(page_title="INCEPTION v4.6 – Strategic Investor Edition",
+                   layout="wide",
+                   page_icon="🟣")
 
 st.markdown("""
 <style>
@@ -26,18 +29,12 @@ body {
     color: #E5E7EB;
     font-family: 'Segoe UI', sans-serif;
 }
-h1, h2, h3, strong { color: #E5E7EB; }
-.report-text { color: #E5E7EB; white-space: pre-wrap; }
-.stButton>button {
-    width: 100%;
-    background-color: #9333EA;
-    color: white;
-    font-weight: bold;
-    border-radius: 10px;
-    height: 42px;
+strong {
+    color: #E5E7EB;
+    font-weight: 700;
 }
-.stButton>button:hover {
-    background-color: #A855F7;
+h1, h2, h3 {
+    color: #E5E7EB;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -48,6 +45,8 @@ h1, h2, h3, strong { color: #E5E7EB; }
 
 PRICE_VOL_PATH = "Price_Vol.xlsx"
 HSC_TARGET_PATH = "Tickers target price.xlsx"
+TICKER_NAME_PATH = "Ticker name.xlsx"
+
 VALID_KEYS = {
     "VIP888": {"name": "Admin Tuấn", "quota": 999},
     "KH01": {"name": "Khách mời 01", "quota": 5},
@@ -58,22 +57,80 @@ VALID_KEYS = {
 }
 
 # ============================================================
-# 3. LOADERS & INDICATORS
+# 3. HELPER FUNCTIONS
 # ============================================================
 
-def load_price_vol(path=PRICE_VOL_PATH):
+def _fmt_price(x, ndigits=2):
+    if pd.isna(x): return ""
+    return f"{float(x):.{ndigits}f}"
+
+def _fmt_int(x):
+    if pd.isna(x): return ""
+    return f"{int(round(float(x))):,}"
+
+def _fmt_pct(x):
+    if pd.isna(x): return ""
+    return f"{float(x):.1f}%"
+
+def _safe_float(x, default=np.nan) -> float:
+    try: return float(x)
+    except: return default
+
+def _round_price(x: float, ndigits: int = 2) -> float:
+    if np.isnan(x): return np.nan
+    return round(float(x), ndigits)
+
+def _isnan(x) -> bool:
+    try: return x is None or (isinstance(x, float) and np.isnan(x))
+    except: return True
+
+# ============================================================
+# 4. LOADERS
+# ============================================================
+
+@st.cache_data
+def load_price_vol(path: str = PRICE_VOL_PATH) -> pd.DataFrame:
     try:
         df = pd.read_excel(path)
-        df.columns = [c.strip().title() for c in df.columns]
-        rename = {"Ngay": "Date", "Ma": "Ticker", "Vol": "Volume"}
-        df.rename(columns=rename, inplace=True)
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        df = df.sort_values(["Ticker", "Date"]).dropna(subset=["Date"])
-        return df
-    except:
+    except Exception as e:
+        st.error(f"Lỗi khi đọc file {path}: {e}")
         return pd.DataFrame()
+    df.columns = [c.strip().title() for c in df.columns]
+    rename = {"Ngay": "Date", "Ma": "Ticker", "Vol": "Volume"}
+    df.rename(columns=rename, inplace=True)
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df.sort_values(["Ticker", "Date"]).dropna(subset=["Date"])
+    return df
 
-def sma(series, window): return series.rolling(window).mean()
+@st.cache_data
+def load_ticker_names(path: str = TICKER_NAME_PATH) -> pd.DataFrame:
+    try:
+        df = pd.read_excel(path)
+        df.columns = [c.strip() for c in df.columns]
+    except Exception:
+        return pd.DataFrame(columns=["Ticker", "Name"])
+    if "Ticker" not in df.columns:
+        return pd.DataFrame(columns=["Ticker", "Name"])
+    name_col = "Stock Name" if "Stock Name" in df.columns else "Name"
+    df = df.rename(columns={name_col: "Name"})
+    return df[["Ticker", "Name"]].drop_duplicates()
+
+@st.cache_data
+def load_hsc_targets(path: str = HSC_TARGET_PATH) -> pd.DataFrame:
+    try:
+        df = pd.read_excel(path)
+        df.columns = [c.strip() for c in df.columns]
+    except Exception:
+        return pd.DataFrame(columns=["Ticker", "Target", "Upside"])
+    df.rename(columns={"TP (VND)": "Target"}, inplace=True)
+    df["Upside"] = pd.to_numeric(df.get("Upside/Downside", 0), errors="coerce")
+    return df
+
+# ============================================================
+# 5. INDICATORS
+# ============================================================
+
+def sma(series, window): return series.rolling(window=window).mean()
 def ema(series, span): return series.ewm(span=span, adjust=False).mean()
 
 def rsi_wilder(close, period=14):
@@ -88,222 +145,49 @@ def rsi_wilder(close, period=14):
 def macd(close, fast=12, slow=26, signal=9):
     macd_line = ema(close, fast) - ema(close, slow)
     signal_line = ema(macd_line, signal)
-    return macd_line, signal_line, macd_line - signal_line
+    hist = macd_line - signal_line
+    return macd_line, signal_line, hist
 
-def compute_fibo(df, period=250):
-    win = df.tail(period)
-    high, low = win["High"].max(), win["Low"].min()
+# ============================================================
+# 6. FIBONACCI DUAL-FRAME
+# ============================================================
+
+def _fib_levels(low, high):
     rng = high - low
+    if rng <= 0: return {}
     return {
         "38.2": high - 0.382 * rng,
         "50.0": high - 0.5 * rng,
-        "61.8": high - 0.618 * rng
+        "61.8": high - 0.618 * rng,
+        "127.2": high + 0.272 * rng,
+        "161.8": high + 0.618 * rng
     }
 
-def _norm_col(s: str) -> str:
-    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode("ascii")
-    return "".join(s.lower().split())
-
-def load_targets(path=HSC_TARGET_PATH):
-    try:
-        df = pd.read_excel(path)
-        df.columns = [str(c).strip() for c in df.columns]
-        norm_map = {c: _norm_col(c) for c in df.columns}
-
-        ticker_col = None
-        for c, n in norm_map.items():
-            if n in ("ticker", "ma", "symbol", "code"):
-                ticker_col = c
-                break
-        if ticker_col is None:
-            for c, n in norm_map.items():
-                if "ticker" in n or "symbol" in n or n == "ma":
-                    ticker_col = c
-                    break
-
-        target_col = None
-        for c, n in norm_map.items():
-            if n in ("target", "targetprice", "giacmuctieu", "giamuctieu", "muctieu", "giatarget"):
-                target_col = c
-                break
-        if target_col is None:
-            for c, n in norm_map.items():
-                if "target" in n or "muctieu" in n:
-                    target_col = c
-                    break
-
-        if ticker_col is None or target_col is None:
-            return pd.DataFrame(columns=["Ticker", "Target"])
-
-        out = df[[ticker_col, target_col]].copy()
-        out.rename(columns={ticker_col: "Ticker", target_col: "Target"}, inplace=True)
-        out["Ticker"] = out["Ticker"].astype(str).str.strip().str.upper()
-        out["Target"] = pd.to_numeric(out["Target"], errors="coerce")
-        out = out.dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last")
-        return out
-    except:
-        return pd.DataFrame(columns=["Ticker", "Target"])
-
-def get_target_price(ticker: str) -> float:
-    tdf = load_targets()
-    if tdf.empty:
-        return np.nan
-    row = tdf[tdf["Ticker"] == ticker.upper()]
-    if row.empty:
-        return np.nan
-    return float(row.iloc[0]["Target"]) if pd.notna(row.iloc[0]["Target"]) else np.nan
-
-def compute_market_context(df_all: pd.DataFrame, stock_change_pct: float) -> Dict[str, Any]:
-    def _get_index_metrics(symbol: str) -> Dict[str, Any]:
-        dfi = df_all[df_all["Ticker"].str.upper() == symbol.upper()].copy()
-        if dfi.empty or len(dfi) < 2 or "Close" not in dfi.columns:
-            return {"Ticker": symbol.upper(), "Available": False}
-
-        dfi["MA20"] = sma(dfi["Close"], 20)
-        dfi["MA50"] = sma(dfi["Close"], 50)
-
-        last = dfi.iloc[-1]
-        prev = dfi.iloc[-2]
-
-        close = float(last["Close"])
-        prev_close = float(prev["Close"])
-        chg = (close - prev_close) / prev_close * 100 if prev_close != 0 else np.nan
-
-        ma20 = float(last["MA20"]) if pd.notna(last["MA20"]) else np.nan
-        ma50 = float(last["MA50"]) if pd.notna(last["MA50"]) else np.nan
-
-        return {
-            "Ticker": symbol.upper(),
-            "Available": True,
-            "Close": close,
-            "ChangePct": chg,
-            "MA20": ma20,
-            "MA50": ma50,
-            "AboveMA20": (close > ma20) if pd.notna(ma20) else np.nan,
-            "AboveMA50": (close > ma50) if pd.notna(ma50) else np.nan,
-        }
-
-    vnindex = _get_index_metrics("VNINDEX")
-    vn30 = _get_index_metrics("VN30")
-
-    rel = {}
-    for idx in [vnindex, vn30]:
-        if idx.get("Available") and pd.notna(idx.get("ChangePct")) and pd.notna(stock_change_pct):
-            rel[idx["Ticker"]] = float(stock_change_pct - float(idx["ChangePct"]))
-        else:
-            rel[idx["Ticker"]] = np.nan
-
+def compute_dual_fibonacci(df: pd.DataFrame) -> Dict[str, Any]:
+    L_short = 60 if len(df) >= 60 else len(df)
+    L_long = 250 if len(df) >= 250 else len(df)
+    win_short = df.tail(L_short)
+    win_long = df.tail(L_long)
+    s_hi, s_lo = win_short["High"].max(), win_short["Low"].min()
+    l_hi, l_lo = win_long["High"].max(), win_long["Low"].min()
     return {
-        "VNINDEX": vnindex,
-        "VN30": vn30,
-        "RelPerfPctPoint": rel
+        "auto_short": {"swing_high": s_hi, "swing_low": s_lo, "levels": _fib_levels(s_lo, s_hi)},
+        "fixed_long": {"swing_high": l_hi, "swing_low": l_lo, "levels": _fib_levels(l_lo, l_hi)}
     }
-
-def format_market_brief(market: Dict[str, Any]) -> Dict[str, str]:
-    def _fmt_idx(idx: Dict[str, Any]) -> str:
-        if not idx.get("Available"):
-            return f"{idx.get('Ticker','N/A')}: N/A"
-        chg = idx.get("ChangePct")
-        close = idx.get("Close")
-        above50 = idx.get("AboveMA50")
-        trend = "trên MA50" if above50 is True else ("dưới MA50" if above50 is False else "MA50 N/A")
-        return f"{idx['Ticker']} {close:.2f} ({chg:+.2f}%), {trend}"
-
-    vnindex_s = _fmt_idx(market.get("VNINDEX", {"Ticker": "VNINDEX", "Available": False}))
-    vn30_s = _fmt_idx(market.get("VN30", {"Ticker": "VN30", "Available": False}))
-
-    rel = market.get("RelPerfPctPoint", {})
-    rel_vni = rel.get("VNINDEX", np.nan)
-    rel_vn30 = rel.get("VN30", np.nan)
-
-    rel_s = []
-    if pd.notna(rel_vni):
-        rel_s.append(f"So với VNINDEX: {rel_vni:+.2f} điểm %")
-    else:
-        rel_s.append("So với VNINDEX: N/A")
-
-    if pd.notna(rel_vn30):
-        rel_s.append(f"So với VN30: {rel_vn30:+.2f} điểm %")
-    else:
-        rel_s.append("So với VN30: N/A")
-
-    return {
-        "VNINDEX_LINE": vnindex_s,
-        "VN30_LINE": vn30_s,
-        "REL_LINE": " | ".join(rel_s)
-    }
-
-def gpt_preface_expert(t: Dict[str, Any]) -> str:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return (
-            "Thị trường hiện đang dao động trong vùng cân bằng sau nhịp hồi. "
-            f"{t['Ticker']} đang thể hiện {('tốt hơn' if t['Change']>0 else 'kém hơn')} thị trường chung, "
-            "phản ánh sự chọn lọc dòng tiền giữa các nhóm cổ phiếu. "
-            "→ Giai đoạn hiện tại phù hợp với việc canh các nhịp điều chỉnh ngắn để gia tăng vị thế hơn là mua đuổi."
-        )
-
-    market = t.get("Market", {})
-    mbrief = format_market_brief(market)
-
-    target = t.get("Target", np.nan)
-    upside = t.get("Upside", np.nan)
-
-    target_str = f"{target/1000:.1f} ngàn VND" if pd.notna(target) else "N/A"
-    upside_str = f"{upside:.1f}%" if pd.notna(upside) else "N/A"
-
-    payload = {
-        "ticker": t.get("Ticker"),
-        "stock_close": float(t.get("Close")) if pd.notna(t.get("Close")) else None,
-        "stock_change_pct": float(t.get("Change")) if pd.notna(t.get("Change")) else None,
-        "ma20": float(t.get("MA20")) if pd.notna(t.get("MA20")) else None,
-        "ma50": float(t.get("MA50")) if pd.notna(t.get("MA50")) else None,
-        "ma200": float(t.get("MA200")) if pd.notna(t.get("MA200")) else None,
-        "rsi": float(t.get("RSI")) if pd.notna(t.get("RSI")) else None,
-        "macd": float(t.get("MACD")) if pd.notna(t.get("MACD")) else None,
-        "signal": float(t.get("Signal")) if pd.notna(t.get("Signal")) else None,
-        "target_price_display": target_str,
-        "upside_display": upside_str,
-        "vnindex_summary": mbrief["VNINDEX_LINE"],
-        "vn30_summary": mbrief["VN30_LINE"],
-        "relative_perf_summary": mbrief["REL_LINE"],
-    }
-
-    system_msg = (
-        "Bạn là chuyên gia chiến lược chứng khoán cao cấp. "
-        "Chỉ được phép sử dụng đúng các số liệu đã được cung cấp trong JSON. "
-        "Tuyệt đối không bịa số, không tự tính toán, không suy diễn thêm con số. "
-        "Nếu thiếu dữ liệu thì ghi rõ N/A. "
-        "Viết 3-5 câu tiếng Việt, văn phong chuyên gia, tóm tắt: "
-        "(1) trạng thái kỹ thuật (MA/RSI/MACD) "
-        "(2) upside cơ bản "
-        "(3) tương quan với thị trường (VNINDEX, VN30) dựa trên các dòng summary đã cho."
-    )
-
-    user_msg = f"Dữ liệu (JSON): {payload}\nYêu cầu: viết đoạn 'preface' ngắn gọn theo đúng nguyên tắc trên."
-
-    try:
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": user_msg},
-            ],
-            temperature=0.2,
-        )
-        text = resp.choices[0].message.content.strip()
-        return text
-    except:
-        return (
-            "Thị trường hiện đang dao động trong vùng cân bằng sau nhịp hồi. "
-            f"{t['Ticker']} đang thể hiện {('tốt hơn' if t['Change']>0 else 'kém hơn')} thị trường chung, "
-            "phản ánh sự chọn lọc dòng tiền giữa các nhóm cổ phiếu. "
-            "→ Giai đoạn hiện tại phù hợp với việc canh các nhịp điều chỉnh ngắn để gia tăng vị thế hơn là mua đuổi."
-        )
 
 # ============================================================
-# 4. ANALYSIS
+# 7. CONVICTION SCORE
+# ============================================================
+
+def compute_conviction(last: pd.Series) -> float:
+    score = 5.0
+    if last["Close"] > last["MA200"]: score += 2
+    if last["RSI"] > 55: score += 1
+    if last["Volume"] > last["Avg20Vol"]: score += 1
+    if last["MACD"] > last["MACDSignal"]: score += 0.5
+    return min(10.0, score)
+# ============================================================
+# 8. TRADE PLAN LOGIC
 # ============================================================
 
 @dataclass
@@ -315,8 +199,77 @@ class TradeSetup:
     rr: float
     probability: str
 
-def analyze_ticker(ticker: str, fibo_period: int = 250):
-    df_all = load_price_vol()
+def _compute_rr(entry: float, stop: float, tp: float) -> float:
+    if any(pd.isna([entry, stop, tp])) or entry <= stop:
+        return np.nan
+    risk = entry - stop
+    reward = tp - entry
+    return reward / risk if risk > 0 else np.nan
+
+def build_trade_plan(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, TradeSetup]:
+    if df.empty: return {}
+
+    last = df.iloc[-1]
+    close = last["Close"]
+    ma20 = last["MA20"]
+    ma50 = last["MA50"]
+
+    fib_short = dual_fib["auto_short"]["levels"]
+    fib_long = dual_fib["fixed_long"]["levels"]
+    fib_hi = dual_fib["auto_short"]["swing_high"]
+    fib_lo = dual_fib["auto_short"]["swing_low"]
+
+    # Basic reference levels
+    res_zone = fib_short.get("61.8", close * 1.05)
+    sup_zone = fib_short.get("38.2", close * 0.95)
+
+    # === Breakout Setup ===
+    entry_b = _round_price(res_zone * 1.01)
+    stop_b = _round_price(max(ma20 * 0.985, sup_zone * 0.99))
+    tp_b = _round_price(entry_b * 1.25)  # default 25% upside
+    rr_b = _compute_rr(entry_b, stop_b, tp_b)
+
+    # === Pullback Setup ===
+    entry_p = _round_price(sup_zone)
+    stop_p = _round_price(entry_p * 0.94)
+    tp_p = _round_price(entry_p * 1.20)
+    rr_p = _compute_rr(entry_p, stop_p, tp_p)
+
+    # Filter RR < 2.5
+    setups = {}
+    if rr_b >= 2.5:
+        setups["Breakout"] = TradeSetup("Breakout", entry_b, stop_b, tp_b, rr_b, "Cao")
+    if rr_p >= 2.5:
+        setups["Pullback"] = TradeSetup("Pullback", entry_p, stop_p, tp_p, rr_p, "TB")
+
+    return setups
+
+# ============================================================
+# 9. SCENARIO CLASSIFICATION
+# ============================================================
+
+def classify_scenario(last: pd.Series) -> str:
+    c, ma20, ma50, ma200 = last["Close"], last["MA20"], last["MA50"], last["MA200"]
+    rsi, macd_v, sig = last["RSI"], last["MACD"], last["MACDSignal"]
+
+    if all(pd.notna([c, ma20, ma50, ma200])):
+        if ma20 > ma50 > ma200 and c > ma20:
+            return "Uptrend – Breakout Confirmation"
+        elif c > ma200 and ma20 > ma200:
+            return "Uptrend – Pullback Phase"
+        elif c < ma200 and ma50 < ma200:
+            return "Downtrend – Weak Phase"
+    return "Neutral / Sideways"
+
+# ============================================================
+# 10. MAIN ANALYSIS FUNCTION
+# ============================================================
+
+def analyze_ticker(ticker: str) -> Dict[str, Any]:
+    df_all = load_price_vol(PRICE_VOL_PATH)
+    if df_all.empty:
+        return {"Error": "Không đọc được dữ liệu Price_Vol.xlsx"}
+
     df = df_all[df_all["Ticker"].str.upper() == ticker.upper()].copy()
     if df.empty:
         return {"Error": f"Không tìm thấy mã {ticker}"}
@@ -324,132 +277,232 @@ def analyze_ticker(ticker: str, fibo_period: int = 250):
     df["MA20"] = sma(df["Close"], 20)
     df["MA50"] = sma(df["Close"], 50)
     df["MA200"] = sma(df["Close"], 200)
+    df["Avg20Vol"] = sma(df["Volume"], 20)
     df["RSI"] = rsi_wilder(df["Close"], 14)
-    m, s, h = macd(df["Close"])
-    df["MACD"], df["Signal"], df["Hist"] = m, s, h
-    fibo = compute_fibo(df, period=fibo_period)
+    m, s, h = macd(df["Close"], 12, 26, 9)
+    df["MACD"], df["MACDSignal"], df["MACDHist"] = m, s, h
 
+    dual_fib = compute_dual_fibonacci(df)
     last = df.iloc[-1]
-    close, prev_close = last["Close"], df.iloc[-2]["Close"]
-    change = (close - prev_close) / prev_close * 100
-    conviction = 7 + (close > last["MA50"]) * 1.5
 
-    target = get_target_price(ticker)
-    upside = (target - close) / close * 100 if pd.notna(target) and close != 0 else np.nan
+    conviction = compute_conviction(last)
+    scenario = classify_scenario(last)
+    trade_plans = build_trade_plan(df, dual_fib)
 
-    market = compute_market_context(df_all, change)
+    hsc = load_hsc_targets(HSC_TARGET_PATH)
+    fund = hsc[hsc["Ticker"].str.upper() == ticker.upper()]
+    fund_row = fund.iloc[0].to_dict() if not fund.empty else {}
 
     return {
         "Ticker": ticker.upper(),
-        "Close": close,
-        "Change": change,
-        "Volume": last["Volume"],
-        "Avg20": df["Volume"].tail(20).mean(),
-        "MA20": last["MA20"],
-        "MA50": last["MA50"],
-        "MA200": last["MA200"],
-        "RSI": last["RSI"],
-        "MACD": last["MACD"],
-        "Signal": last["Signal"],
+        "Last": last.to_dict(),
+        "Scenario": scenario,
         "Conviction": conviction,
-        "Fibo": fibo,
-        "Target": target,
-        "Upside": upside,
-        "Market": market
-    }
-
-# ============================================================
-# 5. REPORT GENERATION
+        "DualFibo": dual_fib,
+        "TradePlans": trade_plans,
+        "Fundamental": fund_row
+    } # ============================================================
+# 11. GPT-4 TURBO STRATEGIC INSIGHT GENERATION
 # ============================================================
 
-def generate_report(data: Dict[str, Any]) -> str:
-    t = data
-    close, chg = t["Close"], t["Change"]
-    updown = "tăng" if chg > 0 else "giảm"
-    fibo = t["Fibo"]
-    fibo_levels = list(fibo.values())
+def generate_insight_report(data: Dict[str, Any]) -> str:
+    """
+    Hàm này gửi dữ liệu kỹ thuật và cơ bản sang GPT-4 Turbo
+    để tạo báo cáo phân tích theo chuẩn Strategic Commentary.
+    """
+    if "Error" in data:
+        return f"❌ {data['Error']}"
 
-    header = f"**{t['Ticker']} — {close:.2f} VND ({chg:+.2f}%) ⭐ {t['Conviction']:.1f}/10**\n"
-    header += f"Xu hướng: {'Tăng' if chg>0 else 'Giảm' if chg<0 else 'Trung tính'}\n\n"
+    # Chuẩn bị dữ liệu
+    tick = data["Ticker"]
+    last = data["Last"]
+    trade_plans = data["TradePlans"]
+    fund = data["Fundamental"]
+    conviction = data["Conviction"]
+    scenario = data["Scenario"]
 
-    preface = gpt_preface_expert(t)
+    close = _fmt_price(last.get("Close"))
+    rsi = _fmt_price(last.get("RSI"))
+    macd_v = _fmt_price(last.get("MACD"))
+    ma20 = _fmt_price(last.get("MA20"))
+    ma50 = _fmt_price(last.get("MA50"))
+    ma200 = _fmt_price(last.get("MA200"))
+    vol = _fmt_int(last.get("Volume"))
+    avg_vol = _fmt_int(last.get("Avg20Vol"))
 
-    a_block = f"""
-### A. Phân tích Kỹ thuật
+    header = f"**{tick} — {close} | Conviction: {conviction:.1f}/10 | {scenario}**"
 
-* Close: {close:.2f} ({chg:+.2f}%)
-* Volume: {t['Volume']:,} | Avg20 Vol: {t['Avg20']:.0f}
-* MA20 / MA50 / MA200: {t['MA20']:.2f} / {t['MA50']:.2f} / {t['MA200']:.2f}
-* RSI (14): {t['RSI']:.2f}
-* MACD / Signal: {t['MACD']:.2f} / {t['Signal']:.2f}
+    # Trade Plan summary
+    tp_text = []
+    for k, s in trade_plans.items():
+        tp_text.append(f"{k}: Entry {s.entry}, Stop {s.stop}, TP {s.tp}, R:R {s.rr:.2f}")
+    tp_summary = " | ".join(tp_text) if tp_text else "Chưa có chiến lược đạt chuẩn R:R ≥ 2.5"
 
-1. **MA Trend:** So sánh ba đường MA cho thấy cấu trúc xu hướng hiện tại đang {'tăng' if t['MA20']>t['MA50'] else 'giảm'} nhẹ.
-2. **RSI:** Ở mức {t['RSI']:.2f}, phản ánh {('động lượng tích cực' if t['RSI']>55 else 'trung tính')}.
-3. **MACD:** {('Đang mở rộng dương → tín hiệu xu hướng mạnh.' if t['MACD']>t['Signal'] else 'Tín hiệu yếu hoặc trung lập.')}
-4. **RSI + MACD Bias Matrix:** Khi kết hợp RSI và MACD, chiến lược phù hợp là {('nắm giữ theo xu hướng' if t['RSI']>55 else 'quan sát chờ xác nhận')}.
-5. **Fibonacci:** Hỗ trợ: {fibo_levels[2]:.2f}, {fibo_levels[1]:.2f} | Kháng cự: {fibo_levels[0]:.2f}.
-6. **Volume & Price Action:** Khối lượng đang {'tăng' if t['Volume']>t['Avg20'] else 'giảm'} so với trung bình 20 phiên.
-7. **Kịch bản Tiềm năng:** Nếu giá vượt vùng kháng cự, xu hướng tăng có thể tiếp diễn; nếu thất bại, khả năng điều chỉnh ngắn hạn có thể xuất hiện.
-8. **Độ Tin cậy:** ⭐ {t['Conviction']:.1f}/10
-"""
-
-    if pd.notna(t.get("Target")) and pd.notna(t.get("Upside")):
-        b_block = f"""
-### B. Phân tích Cơ bản
-Giá mục tiêu: {t['Target']/1000:.1f} ngàn VND | Upside: {t['Upside']:.1f}%
-Nhận định: Upside {t['Upside']:.1f}% → ưu tiên chiến lược theo xu hướng, chỉ gia tăng khi kỹ thuật xác nhận.
-"""
-    else:
-        b_block = f"""
-### B. Phân tích Cơ bản
-Giá mục tiêu: N/A | Upside: N/A
-Nhận định: Chưa đọc được target từ file Tickers target price.xlsx cho mã này.
-"""
-
-    c_block = f"""
-### C. Trade Plan & Risk–Reward Simulation
-| Chiến lược | Entry (ưu tiên) | Stop-loss | Take-profit | Xác suất | R:R ước tính |
-|-------------|-----------------|------------|--------------|-----------|---------------|
-| Pullback | {fibo_levels[2]:.2f} | {fibo_levels[2]*0.94:.2f} (-6%) | {fibo_levels[2]*1.2:.2f} (+20%) | TB | 3.33 |
-| Breakout | {fibo_levels[0]:.2f} | {fibo_levels[1]:.2f} (-6%) | {fibo_levels[0]*1.25:.2f} (+25%) | Cao | 4.17 |
-"""
-
-    summary = (
-        "Trong tổng thể, cấu trúc kỹ thuật của cổ phiếu đang duy trì trạng thái ổn định. "
-        "Chiến lược phù hợp là ưu tiên canh các nhịp pullback khi thị trường rung lắc, "
-        "hoặc chờ xác nhận breakout với thanh khoản mạnh để gia tăng vị thế."
+    # Fundamental
+    fund_text = (
+        f"Khuyến nghị: {fund.get('Recommendation', 'N/A')} | "
+        f"Giá mục tiêu: {_fmt_price(fund.get('Target'))} | "
+        f"Upside: {_fmt_pct(fund.get('Upside', 0)*100)}"
+        if fund else "Không có dữ liệu fundamental"
     )
 
-    return f"{header}\n{preface}\n\n{a_block}\n{b_block}\n{c_block}\n{summary}"
+    # === Prompt ===
+    prompt = f"""
+    Bạn là chuyên gia phân tích chiến lược của một công ty chứng khoán cao cấp.
+    Hãy viết báo cáo ngắn gọn (~700-900 từ) theo cấu trúc chuẩn sau, bằng tiếng Việt, 
+    văn phong chuyên nghiệp, gần gũi và có chiều sâu:
 
-# ============================================================
-# 7. SIDEBAR & MAIN LAYOUT
+    1️⃣ **Executive Summary (3–4 câu)**
+    - Nhận định tổng thể xu hướng hiện tại của {tick}, dòng tiền, động lượng.
+    - Tác động lên chiến lược hành động của nhà đầu tư trung–dài hạn.
+
+    2️⃣ **A. Phân tích Kỹ thuật**
+    Bao gồm:
+    - MA Trend (MA20, MA50, MA200)
+    - RSI Analysis (động lượng, vùng quá mua/bán)
+    - MACD Analysis (tín hiệu xu hướng)
+    - RSI + MACD Bias
+    - Fibonacci (2 khung 60–90 & 250 ngày): hỗ trợ – kháng cự – vùng chiến lược
+    - Volume & Price Action
+    - 12-Scenario Classification
+    - Master Integration + Conviction Score
+
+    3️⃣ **B. Fundamental Analysis Summary**
+    - Dữ liệu: {fund_text}
+
+    4️⃣ **C. Trade Plan**
+    - {tp_summary}
+
+    5️⃣ **D. Risk–Reward Simulation**
+    - Diễn giải R:R, xác suất, và chiến lược phù hợp khẩu vị lợi nhuận 15–100%, rủi ro 5–8%.
+
+    Ngữ điệu cần tự nhiên, chuyên nghiệp, kiểu như chuyên gia phân tích trình bày trước khách hàng tổ chức.
+    Phải đảm bảo:
+    - Không tự bịa số liệu.
+    - Chỉ phân tích dựa trên các giá trị thực sau:
+      MA20={ma20}, MA50={ma50}, MA200={ma200}, RSI={rsi}, MACD={macd_v},
+      Volume={vol}, AvgVol={avg_vol}, Conviction={conviction:.1f}.
+    """
+
+    # ============================================================
+    # ẨN API KEY KHI KHỞI TẠO CLIENT
+    # ============================================================
+    try:
+        client = OpenAI()  # Key lấy tự động từ môi trường
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": "Bạn là INCEPTION AI, chuyên gia phân tích đầu tư chiến lược."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1600
+        )
+        content = response.choices[0].message.content
+    except Exception as e:
+        content = f"⚠️ Lỗi khi gọi GPT: {e}"
+
+    return f"{header}\n\n{content}" # ============================================================
+# 12. STREAMLIT UI & APP LAYOUT
 # ============================================================
 
+# --- Header section ---
+st.markdown("<h1 style='color:#A855F7;'>🟣 INCEPTION v4.6 — Strategic Investor Edition</h1>", unsafe_allow_html=True)
+st.markdown("<p style='color:#9CA3AF;'>Công cụ phân tích chiến lược cho nhà đầu tư trung–dài hạn (Lợi nhuận 15–100%, Rủi ro 5–8%).</p>", unsafe_allow_html=True)
+st.divider()
+
+# --- Sidebar controls ---
 with st.sidebar:
     st.markdown("### 🔐 Đăng nhập người dùng")
     user_key = st.text_input("Nhập Mã VIP:", type="password")
-    ticker = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
-    fibo_period = st.selectbox("Fibo Window (phiên)", [60, 90, 250], index=2)
-    st.markdown("<div style='height:5px'></div>", unsafe_allow_html=True)
-    col1 = st.columns(1)[0]
-    with col1:
-        tech_btn = st.button("📊 Phân tích kỹ thuật")
-        fund_btn = st.button("💼 Phân tích cơ bản")
-        news_btn = st.button("📰 Tin tức")
+    ticker_input = st.text_input("Mã Cổ Phiếu:", value="HPG").upper()
+    run_btn = st.button("🚀 Phân tích ngay", type="primary")
+
+# --- Layout containers ---
+col_main, = st.columns([1])  # Chỉ hiển thị phần Report (ẩn Chart column tạm thời)
 
 # ============================================================
-# 8. MAIN EXECUTION
+# 13. MAIN EXECUTION
 # ============================================================
 
-if tech_btn:
+if run_btn:
     if user_key not in VALID_KEYS:
-        st.error("❌ Mã VIP không hợp lệ.")
+        st.error("❌ Mã VIP không đúng. Vui lòng nhập lại.")
     else:
-        with st.spinner("Đang phân tích..."):
-            result = analyze_ticker(ticker, fibo_period)
-            if "Error" in result:
-                st.error(result["Error"])
-            else:
-                report = generate_report(result)
-                st.markdown(f"<div class='report-text'>{report}</div>", unsafe_allow_html=True)
+        with st.spinner(f"Đang xử lý phân tích {ticker_input}..."):
+            try:
+                result = analyze_ticker(ticker_input)
+                report = generate_insight_report(result)
+                st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown(report)
+            except Exception as e:
+                st.error(f"⚠️ Lỗi xử lý: {e}")
+
+# ============================================================
+# 14. FOOTER
+# ============================================================
+
+st.divider()
+st.markdown(
+    """
+    <p style='text-align:center; color:#6B7280; font-size:13px;'>
+    © 2025 INCEPTION Research Framework<br>
+    Phiên bản 4.6 – Strategic Investor Edition | Engine GPT-4 Turbo
+    </p>
+    """,
+    unsafe_allow_html=True
+) # ============================================================
+# 15. FINAL TOUCHES – MARKDOWN OPTIMIZATION & SAFETY CHECKS
+# ============================================================
+
+def render_markdown_safe(text: str):
+    """Đảm bảo hiển thị báo cáo Markdown có xuống dòng và format rõ ràng."""
+    text = text.replace("\n\n", "<br><br>")
+    st.markdown(f"<div style='white-space:pre-wrap; color:#E5E7EB;'>{text}</div>", unsafe_allow_html=True)
+
+# Kiểm tra file dữ liệu
+missing_files = []
+for f in [PRICE_VOL_PATH, HSC_TARGET_PATH, TICKER_NAME_PATH]:
+    if not os.path.exists(f):
+        missing_files.append(f)
+
+if missing_files:
+    st.warning(f"⚠️ Thiếu file dữ liệu: {', '.join(missing_files)}. Hãy kiểm tra lại thư mục trước khi chạy.")
+else:
+    st.info("✅ Tất cả file dữ liệu đã sẵn sàng. Bạn có thể tiến hành phân tích.")
+
+# ============================================================
+# 16. RUNNING GUIDE
+# ============================================================
+
+st.divider()
+st.markdown(
+    """
+    <div style='color:#9CA3AF; font-size:14px; line-height:1.6;'>
+    <strong>📘 Hướng dẫn sử dụng:</strong><br>
+    1️⃣ Mở Terminal hoặc Command Prompt.<br>
+    2️⃣ Di chuyển đến thư mục chứa file <code>app.py</code> và các file Excel dữ liệu.<br>
+    3️⃣ Gõ lệnh: <code>streamlit run app.py</code><br>
+    4️⃣ Nhập Mã VIP và Mã Cổ Phiếu (VD: HPG, FPT, VNM).<br>
+    5️⃣ Hệ thống sẽ tự động tạo báo cáo phân tích chiến lược.<br><br>
+    <em>Lưu ý:</em> INCEPTION v4.6 dành cho nhà đầu tư chiến lược (Target 15–100%, Risk 5–8%).<br>
+    Không sử dụng cho mục đích giao dịch ngắn hạn hoặc lướt sóng trong ngày.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# ============================================================
+# 17. SAFETY EXIT (FOR EMPTY RUNS)
+# ============================================================
+
+if not run_btn:
+    st.markdown(
+        """
+        <br><br>
+        <div style='text-align:center; color:#A855F7;'>
+        🔍 <strong>Nhập mã cổ phiếu và nhấn “Phân tích ngay” để bắt đầu.</strong>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
