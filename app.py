@@ -1,4 +1,4 @@
-```python
+
 # ============================================================
 # INCEPTION v4.6 FINAL | Strategic Investor Edition
 # app.py — Streamlit + GPT-4 Turbo
@@ -865,3 +865,4 @@ if not run_btn:
         unsafe_allow_html=True
     )
 ```
+
