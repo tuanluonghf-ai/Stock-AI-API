@@ -107,6 +107,15 @@ def _isnan(x) -> bool:
     try: return x is None or (isinstance(x, float) and np.isnan(x))
     except: return True
 
+def _scenario_vi(s: str) -> str:
+    m = {
+        "Uptrend – Breakout Confirmation": "Xu hướng tăng — Xác nhận breakout",
+        "Uptrend – Pullback Phase": "Xu hướng tăng — Pha điều chỉnh (pullback)",
+        "Downtrend – Weak Phase": "Xu hướng giảm — Pha yếu",
+        "Neutral / Sideways": "Đi ngang / trung tính",
+    }
+    return m.get(s, s)
+
 # ============================================================
 # 4. LOADERS
 # ============================================================
@@ -241,7 +250,7 @@ def compute_dual_fibonacci(df: pd.DataFrame, short_window: int = 60, long_window
     }
 
 def select_fib_short_window(df: pd.DataFrame) -> int:
-    # Auto choose 60 or 90. Fallback to 60 if insufficient data or missing columns.
+    # Auto choose 60 or 90. High volatility -> 90 (smoother), else 60.
     if df is None or df.empty:
         return 60
     if len(df) < 90:
@@ -269,8 +278,6 @@ def select_fib_short_window(df: pd.DataFrame) -> int:
         return 60
 
     atr_pct = (last_atr / last_close) * 100
-
-    # High volatility -> smoother window 90; otherwise 60
     return 90 if atr_pct >= 3.5 else 60
 
 def detect_fibo_conflict(last: pd.Series, dual_fib: Dict[str, Any]) -> Dict[str, Any]:
@@ -444,7 +451,6 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
     # 12 scenarios = Trend(3) x Momentum(4)
     trend_order = {"Up": 0, "Neutral": 1, "Down": 2}
     mom_order = {"Bull": 0, "Neutral": 1, "Bear": 2, "Exhaust": 3}
-
     code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1  # 1..12
 
     name_map = {
@@ -487,13 +493,11 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
     vol = _safe_float(last.get("Volume"))
     avg_vol = _safe_float(last.get("Avg20Vol"))
 
-    target = _safe_float(fund_row.get("Target"))
     upside_pct = _safe_float(fund_row.get("UpsidePct"))
 
     # Components (0..2 each), total 0..10-ish
     comps = {}
 
-    # Trend component
     trend = 0.0
     if pd.notna(c) and pd.notna(ma50) and pd.notna(ma200):
         if (c >= ma50) and (ma50 >= ma200):
@@ -504,7 +508,6 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             trend = 0.4
     comps["Trend"] = trend
 
-    # Momentum component
     mom = 0.0
     if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
         if (rsi >= 55) and (macd_v >= sig):
@@ -515,13 +518,11 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             mom = 1.1
     comps["Momentum"] = mom
 
-    # Volume component
     vcomp = 0.0
     if pd.notna(vol) and pd.notna(avg_vol):
         vcomp = 1.6 if vol > avg_vol else 0.9
     comps["Volume"] = vcomp
 
-    # Fibonacci positioning component (uses selected short + long)
     fibc = 0.0
     try:
         s_lv = dual_fib.get("auto_short", {}).get("levels", {})
@@ -548,9 +549,8 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
                 fibc += 0.2
     except:
         fibc = 0.0
-    comps["Fibonacci"] = fibc  # 0..2.0
+    comps["Fibonacci"] = fibc
 
-    # TradePlan / RR component
     best_rr = np.nan
     if trade_plans:
         rrs = [s.rr for s in trade_plans.values() if pd.notna(s.rr)]
@@ -565,7 +565,6 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             rrcomp = 1.0
     comps["RRQuality"] = rrcomp
 
-    # Fundamental component (Upside)
     fcomp = 0.0
     if pd.notna(upside_pct):
         if upside_pct >= 25:
@@ -579,7 +578,6 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
     comps["FundamentalUpside"] = fcomp
 
     total = float(sum(comps.values()))
-    # Map to tier & sizing guidance (deterministic)
     if total >= 9.0:
         tier = "A+"
         sizing = "Aggressive (2.0x) if risk control ok"
@@ -669,10 +667,15 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     fund = hsc[hsc["Ticker"].str.upper() == ticker.upper()]
     fund_row = fund.iloc[0].to_dict() if not fund.empty else {}
 
-    close = float(last["Close"]) if pd.notna(last["Close"]) else np.nan
-    target = _safe_float(fund_row.get("Target"), np.nan)
-    upside_pct = ((target - close) / close * 100) if (pd.notna(target) and pd.notna(close) and close != 0) else np.nan
-    fund_row["Target"] = target
+    # IMPORTANT: Close in Price_Vol.xlsx is typically in "thousand VND" (e.g., 30.5 == 30,500 VND)
+    close_k = float(last["Close"]) if pd.notna(last["Close"]) else np.nan
+
+    # Target in file is VND (e.g., 42,500 VND). Convert to thousand for upside calculation/display.
+    target_vnd = _safe_float(fund_row.get("Target"), np.nan)
+    target_k = (target_vnd / 1000) if pd.notna(target_vnd) else np.nan
+    upside_pct = ((target_k - close_k) / close_k * 100) if (pd.notna(target_k) and pd.notna(close_k) and close_k != 0) else np.nan
+
+    fund_row["Target"] = target_vnd
     fund_row["UpsidePct"] = upside_pct
 
     scenario12 = classify_scenario12(last)
@@ -704,13 +707,14 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
             "Short": dual_fib.get("auto_short", {}),
             "Long": dual_fib.get("fixed_long", {})
         },
+        # kept for internal logic only (do not ask GPT to present)
         "FiboConflictFlag": fibo_conf.get("FiboConflictFlag"),
         "FiboConflictType": fibo_conf.get("FiboConflictType"),
         "FiboPriorityRuleApplied": fibo_conf.get("FiboPriorityRuleApplied"),
         "Fundamental": {
             "Recommendation": fund_row.get("Recommendation", "N/A") if fund_row else "N/A",
-            "TargetVND": target,
-            "TargetK": (target / 1000) if pd.notna(target) else np.nan,
+            "TargetVND": target_vnd,
+            "TargetK": target_k,
             "UpsidePct": upside_pct
         },
         "TradePlans": [
@@ -751,7 +755,6 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     if "Error" in data:
         return f"❌ {data['Error']}"
 
-    # Chuẩn bị dữ liệu
     tick = data["Ticker"]
     last = data["Last"]
     trade_plans = data["TradePlans"]
@@ -761,15 +764,9 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     analysis_pack = data.get("AnalysisPack", {})
 
     close = _fmt_price(last.get("Close"))
-    rsi = _fmt_price(last.get("RSI"))
-    macd_v = _fmt_price(last.get("MACD"))
-    ma20 = _fmt_price(last.get("MA20"))
-    ma50 = _fmt_price(last.get("MA50"))
-    ma200 = _fmt_price(last.get("MA200"))
-    vol = _fmt_int(last.get("Volume"))
-    avg_vol = _fmt_int(last.get("Avg20Vol"))
+    scenario_vi = _scenario_vi(scenario)
 
-    header = f"**{tick} — {close} | Conviction: {conviction:.1f}/10 | {scenario}**"
+    header = f"## {tick} — {close} | Điểm tin cậy: {conviction:.1f}/10 | {scenario_vi}"
 
     # Trade Plan summary
     tp_text = []
@@ -777,66 +774,43 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
         tp_text.append(f"{k}: Entry {s.entry}, Stop {s.stop}, TP {s.tp}, R:R {s.rr:.2f}")
     tp_summary = " | ".join(tp_text) if tp_text else "Chưa có chiến lược đạt chuẩn R:R ≥ 2.5"
 
-    # Fundamental (Target displayed in thousand, without unit label)
-    fund_text = (
-        f"Khuyến nghị: {fund.get('Recommendation', 'N/A')} | "
-        f"Giá mục tiêu: {_fmt_thousand(fund.get('Target'))} | "
-        f"Upside: {_fmt_pct(fund.get('UpsidePct'))}"
-        if fund else "Không có dữ liệu fundamental"
-    )
+    # Fundamental (Target shown in thousand number without unit label)
+    target_k = analysis_pack.get("Fundamental", {}).get("TargetK", np.nan)
+    upside_pct = analysis_pack.get("Fundamental", {}).get("UpsidePct", np.nan)
+    rec = fund.get("Recommendation", "N/A") if fund else "N/A"
 
-    # === Prompt ===
+    fund_text = f"Khuyến nghị: {rec} | Giá mục tiêu: {_fmt_price(target_k, 1)} | Upside: {_fmt_pct(upside_pct)}"
+
     pack_json = json.dumps(analysis_pack, ensure_ascii=False)
 
     prompt = f"""
-    Bạn là chuyên gia phân tích chiến lược của một công ty chứng khoán cao cấp.
-    Hãy viết báo cáo ngắn gọn (~700-900 từ) theo cấu trúc chuẩn sau, bằng tiếng Việt,
-    văn phong chuyên nghiệp, gần gũi và có chiều sâu.
+Bạn là INCEPTION AI, nói chuyện với "bạn" theo kiểu thân thiện, dễ hiểu nhưng vẫn chuẩn mực như người có nghề.
 
-    QUY TẮC BẮT BUỘC (FRAME-LOCK):
-    - Tuyệt đối KHÔNG bịa số liệu.
-    - Tuyệt đối KHÔNG tự tính toán bất kỳ con số nào (kể cả cộng/trừ/nhân/chia).
-    - Chỉ được phép sử dụng đúng dữ liệu trong JSON "AnalysisPack" bên dưới.
-    - Nếu thiếu dữ liệu thì ghi rõ "N/A" và không suy diễn.
+QUY TẮC BẮT BUỘC (FRAME-LOCK):
+- Tuyệt đối KHÔNG bịa số liệu.
+- Tuyệt đối KHÔNG tự tính toán bất kỳ con số nào (kể cả cộng/trừ/nhân/chia).
+- Chỉ được phép dùng đúng dữ liệu trong JSON "AnalysisPack".
+- Không dùng ký hiệu đánh số kiểu 1️⃣ 2️⃣ 3️⃣ hoặc emoji-numbering.
+- Hạn chế liệt kê; ưu tiên viết thành đoạn ngắn, rõ ý. Nếu thật cần gạch đầu dòng, tối đa 3 dòng.
+- Không nhắc tới FiboConflictFlag / FiboPriorityRuleApplied trong bài viết (chỉ dùng ngầm để tránh xung đột trade plan).
 
-    1️⃣ **Executive Summary (3–4 câu)**
-    - Nhận định tổng thể xu hướng hiện tại của {tick}, dòng tiền, động lượng.
-    - Tác động lên chiến lược hành động của nhà đầu tư trung–dài hạn.
+YÊU CẦU BÀI VIẾT:
+- Mở đầu bằng 1 đoạn tóm tắt 4–6 câu (không đặt tiêu đề “Executive Summary”).
+- Sau đó viết các phần: Kỹ thuật, Cơ bản, Trade plan, Rủi ro–Lợi nhuận.
+- Phần “Cơ bản” dựa trên dòng: {fund_text}
+- Phần “Trade plan” dựa trên: {tp_summary}
+- Phần “Rủi ro–Lợi nhuận” dựa trên RRSim trong JSON (RiskPct, RewardPct, RR, Probability).
 
-    2️⃣ **A. Phân tích Kỹ thuật**
-    Bao gồm (chỉ dùng số trong JSON):
-    - MA Trend (MA20, MA50, MA200)
-    - RSI Analysis
-    - MACD Analysis
-    - RSI + MACD Bias
-    - Fibonacci (2 khung: ShortWindow & LongWindow): hỗ trợ – kháng cự – vùng chiến lược
-    - Volume & Price Action
-    - 12-Scenario Classification (Scenario12)
-    - Master Integration + MasterScore
-    - Fibo Conflict (FiboConflictFlag/FiboPriorityRuleApplied) nếu có
+Dữ liệu (AnalysisPack JSON):
+{pack_json}
+"""
 
-    3️⃣ **B. Fundamental Analysis Summary**
-    - Dữ liệu: {fund_text}
-
-    4️⃣ **C. Trade Plan**
-    - {tp_summary}
-
-    5️⃣ **D. Risk–Reward Simulation**
-    - Diễn giải dựa trên RRSim trong JSON (RiskPct, RewardPct, RR, Probability).
-
-    Dữ liệu (AnalysisPack JSON):
-    {pack_json}
-    """
-
-    # ============================================================
-    # ẨN API KEY KHI KHỞI TẠO CLIENT
-    # ============================================================
     try:
-        client = OpenAI()  # Key lấy tự động từ môi trường
+        client = OpenAI()
         response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
-                {"role": "system", "content": "Bạn là INCEPTION AI, chuyên gia phân tích đầu tư chiến lược."},
+                {"role": "system", "content": "Bạn là INCEPTION AI, trợ lý phân tích đầu tư, nói chuyện tự nhiên và rõ ràng."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
@@ -846,24 +820,22 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     except Exception as e:
         content = f"⚠️ Lỗi khi gọi GPT: {e}"
 
-    return f"{header}\n\n{content}" # ============================================================
+    return f"{header}\n\n{content}"
+
+# ============================================================
 # 12. STREAMLIT UI & APP LAYOUT
 # ============================================================
 
-# --- Header section ---
 st.markdown("<h1 style='color:#A855F7;'>🟣 INCEPTION v4.6</h1>", unsafe_allow_html=True)
-st.markdown("<p style='color:#9CA3AF;'>Công cụ phân tích chiến lược cho nhà đầu tư trung–dài hạn (Lợi nhuận 15–100%, Rủi ro 5–8%).</p>", unsafe_allow_html=True)
 st.divider()
 
-# --- Sidebar controls ---
 with st.sidebar:
     st.markdown("### 🔐 Đăng nhập người dùng")
     user_key = st.text_input("Nhập Mã VIP:", type="password")
-    ticker_input = st.text_input("Mã Cổ Phiếu:", value="HPG").upper()
+    ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
     run_btn = st.button("Phân tích")
 
-# --- Layout containers ---
-col_main, = st.columns([1])  # Chỉ hiển thị phần Report (ẩn Chart column tạm thời)
+col_main, = st.columns([1])
 
 # ============================================================
 # 13. MAIN EXECUTION
@@ -895,57 +867,4 @@ st.markdown(
     </p>
     """,
     unsafe_allow_html=True
-) # ============================================================
-# 15. FINAL TOUCHES – MARKDOWN OPTIMIZATION & SAFETY CHECKS
-# ============================================================
-
-def render_markdown_safe(text: str):
-    """Đảm bảo hiển thị báo cáo Markdown có xuống dòng và format rõ ràng."""
-    text = text.replace("\n\n", "<br><br>")
-    st.markdown(f"<div style='white-space:pre-wrap; color:#E5E7EB;'>{text}</div>", unsafe_allow_html=True)
-
-# Kiểm tra file dữ liệu
-missing_files = []
-for f in [PRICE_VOL_PATH, HSC_TARGET_PATH, TICKER_NAME_PATH]:
-    if not os.path.exists(f):
-        missing_files.append(f)
-
-if missing_files:
-    st.warning(f"⚠️ Thiếu file dữ liệu: {', '.join(missing_files)}. Hãy kiểm tra lại thư mục trước khi chạy.")
-else:
-    st.info("✅ Tất cả file dữ liệu đã sẵn sàng. Bạn có thể tiến hành phân tích.")
-
-# ============================================================
-# 16. RUNNING GUIDE
-# ============================================================
-
-st.divider()
-st.markdown(
-    """
-    <div style='color:#9CA3AF; font-size:14px; line-height:1.6;'>
-    <strong>📘 Hướng dẫn sử dụng:</strong><br>
-    1️⃣ Mở Terminal hoặc Command Prompt.<br>
-    2️⃣ Di chuyển đến thư mục chứa file <code>app.py</code> và các file Excel dữ liệu.<br>
-    3️⃣ Gõ lệnh: <code>streamlit run app.py</code><br>
-    4️⃣ Nhập Mã VIP và Mã Cổ Phiếu (VD: HPG, FPT, VNM).<br>
-    5️⃣ Hệ thống sẽ tự động tạo báo cáo phân tích chiến lược.<br><br>
-    <em>Lưu ý:</em> INCEPTION v4.6 dành cho nhà đầu tư chiến lược (Target 15–100%, Risk 5–8%).
-    </div>
-    """,
-    unsafe_allow_html=True
 )
-
-# ============================================================
-# 17. SAFETY EXIT (FOR EMPTY RUNS)
-# ============================================================
-
-if not run_btn:
-    st.markdown(
-        """
-        <br><br>
-        <div style='text-align:center; color:#A855F7;'>
-        🔍 <strong>Nhập mã cổ phiếu và nhấn “Phân tích ngay” để bắt đầu.</strong>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
