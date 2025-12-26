@@ -19,7 +19,7 @@ from typing import Dict, Any, Tuple, List, Optional
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
 
-st.set_page_config(page_title="INCEPTION v4.6 – Strategic Investor Edition",
+st.set_page_config(page_title="INCEPTION v4.6",
                    layout="wide",
                    page_icon="🟣")
 
@@ -36,6 +36,24 @@ strong {
 }
 h1, h2, h3 {
     color: #E5E7EB;
+}
+
+/* Sidebar button style: black glossy, white text, full width */
+.stButton > button {
+    width: 100% !important;
+    background: linear-gradient(180deg, #1f1f1f 0%, #000000 100%) !important;
+    color: #FFFFFF !important;
+    font-weight: 700 !important;
+    border-radius: 12px !important;
+    height: 42px !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    box-shadow: 0 10px 18px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.08) !important;
+}
+.stButton > button:hover {
+    background: linear-gradient(180deg, #2a2a2a 0%, #050505 100%) !important;
+}
+.stButton > button:active {
+    transform: translateY(1px);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -191,7 +209,7 @@ def macd(close, fast=12, slow=26, signal=9):
     return macd_line, signal_line, hist
 
 # ============================================================
-# 6. FIBONACCI DUAL-FRAME (SHORT AUTO 60/90 + LONG 250)
+# 6. FIBONACCI DUAL-FRAME (PYTHON AUTO-SELECT 60/90 + LONG 250)
 # ============================================================
 
 def _fib_levels(low, high):
@@ -222,61 +240,68 @@ def compute_dual_fibonacci(df: pd.DataFrame, short_window: int = 60, long_window
         "fixed_long": {"swing_high": l_hi, "swing_low": l_lo, "levels": _fib_levels(l_lo, l_hi)}
     }
 
-def compute_fib_for_window(df: pd.DataFrame, window: int) -> Dict[str, Any]:
-    L = window if len(df) >= window else len(df)
-    win = df.tail(L)
-    hi, lo = win["High"].max(), win["Low"].min()
+def select_fib_short_window(df: pd.DataFrame) -> int:
+    # Auto choose 60 or 90. Fallback to 60 if insufficient data or missing columns.
+    if df is None or df.empty:
+        return 60
+    if len(df) < 90:
+        return 60
+    for col in ["High", "Low", "Close"]:
+        if col not in df.columns:
+            return 60
+
+    close = df["Close"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        (high - low).abs(),
+        (high - prev_close).abs(),
+        (low - prev_close).abs()
+    ], axis=1).max(axis=1)
+
+    atr14 = tr.rolling(14).mean()
+    last_close = close.iloc[-1]
+    last_atr = atr14.iloc[-1]
+
+    if pd.isna(last_close) or pd.isna(last_atr) or last_close == 0:
+        return 60
+
+    atr_pct = (last_atr / last_close) * 100
+
+    # High volatility -> smoother window 90; otherwise 60
+    return 90 if atr_pct >= 3.5 else 60
+
+def detect_fibo_conflict(last: pd.Series, dual_fib: Dict[str, Any]) -> Dict[str, Any]:
+    c = _safe_float(last.get("Close"))
+    s_lv = dual_fib.get("auto_short", {}).get("levels", {})
+    l_lv = dual_fib.get("fixed_long", {}).get("levels", {})
+
+    s_618 = _safe_float(s_lv.get("61.8"))
+    l_618 = _safe_float(l_lv.get("61.8"))
+    l_382 = _safe_float(l_lv.get("38.2"))
+
+    conflict = False
+    ctype = "N/A"
+    rule = "Long=structure (ceiling/floor), Short=tactical (entry)"
+
+    if pd.notna(c) and pd.notna(l_618) and (abs(c - l_618) / l_618 * 100 <= 2.0):
+        conflict = True
+        ctype = "Near long resistance (Long 61.8 ±2%)"
+
+    if pd.notna(c) and pd.notna(l_382) and (c < l_382):
+        conflict = True
+        ctype = "Below long support (Long 38.2 breached)"
+
+    if conflict and pd.notna(c) and pd.notna(s_618) and (c >= s_618):
+        ctype = f"{ctype} + Short bullish trigger (Close>=Short 61.8)"
+
     return {
-        "window": L,
-        "swing_high": hi,
-        "swing_low": lo,
-        "levels": _fib_levels(lo, hi)
+        "FiboConflictFlag": bool(conflict),
+        "FiboConflictType": ctype,
+        "FiboPriorityRuleApplied": rule
     }
-
-def _count_touches(series: pd.Series, level: float, tol_pct: float = 0.007) -> int:
-    if pd.isna(level) or level == 0:
-        return 0
-    tol = abs(level) * tol_pct
-    return int(((series - level).abs() <= tol).sum())
-
-def choose_best_short_fibo_window(df: pd.DataFrame, candidates=(60, 90), tol_pct: float = 0.007) -> int:
-    best_w = candidates[0]
-    best_score = -1
-
-    close_series = df["Close"]
-    high_series = df["High"]
-    low_series = df["Low"]
-    last_close = float(df.iloc[-1]["Close"])
-
-    for w in candidates:
-        fib = compute_fib_for_window(df, w)
-        levels = fib["levels"]
-
-        s_hi = fib["swing_high"]
-        s_lo = fib["swing_low"]
-        score_swing = _count_touches(high_series.tail(fib["window"]), s_hi, tol_pct) + _count_touches(low_series.tail(fib["window"]), s_lo, tol_pct)
-
-        score_levels = 0
-        for key in ["38.2", "50.0", "61.8"]:
-            lv = levels.get(key, np.nan)
-            if pd.isna(lv):
-                continue
-            touches = (
-                _count_touches(close_series.tail(fib["window"]), lv, tol_pct) +
-                _count_touches(high_series.tail(fib["window"]), lv, tol_pct) +
-                _count_touches(low_series.tail(fib["window"]), lv, tol_pct)
-            )
-            dist = abs(lv - last_close) / last_close if last_close != 0 else 1
-            weight = 1 / (1 + dist * 10)
-            score_levels += touches * weight
-
-        score = score_swing * 2 + score_levels
-
-        if score > best_score:
-            best_score = score
-            best_w = w
-
-    return int(best_w)
 
 # ============================================================
 # 7. CONVICTION SCORE
@@ -289,6 +314,7 @@ def compute_conviction(last: pd.Series) -> float:
     if last["Volume"] > last["Avg20Vol"]: score += 1
     if last["MACD"] > last["MACDSignal"]: score += 0.5
     return min(10.0, score)
+
 # ============================================================
 # 8. TRADE PLAN LOGIC
 # ============================================================
@@ -380,6 +406,7 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
 
     rules_hit = []
 
+    # Trend regime (3)
     trend = "Neutral"
     if pd.notna(c) and pd.notna(ma50) and pd.notna(ma200):
         if c >= ma50 and ma50 >= ma200:
@@ -392,6 +419,7 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
             trend = "Neutral"
             rules_hit.append("Trend=Neutral (mixed MA structure)")
 
+    # Momentum regime (4)
     mom = "Neutral"
     if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
         if (rsi >= 55) and (macd_v >= sig):
@@ -407,15 +435,17 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
             mom = "Neutral"
             rules_hit.append("Momentum=Neutral (between zones)")
 
+    # Volume regime (informational)
     vol_reg = "N/A"
     if pd.notna(vol) and pd.notna(avg_vol):
         vol_reg = "High" if vol > avg_vol else "Low"
         rules_hit.append(f"Volume={vol_reg} (Vol {'>' if vol>avg_vol else '<='} Avg20Vol)")
 
+    # 12 scenarios = Trend(3) x Momentum(4)
     trend_order = {"Up": 0, "Neutral": 1, "Down": 2}
     mom_order = {"Bull": 0, "Neutral": 1, "Bear": 2, "Exhaust": 3}
 
-    code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1
+    code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1  # 1..12
 
     name_map = {
         ( "Up","Bull" ): "S1 – Uptrend + Bullish Momentum",
@@ -460,8 +490,10 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
     target = _safe_float(fund_row.get("Target"))
     upside_pct = _safe_float(fund_row.get("UpsidePct"))
 
+    # Components (0..2 each), total 0..10-ish
     comps = {}
 
+    # Trend component
     trend = 0.0
     if pd.notna(c) and pd.notna(ma50) and pd.notna(ma200):
         if (c >= ma50) and (ma50 >= ma200):
@@ -472,6 +504,7 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             trend = 0.4
     comps["Trend"] = trend
 
+    # Momentum component
     mom = 0.0
     if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
         if (rsi >= 55) and (macd_v >= sig):
@@ -482,11 +515,13 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             mom = 1.1
     comps["Momentum"] = mom
 
+    # Volume component
     vcomp = 0.0
     if pd.notna(vol) and pd.notna(avg_vol):
         vcomp = 1.6 if vol > avg_vol else 0.9
     comps["Volume"] = vcomp
 
+    # Fibonacci positioning component (uses selected short + long)
     fibc = 0.0
     try:
         s_lv = dual_fib.get("auto_short", {}).get("levels", {})
@@ -513,8 +548,9 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
                 fibc += 0.2
     except:
         fibc = 0.0
-    comps["Fibonacci"] = fibc
+    comps["Fibonacci"] = fibc  # 0..2.0
 
+    # TradePlan / RR component
     best_rr = np.nan
     if trade_plans:
         rrs = [s.rr for s in trade_plans.values() if pd.notna(s.rr)]
@@ -529,6 +565,7 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             rrcomp = 1.0
     comps["RRQuality"] = rrcomp
 
+    # Fundamental component (Upside)
     fcomp = 0.0
     if pd.notna(upside_pct):
         if upside_pct >= 25:
@@ -542,6 +579,7 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
     comps["FundamentalUpside"] = fcomp
 
     total = float(sum(comps.values()))
+    # Map to tier & sizing guidance (deterministic)
     if total >= 9.0:
         tier = "A+"
         sizing = "Aggressive (2.0x) if risk control ok"
@@ -619,9 +657,8 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     m, s, h = macd(df["Close"], 12, 26, 9)
     df["MACD"], df["MACDSignal"], df["MACDHist"] = m, s, h
 
-    fib_short_window = choose_best_short_fibo_window(df, candidates=(60, 90))
+    fib_short_window = select_fib_short_window(df)
     dual_fib = compute_dual_fibonacci(df, short_window=fib_short_window, long_window=250)
-
     last = df.iloc[-1]
 
     conviction = compute_conviction(last)
@@ -641,6 +678,8 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     scenario12 = classify_scenario12(last)
     rrsim = build_rr_sim(trade_plans)
     master = compute_master_score(last, dual_fib, trade_plans, fund_row)
+
+    fibo_conf = detect_fibo_conflict(last, dual_fib)
 
     analysis_pack = {
         "Ticker": ticker.upper(),
@@ -665,6 +704,9 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
             "Short": dual_fib.get("auto_short", {}),
             "Long": dual_fib.get("fixed_long", {})
         },
+        "FiboConflictFlag": fibo_conf.get("FiboConflictFlag"),
+        "FiboConflictType": fibo_conf.get("FiboConflictType"),
+        "FiboPriorityRuleApplied": fibo_conf.get("FiboPriorityRuleApplied"),
         "Fundamental": {
             "Recommendation": fund_row.get("Recommendation", "N/A") if fund_row else "N/A",
             "TargetVND": target,
@@ -771,6 +813,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     - Volume & Price Action
     - 12-Scenario Classification (Scenario12)
     - Master Integration + MasterScore
+    - Fibo Conflict (FiboConflictFlag/FiboPriorityRuleApplied) nếu có
 
     3️⃣ **B. Fundamental Analysis Summary**
     - Dữ liệu: {fund_text}
@@ -808,7 +851,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
 # ============================================================
 
 # --- Header section ---
-st.markdown("<h1 style='color:#A855F7;'>🟣 INCEPTION v4.6 — Strategic Investor Edition</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#A855F7;'>🟣 INCEPTION v4.6</h1>", unsafe_allow_html=True)
 st.markdown("<p style='color:#9CA3AF;'>Công cụ phân tích chiến lược cho nhà đầu tư trung–dài hạn (Lợi nhuận 15–100%, Rủi ro 5–8%).</p>", unsafe_allow_html=True)
 st.divider()
 
@@ -817,7 +860,7 @@ with st.sidebar:
     st.markdown("### 🔐 Đăng nhập người dùng")
     user_key = st.text_input("Nhập Mã VIP:", type="password")
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="HPG").upper()
-    run_btn = st.button("🚀 Phân tích ngay", type="primary")
+    run_btn = st.button("Phân tích")
 
 # --- Layout containers ---
 col_main, = st.columns([1])  # Chỉ hiển thị phần Report (ẩn Chart column tạm thời)
@@ -848,7 +891,7 @@ st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
     © 2025 INCEPTION Research Framework<br>
-    Phiên bản 4.6 – Strategic Investor Edition | Engine GPT-4 Turbo
+    Phiên bản 4.6 | Engine GPT-4 Turbo
     </p>
     """,
     unsafe_allow_html=True
@@ -886,8 +929,7 @@ st.markdown(
     3️⃣ Gõ lệnh: <code>streamlit run app.py</code><br>
     4️⃣ Nhập Mã VIP và Mã Cổ Phiếu (VD: HPG, FPT, VNM).<br>
     5️⃣ Hệ thống sẽ tự động tạo báo cáo phân tích chiến lược.<br><br>
-    <em>Lưu ý:</em> INCEPTION v4.6 dành cho nhà đầu tư chiến lược (Target 15–100%, Risk 5–8%).<br>
-    Không sử dụng cho mục đích giao dịch ngắn hạn hoặc lướt sóng trong ngày.
+    <em>Lưu ý:</em> INCEPTION v4.6 dành cho nhà đầu tư chiến lược (Target 15–100%, Risk 5–8%).
     </div>
     """,
     unsafe_allow_html=True
