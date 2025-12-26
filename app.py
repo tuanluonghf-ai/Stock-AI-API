@@ -1040,4 +1040,288 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
         s_618 = _safe_float(s_lv.get("61.8"))
         s_382 = _safe_float(s_lv.get("38.2"))
         l_618 = _safe_float(l_lv.get("61.8"))
-        l_382 = _safe_float(l_lv.get("3
+        l_382 = _safe_float(l_lv.get("38.2"))
+
+        if pd.notna(c) and pd.notna(s_618) and pd.notna(s_382):
+            fibc += 1.2 if c >= s_618 else (0.8 if c >= s_382 else 0.4)
+        if pd.notna(c) and pd.notna(l_618) and pd.notna(l_382):
+            fibc += 0.8 if c >= l_618 else (0.5 if c >= l_382 else 0.2)
+    except Exception:
+        fibc = 0.0
+    comps["Fibonacci"] = fibc
+
+    best_rr = np.nan
+    if trade_plans:
+        rrs = [s.rr for s in trade_plans.values() if pd.notna(s.rr)]
+        best_rr = max(rrs) if rrs else np.nan
+    rrcomp = 0.0
+    if pd.notna(best_rr):
+        rrcomp = 2.0 if best_rr >= 4.0 else (1.5 if best_rr >= 3.0 else 1.0)
+    comps["RRQuality"] = rrcomp
+
+    fcomp = 0.0
+    if pd.notna(upside_pct) and upside_pct > 0:
+        fcomp = 2.0 if upside_pct >= 25 else (1.5 if upside_pct >= 15 else (1.0 if upside_pct >= 5 else 0.5))
+    comps["FundamentalUpside"] = fcomp
+
+    total = float(sum(comps.values()))
+    if total >= 9.0:
+        tier, sizing = "A+", "Aggressive (2.0x) if risk control ok"
+    elif total >= 7.5:
+        tier, sizing = "A", "Full size (1.0x) + consider pyramiding"
+    elif total >= 6.0:
+        tier, sizing = "B", "Medium size (0.6–0.8x)"
+    elif total >= 4.5:
+        tier, sizing = "C", "Small / tactical (0.3–0.5x)"
+    else:
+        tier, sizing = "D", "No edge / avoid or hedge"
+
+    return {"Components": comps, "Total": round(total, 2), "Tier": tier, "PositionSizing": sizing, "BestRR": best_rr if pd.notna(best_rr) else np.nan}
+
+
+# ============================================================
+# 10. MAIN ANALYSIS
+# ============================================================
+
+def analyze_ticker(ticker: str) -> Dict[str, Any]:
+    df_all = load_price_vol(PRICE_VOL_PATH)
+    if df_all.empty:
+        return {"Error": "Khong doc duoc du lieu Price_Vol.xlsx"}
+
+    df = df_all[df_all["Ticker"].str.upper() == ticker.upper()].copy()
+    if df.empty:
+        return {"Error": f"Khong tim thay ma {ticker}"}
+
+    if df["Close"].dropna().empty:
+        return {"Error": "Thieu du lieu Close"}
+
+    df["Open"] = df["Open"].fillna(df["Close"])
+    df["High"] = df["High"].fillna(df["Close"])
+    df["Low"] = df["Low"].fillna(df["Close"])
+
+    df["MA20"] = sma(df["Close"], 20)
+    df["MA50"] = sma(df["Close"], 50)
+    df["MA200"] = sma(df["Close"], 200)
+    df["Avg20Vol"] = sma(df["Volume"], 20)
+    df["RSI"] = rsi_wilder(df["Close"], 14)
+    m, s, h = macd(df["Close"], 12, 26, 9)
+    df["MACD"], df["MACDSignal"], df["MACDHist"] = m, s, h
+    df["ATR14"] = atr_wilder(df, 14)
+
+    dual_fib = compute_dual_fibonacci_auto(df, 250)
+    last = df.iloc[-1]
+
+    conviction = compute_conviction(last)
+    scenario = classify_scenario(last)
+
+    hsc = load_hsc_targets(HSC_TARGET_PATH)
+    fund = hsc[hsc["Ticker"].str.upper() == ticker.upper()]
+    fund_row = fund.iloc[0].to_dict() if not fund.empty else {}
+
+    close = _safe_float(last.get("Close"))
+    target_vnd = _safe_float(fund_row.get("Target"), np.nan)
+
+    close_for_calc = close
+    target_for_calc = target_vnd
+    if pd.notna(close) and pd.notna(target_vnd):
+        if (close < 500) and (target_vnd > 1000):
+            target_for_calc = target_vnd / 1000.0
+
+    upside_pct = ((target_for_calc - close_for_calc) / close_for_calc * 100) if (pd.notna(target_for_calc) and pd.notna(close_for_calc) and close_for_calc != 0) else np.nan
+
+    ma_feat = compute_ma_features(df)
+    rsi_feat = compute_rsi_features(df)
+    macd_feat = compute_macd_features(df)
+    vol_feat = compute_volume_features(df)
+    market_ctx = compute_market_context(df_all)
+
+    trade_plans = build_trade_plan(df, dual_fib, ma_feat, rsi_feat, macd_feat, vol_feat)
+    scenario12 = classify_scenario12(last)
+    rrsim = build_rr_sim(trade_plans)
+    master = compute_master_score(last, dual_fib, trade_plans, upside_pct)
+
+    stock_chg = np.nan
+    if len(df) >= 2:
+        stock_chg = _pct_change(_safe_float(df.iloc[-1].get("Close")), _safe_float(df.iloc[-2].get("Close")))
+    mkt_chg = _safe_float(market_ctx.get("VNINDEX", {}).get("ChangePct"))
+    rel = "N/A"
+    if pd.notna(stock_chg) and pd.notna(mkt_chg):
+        rel = "Stronger" if stock_chg > mkt_chg + 0.3 else ("Weaker" if stock_chg < mkt_chg - 0.3 else "InLine")
+
+    analysis_pack = {
+        "Ticker": ticker.upper(),
+        "Last": {
+            "Close": _safe_float(last.get("Close")),
+            "MA20": _safe_float(last.get("MA20")),
+            "MA50": _safe_float(last.get("MA50")),
+            "MA200": _safe_float(last.get("MA200")),
+            "RSI": _safe_float(last.get("RSI")),
+            "MACD": _safe_float(last.get("MACD")),
+            "MACDSignal": _safe_float(last.get("MACDSignal")),
+            "MACDHist": _safe_float(last.get("MACDHist")),
+            "Volume": _safe_float(last.get("Volume")),
+            "Avg20Vol": _safe_float(last.get("Avg20Vol")),
+            "ATR14": _safe_float(last.get("ATR14")),
+        },
+        "ScenarioBase": scenario,
+        "Scenario12": scenario12,
+        "Conviction": conviction,
+        "Fibonacci": {
+            "ShortWindow": dual_fib.get("short_window"),
+            "LongWindow": dual_fib.get("long_window"),
+            "SelectionReason": dual_fib.get("selection_reason", "N/A"),
+        },
+        "Fundamental": {
+            "Recommendation": fund_row.get("Recommendation", "N/A") if fund_row else "N/A",
+            "TargetVND": target_vnd,
+            "TargetK": (target_vnd / 1000.0) if pd.notna(target_vnd) else np.nan,
+            "UpsidePct": upside_pct,
+        },
+        "TradePlans": [
+            {
+                "Name": k,
+                "Entry": _safe_float(v.entry),
+                "Stop": _safe_float(v.stop),
+                "TP": _safe_float(v.tp),
+                "RR": _safe_float(v.rr),
+                "Probability": v.probability,
+                "Notes": v.notes
+            } for k, v in (trade_plans or {}).items()
+        ],
+        "RRSim": rrsim,
+        "MasterScore": master,
+        "ProTech": {"MA": ma_feat, "RSI": rsi_feat, "MACD": macd_feat, "Volume": vol_feat},
+        "Market": {"VNINDEX": market_ctx.get("VNINDEX", {}), "VN30": market_ctx.get("VN30", {}), "StockChangePct": stock_chg, "RelativeStrengthVsVNINDEX": rel},
+    }
+
+    analysis_pack["PrimarySetup"] = pick_primary_setup(rrsim)
+
+    return {"Ticker": ticker.upper(), "Last": last.to_dict(), "Scenario": scenario, "Conviction": conviction, "Fundamental": fund_row, "AnalysisPack": analysis_pack}
+
+
+# ============================================================
+# 11. GPT REPORT
+# ============================================================
+
+def generate_insight_report(data: Dict[str, Any]) -> str:
+    if "Error" in data:
+        return f"Loi: {data['Error']}"
+
+    tick = data["Ticker"]
+    scenario = data["Scenario"]
+    conviction = data["Conviction"]
+    analysis_pack = data.get("AnalysisPack", {})
+
+    last = data["Last"]
+    close = _fmt_price(last.get("Close"))
+    header_html = f"<h2 style='margin:0; padding:0; font-size:26px; line-height:1.2;'>{tick} — {close} | Diem tin cay: {conviction:.1f}/10 | {_scenario_vi(scenario)}</h2>"
+
+    fund = analysis_pack.get("Fundamental", {}) or {}
+    fund_text = (
+        f"Khuyen nghi: {fund.get('Recommendation', 'N/A')} | "
+        f"Gia muc tieu: {_fmt_thousand(fund.get('TargetVND'))} | "
+        f"Upside: {_fmt_pct(fund.get('UpsidePct'))}"
+        if fund else "Khong co du lieu co ban"
+    )
+
+    pack_json = json.dumps(analysis_pack, ensure_ascii=False)
+    primary = (analysis_pack.get("PrimarySetup") or {})
+
+    prompt = f"""
+Ban la chuyen gia phan tich chung khoan, van phong muot ma, ro rang.
+TUYET DOI:
+- Khong bia so.
+- Khong tu tinh bat ky con so nao.
+- Khong copy/paste nguyen chuoi ky thuat dang "label=...; label=...".
+- Chi dung du lieu trong JSON "AnalysisPack".
+
+YEU CAU FORMAT OUTPUT (bat buoc dung dung):
+A. Ky thuat
+1) ...
+2) ...
+3) ...
+4) ...
+5) ...
+6) ...
+7) ...
+8) ...
+
+B. Co ban
+...
+
+C. Trade plan
+...
+
+D. Rui ro vs loi nhuan
+Risk%: ...
+Reward%: ...
+RR: ...
+Probability: ...
+
+Goi y noi dung A:
+- Dien giai tu ProTech (MA/RSI/MACD/Volume) va Scenario12 + MasterScore.
+- Moi dong 1–2 con so toi da, uu tien nhan dinh.
+
+Muc B: dung dung dong: {fund_text}
+
+KHOA CUNG MUC D (copy dung gia tri, khong them/bot):
+Risk%: {primary.get('RiskPct')}
+Reward%: {primary.get('RewardPct')}
+RR: {primary.get('RR')}
+Probability: {primary.get('Probability')}
+
+Du lieu JSON:
+{pack_json}
+"""
+
+    try:
+        content = call_gpt_with_guard(prompt, analysis_pack, max_retry=2)
+    except Exception as e:
+        content = f"Loi khi goi GPT: {e}"
+
+    return f"{header_html}\n\n{content}"
+
+
+# ============================================================
+# 12. UI
+# ============================================================
+
+st.markdown("<h1 style='color:#A855F7; margin-bottom:6px;'>INCEPTION v5.0</h1>", unsafe_allow_html=True)
+st.divider()
+
+with st.sidebar:
+    st.markdown("### Dang nhap nguoi dung")
+    user_key = st.text_input("Nhap Ma VIP:", type="password")
+    ticker_input = st.text_input("Ma Co Phieu:", value="VCB").upper()
+    run_btn = st.button("Phan tich", type="primary", use_container_width=True)
+
+# ============================================================
+# 13. MAIN
+# ============================================================
+
+if run_btn:
+    if user_key not in VALID_KEYS:
+        st.error("Ma VIP khong dung. Vui long nhap lai.")
+    else:
+        with st.spinner(f"Dang xu ly phan tich {ticker_input}..."):
+            try:
+                result = analyze_ticker(ticker_input)
+                report = generate_insight_report(result)
+                st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown(report, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Loi xu ly: {e}")
+
+# ============================================================
+# 14. FOOTER
+# ============================================================
+
+st.divider()
+st.markdown(
+    """
+    <p style='text-align:center; color:#6B7280; font-size:13px;'>
+    INCEPTION v5.0
+    </p>
+    """,
+    unsafe_allow_html=True
+)
