@@ -37,30 +37,30 @@ strong {
 h1, h2, h3 {
     color: #E5E7EB;
 }
+
+/* Sidebar button styling */
+.stButton>button {
+    width: 100% !important;
+    color: #FFFFFF !important;
+    font-weight: 700 !important;
+    border-radius: 12px !important;
+    height: 44px !important;
+    border: 1px solid rgba(255,255,255,0.14) !important;
+    background: linear-gradient(180deg, rgba(28,28,28,1) 0%, rgba(10,10,10,1) 100%) !important;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.35) !important;
+}
+.stButton>button:hover {
+    background: linear-gradient(180deg, rgba(36,36,36,1) 0%, rgba(12,12,12,1) 100%) !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
+}
+
+/* Larger report header */
 .report-header {
     font-size: 28px;
     font-weight: 800;
-    color: #E5E7EB;
+    color: #FFFFFF;
     margin: 8px 0 14px 0;
-}
-.report-body {
-    color: #E5E7EB;
-    white-space: pre-wrap;
-    line-height: 1.6;
-}
-.stButton>button {
-    width: 100%;
-    background: linear-gradient(180deg, #111827 0%, #000000 100%);
-    color: white;
-    font-weight: 800;
-    border-radius: 12px;
-    height: 44px;
-    border: 1px solid #1F2937;
-    box-shadow: 0px 6px 14px rgba(0,0,0,0.45);
-}
-.stButton>button:hover {
-    background: linear-gradient(180deg, #0F172A 0%, #000000 100%);
-    border: 1px solid #374151;
+    line-height: 1.2;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -113,6 +113,15 @@ def _round_price(x: float, ndigits: int = 2) -> float:
 def _isnan(x) -> bool:
     try: return x is None or (isinstance(x, float) and np.isnan(x))
     except: return True
+
+def _scenario_vi(s: str) -> str:
+    m = {
+        "Uptrend – Breakout Confirmation": "Xu hướng tăng — Xác nhận bứt phá",
+        "Uptrend – Pullback Phase": "Xu hướng tăng — Nhịp điều chỉnh",
+        "Downtrend – Weak Phase": "Xu hướng giảm — Pha yếu",
+        "Neutral / Sideways": "Đi ngang — Trung tính"
+    }
+    return m.get(s, s)
 
 # ============================================================
 # 4. LOADERS
@@ -216,7 +225,7 @@ def macd(close, fast=12, slow=26, signal=9):
     return macd_line, signal_line, hist
 
 # ============================================================
-# 6. FIBONACCI DUAL-FRAME (PYTHON AUTO-SELECT 60/90 + LONG 250)
+# 6. FIBONACCI DUAL-FRAME (SHORT AUTO 60/90 + LONG 250)
 # ============================================================
 
 def _fib_levels(low, high):
@@ -231,26 +240,22 @@ def _fib_levels(low, high):
     }
 
 def _choose_short_fib_window(df: pd.DataFrame) -> int:
-    """
-    Python tự chọn 60 hoặc 90 dựa trên biến động gần đây.
-    - Nếu biến động 20 phiên cao hơn đáng kể so với 60 phiên -> ưu tiên 60 (nhạy hơn).
-    - Ngược lại -> ưu tiên 90 (ổn định hơn).
-    """
     if df is None or df.empty:
         return 60
+    if len(df) < 60:
+        return max(20, len(df))
     if len(df) < 90:
-        return 60 if len(df) >= 60 else max(20, len(df))
-
-    rng = (df["High"] - df["Low"]).astype(float)
-    vol20 = float(rng.tail(20).mean()) if len(rng) >= 20 else float(rng.mean())
-    vol60 = float(rng.tail(60).mean()) if len(rng) >= 60 else float(rng.mean())
-
-    if (pd.notna(vol20) and pd.notna(vol60) and vol60 != 0) and (vol20 / vol60 >= 1.12):
         return 60
-    return 90
+    r = df["Close"].pct_change()
+    vol20 = float(r.tail(20).std()) if len(r) >= 20 else np.nan
+    vol60 = float(r.tail(60).std()) if len(r) >= 60 else np.nan
+    if pd.notna(vol20) and pd.notna(vol60) and vol60 != 0:
+        return 60 if (vol20 / vol60) >= 1.15 else 90
+    return 60
 
 def compute_dual_fibonacci(df: pd.DataFrame, long_window: int = 250) -> Dict[str, Any]:
     short_window = _choose_short_fib_window(df)
+
     L_short = short_window if len(df) >= short_window else len(df)
     L_long = long_window if len(df) >= long_window else len(df)
 
@@ -308,6 +313,9 @@ def build_trade_plan(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, Tr
     ma50 = last["MA50"]
 
     fib_short = dual_fib["auto_short"]["levels"]
+    fib_long = dual_fib["fixed_long"]["levels"]
+    fib_hi = dual_fib["auto_short"]["swing_high"]
+    fib_lo = dual_fib["auto_short"]["swing_low"]
 
     # Basic reference levels
     res_zone = fib_short.get("61.8", close * 1.05)
@@ -316,7 +324,7 @@ def build_trade_plan(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, Tr
     # === Breakout Setup ===
     entry_b = _round_price(res_zone * 1.01)
     stop_b = _round_price(max(ma20 * 0.985, sup_zone * 0.99))
-    tp_b = _round_price(entry_b * 1.25)
+    tp_b = _round_price(entry_b * 1.25)  # default 25% upside
     rr_b = _compute_rr(entry_b, stop_b, tp_b)
 
     # === Pullback Setup ===
@@ -325,6 +333,7 @@ def build_trade_plan(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, Tr
     tp_p = _round_price(entry_p * 1.20)
     rr_p = _compute_rr(entry_p, stop_p, tp_p)
 
+    # Filter RR < 2.5
     setups = {}
     if rr_b >= 2.5:
         setups["Breakout"] = TradeSetup("Breakout", entry_b, stop_b, tp_b, rr_b, "Cao")
@@ -339,6 +348,8 @@ def build_trade_plan(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, Tr
 
 def classify_scenario(last: pd.Series) -> str:
     c, ma20, ma50, ma200 = last["Close"], last["MA20"], last["MA50"], last["MA200"]
+    rsi, macd_v, sig = last["RSI"], last["MACD"], last["MACDSignal"]
+
     if all(pd.notna([c, ma20, ma50, ma200])):
         if ma20 > ma50 > ma200 and c > ma20:
             return "Uptrend – Breakout Confirmation"
@@ -347,15 +358,6 @@ def classify_scenario(last: pd.Series) -> str:
         elif c < ma200 and ma50 < ma200:
             return "Downtrend – Weak Phase"
     return "Neutral / Sideways"
-
-def _scenario_vi(s: str) -> str:
-    mapping = {
-        "Uptrend – Breakout Confirmation": "Xu hướng tăng – Xác nhận bứt phá",
-        "Uptrend – Pullback Phase": "Xu hướng tăng – Pha điều chỉnh",
-        "Downtrend – Weak Phase": "Xu hướng giảm – Yếu",
-        "Neutral / Sideways": "Trung tính / Đi ngang",
-    }
-    return mapping.get(s, s)
 
 # ============================================================
 # 9B. 12-SCENARIO CLASSIFICATION (PYTHON-ONLY)
@@ -373,6 +375,7 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
 
     rules_hit = []
 
+    # Trend regime (3)
     trend = "Neutral"
     if pd.notna(c) and pd.notna(ma50) and pd.notna(ma200):
         if c >= ma50 and ma50 >= ma200:
@@ -385,6 +388,7 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
             trend = "Neutral"
             rules_hit.append("Trend=Neutral (mixed MA structure)")
 
+    # Momentum regime (4)
     mom = "Neutral"
     if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
         if (rsi >= 55) and (macd_v >= sig):
@@ -400,28 +404,33 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
             mom = "Neutral"
             rules_hit.append("Momentum=Neutral (between zones)")
 
+    # Volume regime (informational)
     vol_reg = "N/A"
     if pd.notna(vol) and pd.notna(avg_vol):
         vol_reg = "High" if vol > avg_vol else "Low"
         rules_hit.append(f"Volume={vol_reg} (Vol {'>' if vol>avg_vol else '<='} Avg20Vol)")
 
+    # 12 scenarios = Trend(3) x Momentum(4)
     trend_order = {"Up": 0, "Neutral": 1, "Down": 2}
     mom_order = {"Bull": 0, "Neutral": 1, "Bear": 2, "Exhaust": 3}
-    code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1
+
+    code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1  # 1..12
 
     name_map = {
-        ("Up","Bull"): "S1 – Uptrend + Bullish Momentum",
-        ("Up","Neutral"): "S2 – Uptrend + Neutral Momentum",
-        ("Up","Bear"): "S3 – Uptrend + Bearish Pullback",
-        ("Up","Exhaust"): "S4 – Uptrend + Overbought/Exhaust",
-        ("Neutral","Bull"): "S5 – Range + Bullish Attempt",
-        ("Neutral","Neutral"): "S6 – Range + Balanced",
-        ("Neutral","Bear"): "S7 – Range + Bearish Pressure",
-        ("Neutral","Exhaust"): "S8 – Range + Overbought Risk",
-        ("Down","Bull"): "S9 – Downtrend + Short-covering Bounce",
-        ("Down","Neutral"): "S10 – Downtrend + Weak Stabilization",
-        ("Down","Bear"): "S11 – Downtrend + Bearish Momentum",
-        ("Down","Exhaust"): "S12 – Downtrend + Overbought Rebound Risk",
+        ( "Up","Bull" ): "S1 – Uptrend + Bullish Momentum",
+        ( "Up","Neutral" ): "S2 – Uptrend + Neutral Momentum",
+        ( "Up","Bear" ): "S3 – Uptrend + Bearish Pullback",
+        ( "Up","Exhaust" ): "S4 – Uptrend + Overbought/Exhaust",
+
+        ( "Neutral","Bull" ): "S5 – Range + Bullish Attempt",
+        ( "Neutral","Neutral" ): "S6 – Range + Balanced",
+        ( "Neutral","Bear" ): "S7 – Range + Bearish Pressure",
+        ( "Neutral","Exhaust" ): "S8 – Range + Overbought Risk",
+
+        ( "Down","Bull" ): "S9 – Downtrend + Short-covering Bounce",
+        ( "Down","Neutral" ): "S10 – Downtrend + Weak Stabilization",
+        ( "Down","Bear" ): "S11 – Downtrend + Bearish Momentum",
+        ( "Down","Exhaust" ): "S12 – Downtrend + Overbought Rebound Risk",
     }
 
     return {
@@ -449,8 +458,10 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
 
     upside_pct = _safe_float(fund_row.get("UpsidePct"))
 
+    # Components (0..2 each), total 0..10-ish
     comps = {}
 
+    # Trend component
     trend = 0.0
     if pd.notna(c) and pd.notna(ma50) and pd.notna(ma200):
         if (c >= ma50) and (ma50 >= ma200):
@@ -461,6 +472,7 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             trend = 0.4
     comps["Trend"] = trend
 
+    # Momentum component
     mom = 0.0
     if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
         if (rsi >= 55) and (macd_v >= sig):
@@ -471,11 +483,13 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             mom = 1.1
     comps["Momentum"] = mom
 
+    # Volume component
     vcomp = 0.0
     if pd.notna(vol) and pd.notna(avg_vol):
         vcomp = 1.6 if vol > avg_vol else 0.9
     comps["Volume"] = vcomp
 
+    # Fibonacci positioning component (uses selected short + long)
     fibc = 0.0
     try:
         s_lv = dual_fib.get("auto_short", {}).get("levels", {})
@@ -502,8 +516,9 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
                 fibc += 0.2
     except:
         fibc = 0.0
-    comps["Fibonacci"] = fibc
+    comps["Fibonacci"] = fibc  # 0..2.0
 
+    # TradePlan / RR component
     best_rr = np.nan
     if trade_plans:
         rrs = [s.rr for s in trade_plans.values() if pd.notna(s.rr)]
@@ -518,6 +533,7 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
             rrcomp = 1.0
     comps["RRQuality"] = rrcomp
 
+    # Fundamental component (Upside)
     fcomp = 0.0
     if pd.notna(upside_pct):
         if upside_pct >= 25:
@@ -531,6 +547,7 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
     comps["FundamentalUpside"] = fcomp
 
     total = float(sum(comps.values()))
+    # Map to tier & sizing guidance (deterministic)
     if total >= 9.0:
         tier = "A+"
         sizing = "Aggressive (2.0x) if risk control ok"
@@ -588,253 +605,6 @@ def build_rr_sim(trade_plans: Dict[str, TradeSetup]) -> Dict[str, Any]:
     }
 
 # ============================================================
-# 9E. PRICE ACTION FEATURES PACK (PYTHON-ONLY)  <<< ADDED
-# ============================================================
-
-def _atr_wilder(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    h = df["High"].astype(float)
-    l = df["Low"].astype(float)
-    c = df["Close"].astype(float)
-    prev_c = c.shift(1)
-    tr = pd.concat([(h - l), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
-    return atr
-
-def _pct(x, denom):
-    if pd.isna(x) or pd.isna(denom) or denom == 0:
-        return np.nan
-    return float(x) / float(denom) * 100.0
-
-def _near_level(close: float, level: float, atr: float, pct_th: float = 0.8, atr_th: float = 0.25) -> bool:
-    if any(pd.isna([close, level])):
-        return False
-    dist_pct = abs(close - level) / close * 100.0 if close != 0 else np.nan
-    if pd.notna(dist_pct) and dist_pct <= pct_th:
-        return True
-    if pd.notna(atr) and atr != 0:
-        if abs(close - level) <= atr_th * atr:
-            return True
-    return False
-
-def build_price_action_pack(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    3-layer PA pack:
-    - Candle anatomy: body%, wick%, range percentile, gap
-    - Core patterns: doji/pinbar/engulfing/inside-outside
-    - Context: near MA/Fib + volume regime + confirm/exhaust label
-    """
-    if df is None or df.empty or len(df) < 3:
-        return {"Error": "Not enough bars"}
-
-    d = df.copy()
-
-    # Required columns
-    for col in ["Open", "High", "Low", "Close", "Volume"]:
-        if col not in d.columns:
-            return {"Error": f"Missing column: {col}"}
-
-    # Range/ATR
-    d["Range"] = (d["High"].astype(float) - d["Low"].astype(float))
-    d["ATR14"] = _atr_wilder(d, 14)
-    last = d.iloc[-1]
-    prev = d.iloc[-2]
-
-    o = _safe_float(last["Open"])
-    h = _safe_float(last["High"])
-    l = _safe_float(last["Low"])
-    c = _safe_float(last["Close"])
-    prev_o = _safe_float(prev["Open"])
-    prev_h = _safe_float(prev["High"])
-    prev_l = _safe_float(prev["Low"])
-    prev_c = _safe_float(prev["Close"])
-
-    rng = _safe_float(last["Range"])
-    atr = _safe_float(last["ATR14"])
-    avg_rng20 = _safe_float(d["Range"].tail(20).mean())
-
-    # Candle anatomy
-    body = abs(c - o) if pd.notna(c) and pd.notna(o) else np.nan
-    upper_wick = (h - max(o, c)) if pd.notna(h) and pd.notna(o) and pd.notna(c) else np.nan
-    lower_wick = (min(o, c) - l) if pd.notna(l) and pd.notna(o) and pd.notna(c) else np.nan
-
-    body_pct = _pct(body, rng)
-    upper_wick_pct = _pct(upper_wick, rng)
-    lower_wick_pct = _pct(lower_wick, rng)
-
-    # Range percentile vs last N days
-    N = 60 if len(d) >= 60 else len(d)
-    range_window = d["Range"].tail(N)
-    range_pctile = np.nan
-    if len(range_window) >= 5 and pd.notna(rng):
-        # Percentile rank of last range within window
-        rank = range_window.rank(pct=True)
-        range_pctile = float(rank.iloc[-1] * 100.0)
-
-    # Gap detection
-    gap_type = "None"
-    gap_pct = np.nan
-    if pd.notna(o) and pd.notna(prev_h) and pd.notna(prev_l) and pd.notna(prev_c) and prev_c != 0:
-        if o > prev_h:
-            gap_type = "GapUp"
-            gap_pct = (o - prev_h) / prev_c * 100.0
-        elif o < prev_l:
-            gap_type = "GapDown"
-            gap_pct = (prev_l - o) / prev_c * 100.0
-
-    # Core patterns (1-2 bar)
-    patterns = []
-
-    # Doji
-    if pd.notna(body_pct) and body_pct <= 10:
-        patterns.append("Doji")
-
-    # Hammer / Shooting Star (Pin bar)
-    # Hammer: long lower wick, small body near top
-    if pd.notna(lower_wick) and pd.notna(body) and pd.notna(upper_wick):
-        if (lower_wick >= 2.0 * body) and (upper_wick <= 0.35 * body):
-            patterns.append("Hammer/PinBarBull")
-        if (upper_wick >= 2.0 * body) and (lower_wick <= 0.35 * body):
-            patterns.append("ShootingStar/PinBarBear")
-
-    # Engulfing
-    bull_engulf = False
-    bear_engulf = False
-    if all(pd.notna([o, c, prev_o, prev_c])):
-        bull_engulf = (c > o) and (prev_c < prev_o) and (c >= prev_o) and (o <= prev_c)
-        bear_engulf = (c < o) and (prev_c > prev_o) and (c <= prev_o) and (o >= prev_c)
-    if bull_engulf:
-        patterns.append("BullishEngulfing")
-    if bear_engulf:
-        patterns.append("BearishEngulfing")
-
-    # Inside / Outside bar
-    inside = False
-    outside = False
-    if all(pd.notna([h, l, prev_h, prev_l])):
-        inside = (h <= prev_h) and (l >= prev_l)
-        outside = (h >= prev_h) and (l <= prev_l)
-    if inside:
-        patterns.append("InsideBar")
-    if outside:
-        patterns.append("OutsideBar")
-
-    # Context: near MA & Fib
-    near_ma = []
-    near_fib = []
-    near_levels = []
-
-    ma20 = _safe_float(last.get("MA20"))
-    ma50 = _safe_float(last.get("MA50"))
-    ma200 = _safe_float(last.get("MA200"))
-
-    if _near_level(c, ma20, atr):
-        near_ma.append("MA20")
-        near_levels.append("MA20")
-    if _near_level(c, ma50, atr):
-        near_ma.append("MA50")
-        near_levels.append("MA50")
-    if _near_level(c, ma200, atr):
-        near_ma.append("MA200")
-        near_levels.append("MA200")
-
-    s_lv = dual_fib.get("auto_short", {}).get("levels", {})
-    for k in ["38.2", "50.0", "61.8"]:
-        lv = _safe_float(s_lv.get(k))
-        if _near_level(c, lv, atr):
-            near_fib.append(f"FiboS{k}")
-            near_levels.append(f"FiboS{k}")
-
-    l_lv = dual_fib.get("fixed_long", {}).get("levels", {})
-    for k in ["38.2", "50.0", "61.8"]:
-        lv = _safe_float(l_lv.get(k))
-        if _near_level(c, lv, atr):
-            near_fib.append(f"FiboL{k}")
-            near_levels.append(f"FiboL{k}")
-
-    # Volume regime
-    avg20_vol = _safe_float(last.get("Avg20Vol"))
-    vol = _safe_float(last.get("Volume"))
-    vol_ratio = (vol / avg20_vol) if (pd.notna(vol) and pd.notna(avg20_vol) and avg20_vol != 0) else np.nan
-
-    vol_regime = "N/A"
-    if pd.notna(vol_ratio):
-        if vol_ratio >= 1.8:
-            vol_regime = "Spike"
-        elif vol_ratio >= 1.2:
-            vol_regime = "High"
-        elif vol_ratio <= 0.8:
-            vol_regime = "Low"
-        else:
-            vol_regime = "Normal"
-
-    # Confirmation vs Exhaustion label (deterministic)
-    # Confirmation: High/Spike volume + close near extreme in direction
-    # Exhaustion: High/Spike volume + long wick (pin/doji) or over-extended range percentile high
-    candle_dir = "Neutral"
-    if pd.notna(c) and pd.notna(o):
-        candle_dir = "Bull" if c > o else ("Bear" if c < o else "Neutral")
-
-    close_pos = np.nan
-    if pd.notna(rng) and rng != 0 and pd.notna(c) and pd.notna(l):
-        close_pos = (c - l) / rng  # 0..1
-
-    pa_signal = "Neutral"
-    if vol_regime in ["High", "Spike"]:
-        # confirmation
-        if (candle_dir == "Bull") and pd.notna(close_pos) and (close_pos >= 0.75) and ("BearishEngulfing" not in patterns):
-            pa_signal = "ConfirmationBull"
-        elif (candle_dir == "Bear") and pd.notna(close_pos) and (close_pos <= 0.25) and ("BullishEngulfing" not in patterns):
-            pa_signal = "ConfirmationBear"
-        else:
-            # exhaustion heuristics
-            exhaustion_hit = False
-            if ("Doji" in patterns) or ("ShootingStar/PinBarBear" in patterns) or ("Hammer/PinBarBull" in patterns):
-                exhaustion_hit = True
-            if pd.notna(range_pctile) and range_pctile >= 85:
-                exhaustion_hit = True
-            pa_signal = "Exhaustion" if exhaustion_hit else "Neutral"
-
-    # Friendly hint labels (so GPT doesn't need to invent)
-    pattern_primary = patterns[0] if patterns else "None"
-    context_primary = ", ".join(near_levels[:3]) if near_levels else "None"
-    vol_label = vol_regime
-
-    return {
-        "CandleAnatomy": {
-            "BodyPct": body_pct,
-            "UpperWickPct": upper_wick_pct,
-            "LowerWickPct": lower_wick_pct
-        },
-        "Range": {
-            "Range": rng,
-            "ATR14": atr,
-            "AvgRange20": avg_rng20,
-            "RangePctileN": range_pctile,
-            "N": int(N)
-        },
-        "Gap": {
-            "Type": gap_type,
-            "GapPct": gap_pct
-        },
-        "Patterns": patterns,
-        "PatternPrimary": pattern_primary,
-        "Context": {
-            "NearMA": near_ma,
-            "NearFibo": near_fib,
-            "NearLevels": near_levels,
-            "ContextPrimary": context_primary
-        },
-        "Volume": {
-            "Regime": vol_label,
-            "VolRatioToAvg20": vol_ratio
-        },
-        "Signal": {
-            "CandleDir": candle_dir,
-            "PA_Signal": pa_signal
-        }
-    }
-
-# ============================================================
 # 10. MAIN ANALYSIS FUNCTION
 # ============================================================
 
@@ -855,7 +625,7 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     m, s, h = macd(df["Close"], 12, 26, 9)
     df["MACD"], df["MACDSignal"], df["MACDHist"] = m, s, h
 
-    dual_fib = compute_dual_fibonacci(df)
+    dual_fib = compute_dual_fibonacci(df, long_window=250)
     last = df.iloc[-1]
 
     conviction = compute_conviction(last)
@@ -866,41 +636,41 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     fund = hsc[hsc["Ticker"].str.upper() == ticker.upper()]
     fund_row = fund.iloc[0].to_dict() if not fund.empty else {}
 
-    # --- Target normalization + Upside calc (unit-safe) ---
-    close_raw = _safe_float(last.get("Close"), np.nan)
+    close_val = _safe_float(last.get("Close"), np.nan)
     target_raw = _safe_float(fund_row.get("Target"), np.nan)
 
+    # Normalize target units to match Close units to avoid Upside blow-up
+    # Heuristic: if Close looks like "k" (e.g., 30.5) and Target looks like VND (e.g., 42500) => convert Target to k
+    target_in_close_unit = target_raw
     target_vnd = np.nan
     target_k = np.nan
+
     if pd.notna(target_raw):
         if target_raw < 1000:
-            target_k = float(target_raw)
-            target_vnd = float(target_raw) * 1000.0
+            target_k = target_raw
+            target_vnd = target_raw * 1000
         else:
-            target_vnd = float(target_raw)
-            target_k = float(target_raw) / 1000.0
+            target_vnd = target_raw
+            target_k = target_raw / 1000
 
-    # Align close to same unit as target for upside
-    close_for_upside = close_raw
-    if pd.notna(close_raw) and pd.notna(target_vnd):
-        # If close looks like "30.5" while target is "42,500" -> close likely in thousand
-        if close_raw < 1000 and target_vnd >= 1000:
-            close_for_upside = close_raw * 1000.0
+    if pd.notna(close_val) and pd.notna(target_raw):
+        if (close_val < 1000) and (target_raw > 1000):
+            target_in_close_unit = target_raw / 1000
+        elif (close_val > 1000) and (target_raw < 1000):
+            target_in_close_unit = target_raw * 1000
+        else:
+            target_in_close_unit = target_raw
 
-    upside_pct = np.nan
-    if pd.notna(target_vnd) and pd.notna(close_for_upside) and close_for_upside != 0:
-        upside_pct = (target_vnd - close_for_upside) / close_for_upside * 100.0
+    upside_pct = ((target_in_close_unit - close_val) / close_val * 100) if (pd.notna(target_in_close_unit) and pd.notna(close_val) and close_val != 0) else np.nan
 
-    fund_row["Target"] = target_vnd
+    fund_row["Target"] = target_raw
+    fund_row["TargetK"] = target_k
+    fund_row["TargetVND"] = target_vnd
     fund_row["UpsidePct"] = upside_pct
-    fund_row["Recommendation"] = fund_row.get("Recommendation", "N/A") if fund_row else "N/A"
 
     scenario12 = classify_scenario12(last)
     rrsim = build_rr_sim(trade_plans)
     master = compute_master_score(last, dual_fib, trade_plans, fund_row)
-
-    # --- Price Action pack (ADDED) ---
-    pa_pack = build_price_action_pack(df, dual_fib)
 
     analysis_pack = {
         "Ticker": ticker.upper(),
@@ -942,8 +712,7 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
             } for k, v in trade_plans.items()
         ],
         "RRSim": rrsim,
-        "MasterScore": master,
-        "PriceAction": pa_pack
+        "MasterScore": master
     }
 
     return {
@@ -964,61 +733,88 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
 # 11. GPT-4 TURBO STRATEGIC INSIGHT GENERATION
 # ============================================================
 
-def generate_insight_report(data: Dict[str, Any]) -> Tuple[str, str]:
+def generate_insight_report(data: Dict[str, Any]) -> str:
+    """
+    Hàm này gửi dữ liệu kỹ thuật và cơ bản sang GPT-4 Turbo
+    để tạo báo cáo phân tích theo chuẩn Strategic Commentary.
+    """
     if "Error" in data:
-        return "❌ Lỗi", f"❌ {data['Error']}"
+        return f"❌ {data['Error']}"
 
     tick = data["Ticker"]
     last = data["Last"]
-    scenario = data["Scenario"]
+    fund = data.get("Fundamental", {}) or {}
     conviction = data["Conviction"]
+    scenario = data["Scenario"]
     analysis_pack = data.get("AnalysisPack", {})
 
     close = _fmt_price(last.get("Close"))
-    header = f"{tick} — {close} | Điểm tin cậy: {conviction:.1f}/10 | {_scenario_vi(scenario)}"
+    scenario_vi = _scenario_vi(scenario)
+
+    header = f"{tick} — {close} | Điểm tin cậy: {conviction:.1f}/10 | {scenario_vi}"
+
+    # Fundamental (Target displayed in thousand, without unit label)
+    fund_text = (
+        f"Khuyến nghị: {fund.get('Recommendation', 'N/A')} | "
+        f"Giá mục tiêu: {_fmt_price(fund.get('TargetK'), 1)} | "
+        f"Upside: {_fmt_pct(fund.get('UpsidePct'))}"
+        if fund else "Không có dữ liệu cơ bản"
+    )
 
     pack_json = json.dumps(analysis_pack, ensure_ascii=False)
 
-    prompt = f"""
-Bạn là chuyên gia chứng khoán cao cấp. Hãy viết báo cáo rõ ràng, mạch lạc, thân thiện, nói với "bạn".
-
-QUY TẮC BẮT BUỘC:
-- Tuyệt đối KHÔNG bịa số liệu.
-- Tuyệt đối KHÔNG tự tính toán bất kỳ con số nào.
-- Chỉ dùng đúng dữ liệu trong JSON "AnalysisPack" bên dưới.
-- Mỗi câu tối đa 1–2 con số. Ưu tiên nhãn/kết luận đã có trong pack.
-
-OUTPUT FORMAT BẮT BUỘC (không thêm mục khác):
+    OUTPUT_FORMAT = """
+OUTPUT FORMAT (BẮT BUỘC):
+- Chỉ được xuất đúng 4 mục, đúng thứ tự, đúng tiêu đề Markdown (không thêm/bớt):
 ### A. Kỹ thuật
-1) MA Trend
-2) RSI
-3) MACD
-4) RSI + MACD Bias
-5) Fibonacci (2 khung Short/Long)
-6) Volume & Price Action (BẮT BUỘC dùng AnalysisPack.PriceAction: Patterns/Signal/Context/Volume)
-7) 12-Scenario (Scenario12)
-8) MasterScore (Tier + PositionSizing)
-
 ### B. Cơ bản
-- Dùng AnalysisPack.Fundamental: Recommendation, TargetK, UpsidePct
-- Giá mục tiêu hiển thị dạng số "ngàn" (TargetK), không ghi đơn vị.
-
 ### C. Trade plan
-- Chỉ dựa trên AnalysisPack.TradePlans, không tự chế.
-
 ### D. Rủi ro vs lợi nhuận
-- Chỉ dựa trên AnalysisPack.RRSim (RiskPct, RewardPct, RR, Probability)
+
+- Trong mục A. Kỹ thuật: bắt buộc có đúng 8 ý, đánh số từ 1 đến 8, đúng thứ tự sau:
+  (Bạn có thể viết 2–3 câu mở đầu ngắn trước danh sách, nhưng danh sách vẫn phải đủ 8 ý.)
+1. MA Trend:
+2. RSI:
+3. MACD:
+4. RSI + MACD Bias:
+5. Fibonacci (2 khung Short/Long):
+6. Volume & Price Action:
+7. 12-Scenario:
+8. MasterScore:
+
+- Tuyệt đối KHÔNG dùng emoji bullets (1️⃣2️⃣3️⃣…), KHÔNG ghi “Executive Summary”, KHÔNG viết dồn thành 1 đoạn văn dài.
+- Văn phong thân thiện, nói với “bạn”, ngắn gọn, mượt, dễ hiểu.
+- Mỗi câu chỉ dùng tối đa 1–2 con số; không liệt kê dày đặc.
+- Không trình bày các cờ nội bộ/flag không cần thiết.
+"""
+
+    prompt = f"""
+Bạn là chuyên gia phân tích chiến lược của một công ty chứng khoán cao cấp.
+
+QUY TẮC BẮT BUỘC (FRAME-LOCK):
+- Tuyệt đối KHÔNG bịa số liệu.
+- Tuyệt đối KHÔNG tự tính toán bất kỳ con số nào (kể cả cộng/trừ/nhân/chia).
+- Chỉ được phép sử dụng đúng dữ liệu trong JSON "AnalysisPack" bên dưới.
+- Nếu thiếu dữ liệu thì ghi rõ "N/A" và không suy diễn.
+
+{OUTPUT_FORMAT}
+
+Gợi ý nội dung theo dữ liệu có sẵn:
+- Kỹ thuật: dùng Last, Fibonacci (Short/Long), Scenario12, MasterScore.
+- Cơ bản: dùng Fundamental (Recommendation, TargetK, UpsidePct). Dữ liệu tóm tắt: {fund_text}
+- Trade plan: dùng TradePlans (Entry/Stop/TP/RR/Probability).
+- Rủi ro vs lợi nhuận: dùng RRSim (RiskPct/RewardPct/RR/Probability).
 
 Dữ liệu (AnalysisPack JSON):
 {pack_json}
 """
 
     try:
-        client = OpenAI()
+        client = OpenAI()  # Key lấy tự động từ môi trường
         response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
-                {"role": "system", "content": "Bạn là INCEPTION AI."},
+                {"role": "system", "content": "Bạn là INCEPTION AI, chuyên gia phân tích đầu tư chiến lược."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
@@ -1056,8 +852,23 @@ if run_btn:
         with st.spinner(f"Đang phân tích {ticker_input}..."):
             try:
                 result = analyze_ticker(ticker_input)
-                header_text, report = generate_insight_report(result)
-                st.markdown(f"<div class='report-header'>{header_text}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='report-body'>{report}</div>", unsafe_allow_html=True)
+                header, report = generate_insight_report(result)
+                st.markdown(f"<div class='report-header'>{header}</div>", unsafe_allow_html=True)
+                st.markdown(report)
             except Exception as e:
                 st.error(f"⚠️ Lỗi xử lý: {e}")
+
+# ============================================================
+# 14. FOOTER
+# ============================================================
+
+st.divider()
+st.markdown(
+    """
+    <p style='text-align:center; color:#6B7280; font-size:13px;'>
+    © 2025 INCEPTION Research Framework<br>
+    Phiên bản 4.6
+    </p>
+    """,
+    unsafe_allow_html=True
+)
