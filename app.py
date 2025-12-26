@@ -781,28 +781,53 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
 
     fund_text = f"Khuyến nghị: {rec} | Giá mục tiêu: {_fmt_price(target_k, 1)} | Upside: {_fmt_pct(upside_pct)}"
 
+        # === Prompt ===
     pack_json = json.dumps(analysis_pack, ensure_ascii=False)
 
+    OUTPUT_FORMAT = """
+OUTPUT FORMAT (BẮT BUỘC):
+- Chỉ được xuất đúng 4 mục, đúng thứ tự, đúng tiêu đề Markdown (không thêm/bớt):
+### A. Kỹ thuật
+### B. Cơ bản
+### C. Trade plan
+### D. Rủi ro vs lợi nhuận
+
+- Trong mục A. Kỹ thuật: bắt buộc có đúng 8 ý, đánh số từ 1 đến 8, đúng thứ tự sau (mỗi ý 2–4 câu là đủ):
+1. MA Trend:
+2. RSI:
+3. MACD:
+4. RSI + MACD Bias:
+5. Fibonacci (2 khung Short/Long):
+6. Volume & Price Action:
+7. 12-Scenario:
+8. MasterScore:
+
+- Tuyệt đối KHÔNG dùng emoji bullets (1️⃣2️⃣3️⃣…), KHÔNG ghi “Executive Summary”, KHÔNG viết dồn thành 1 đoạn văn dài.
+- Văn phong thân thiện, nói với “bạn”, ngắn gọn, mượt, dễ hiểu.
+- Mỗi câu chỉ dùng tối đa 1–2 con số; không liệt kê dày đặc.
+"""
+
     prompt = f"""
-Bạn là INCEPTION AI, nói chuyện với "bạn" theo kiểu thân thiện, dễ hiểu nhưng vẫn chuẩn mực như người có nghề.
+Bạn là chuyên gia phân tích chiến lược của một công ty chứng khoán cao cấp.
 
 QUY TẮC BẮT BUỘC (FRAME-LOCK):
 - Tuyệt đối KHÔNG bịa số liệu.
 - Tuyệt đối KHÔNG tự tính toán bất kỳ con số nào (kể cả cộng/trừ/nhân/chia).
-- Chỉ được phép dùng đúng dữ liệu trong JSON "AnalysisPack".
-- Không dùng ký hiệu đánh số kiểu 1️⃣ 2️⃣ 3️⃣ hoặc emoji-numbering.
-- Hạn chế liệt kê; ưu tiên viết thành đoạn ngắn, rõ ý. Nếu thật cần gạch đầu dòng, tối đa 3 dòng.
-- Không nhắc tới FiboConflictFlag / FiboPriorityRuleApplied trong bài viết (chỉ dùng ngầm để tránh xung đột trade plan).
+- Chỉ được phép sử dụng đúng dữ liệu trong JSON "AnalysisPack" bên dưới.
+- Nếu thiếu dữ liệu thì ghi rõ "N/A" và không suy diễn.
 
-YÊU CẦU BÀI VIẾT:
-- Mở đầu bằng 1 đoạn tóm tắt 4–6 câu (không đặt tiêu đề “Executive Summary”).
-- Sau đó viết các phần: Kỹ thuật, Cơ bản, Trade plan, Rủi ro–Lợi nhuận.
-- Phần “Cơ bản” dựa trên dòng: {fund_text}
-- Phần “Trade plan” dựa trên: {tp_summary}
-- Phần “Rủi ro–Lợi nhuận” dựa trên RRSim trong JSON (RiskPct, RewardPct, RR, Probability).
+{OUTPUT_FORMAT}
+
+Gợi ý nội dung theo dữ liệu có sẵn:
+- Kỹ thuật: dùng Last, Fibonacci (Short/Long), Scenario12, MasterScore.
+- Cơ bản: dùng Fundamental (Recommendation, TargetK, UpsidePct).
+- Trade plan: dùng TradePlans (Entry/Stop/TP/RR/Probability).
+- Rủi ro vs lợi nhuận: dùng RRSim (RiskPct/RewardPct/RR/Probability).
 
 Dữ liệu (AnalysisPack JSON):
 {pack_json}
+"""
+
 """
 
     try:
@@ -868,3 +893,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
