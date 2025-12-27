@@ -1,16 +1,16 @@
 # ============================================================
-# INCEPTION v5.2 | Strategic Investor Edition
+# INCEPTION v5.4 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4 Turbo
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
 # CHANGELOG:
-# v5.0:   Core Refactoring (Facts over Conclusions)
-# v5.1:   TradePlan v2 (Active/Watch Status + ATR Buffer)
-# v5.2:   "B" Series Update (Total Unlocking):
-#         - MasterScore: Remove Fundamentls, Tier=N/A (Step 1B)
-#         - Scenario12: Neutral Naming (Step 2B)
-#         - Bias: Facts + Tags only (Step 3B)
-#         - Conviction: Added ConvictionPack breakdown (Step 4B)
+# v5.0-5.1: Core Refactoring + TradePlan v2
+# v5.2-5.3: Neutralization Phase 1 & 2 (Tags, Facts only)
+# v5.4:     Neutralization Phase 3 (Step 6B + 7B)
+#           - Scenario12: "Extended" -> "RSI_70Plus" (Neutral).
+#           - Bias: Tags updated to match new neutral logic.
+#           - ContextPacks: Added RSIContext, VolumeContext, LevelContext
+#             (Streaks, Deltas, Nearest S/R Distance) to help GPT judge context.
 # ============================================================
 import streamlit as st
 import pandas as pd
@@ -26,7 +26,7 @@ from typing import Dict, Any, Tuple, List, Optional
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.2",
+st.set_page_config(page_title="INCEPTION v5.4",
                    layout="wide",
                    page_icon="🟣")
 
@@ -751,7 +751,7 @@ def compute_volume_features(df: pd.DataFrame) -> Dict[str, Any]:
         else: regime = "Low"
     return {"Vol": vol, "Avg20Vol": avg, "Ratio": ratio, "Regime": regime}
 
-# --- STEP 3B: RSI+MACD BIAS (FACTS ONLY) ---
+# --- STEP 6B: RSI+MACD BIAS (UPDATED) ---
 def compute_rsi_macd_bias_features(rsi_feat: Dict[str, Any], macd_feat: Dict[str, Any]) -> Dict[str, Any]:
     if not rsi_feat or not macd_feat:
         return {"BiasCode": "N/A", "Alignment": "N/A", "Tags": ["MissingData"], "Facts": {}, "Notes": []}
@@ -769,58 +769,46 @@ def compute_rsi_macd_bias_features(rsi_feat: Dict[str, Any], macd_feat: Dict[str
     cross_event = cross.get("Event", "None") if cross else "None"
     cross_bars = cross.get("BarsAgo") if cross else None
     
-    tags = []
-    
-    # Neutral RSI tags
-    if rsi_zone in ["Zone70Plus", "Zone60_70"]: tags.append("RSI_UpperZone")
-    if rsi_zone in ["Zone30_40", "ZoneBelow30"]: tags.append("RSI_LowerZone")
-    if rsi_dir == "Rising": tags.append("RSI_Rising")
-    if rsi_dir == "Falling": tags.append("RSI_Falling")
-    if rsi_div_type == "Bullish": tags.append("RSI_BullDiv")
-    if rsi_div_type == "Bearish": tags.append("RSI_BearDiv")
-    
-    # Neutral MACD tags
-    if macd_rel == "MACD_Above_Signal": tags.append("MACD_AboveSig")
-    if macd_rel == "MACD_Below_Signal": tags.append("MACD_BelowSig")
-    if zero == "Above": tags.append("MACD_AboveZero")
-    if zero == "Below": tags.append("MACD_BelowZero")
-    if "Positive" in hist_state: tags.append("Hist_Pos")
-    if "Negative" in hist_state: tags.append("Hist_Neg")
-    if "Expanding" in hist_state: tags.append("Hist_Expanding")
-    if "Contracting" in hist_state: tags.append("Hist_Contracting")
-    if cross_event == "CrossUp" and cross_bars is not None and cross_bars <= 3: tags.append("MACD_CrossUp_Recent")
-    if cross_event == "CrossDown" and cross_bars is not None and cross_bars <= 3: tags.append("MACD_CrossDown_Recent")
-    
-    # Alignment Logic (Structure, not sentiment)
+    # 6B: Neutralized Bias Logic (Condition-based)
     alignment = "Mixed"
-    bias_code = "Neutral"
+    rsi_pos = (rsi_zone in ["Zone60_70", "Zone70Plus"]) or (rsi_dir == "Rising" and rsi_v > 50)
+    rsi_neg = (rsi_zone in ["Zone30_40", "ZoneBelow30"]) or (rsi_dir == "Falling" and rsi_v < 50)
     
-    is_rsi_up = ("RSI_Rising" in tags) or ("RSI_UpperZone" in tags)
-    is_macd_up = ("MACD_AboveSig" in tags) or ("Hist_Pos" in tags)
-    is_rsi_down = ("RSI_Falling" in tags) or ("RSI_LowerZone" in tags)
-    is_macd_down = ("MACD_BelowSig" in tags) or ("Hist_Neg" in tags)
+    if rsi_zone == "Zone70Plus": alignment = "RSI_70Plus"
+    elif rsi_zone == "ZoneBelow30": alignment = "RSI_Below30"
+    else:
+        # Check alignment in middle zones
+        if rsi_pos and macd_rel == "MACD_Above_Signal":
+            alignment = "Aligned_Positive"
+        elif rsi_neg and macd_rel == "MACD_Below_Signal":
+            alignment = "Aligned_Negative"
+        else:
+            alignment = "Mixed"
+            
+    tags: List[str] = [
+        rsi_zone,
+        macd_rel,
+        f"MACD_ZeroLine={zero}",
+        f"MACD_HistState={hist_state}",
+        f"MACD_Cross={cross_event}",
+        f"RSI_Direction={rsi_dir}",
+        f"RSI_Divergence={rsi_div_type}",
+        f"Alignment={alignment}",
+    ]
     
-    if is_rsi_up and is_macd_up:
-        alignment = "Aligned_Positive"
-        bias_code = "Momentum_Up"
-    elif is_rsi_down and is_macd_down:
-        alignment = "Aligned_Negative"
-        bias_code = "Momentum_Down"
-    elif is_rsi_up and is_macd_down:
-        alignment = "Mixed_RSI_Lead"
-        bias_code = "Divergent"
-    elif is_rsi_down and is_macd_up:
-        alignment = "Mixed_MACD_Lead"
-        bias_code = "Divergent"
-        
-    if "Zone70Plus" in rsi_zone: bias_code = "Extended_High"
-    if "ZoneBelow30" in rsi_zone: bias_code = "Extended_Low"
+    bias_code = "__".join([
+        rsi_zone,
+        macd_rel,
+        f"Zero={zero}",
+        f"Hist={hist_state}",
+        f"Cross={cross_event}",
+        f"Align={alignment}",
+    ])
     
-    notes = []
-    if "RSI_BullDiv" in tags: notes.append("Có phân kỳ dương RSI (Bullish Divergence).")
-    if "RSI_BearDiv" in tags: notes.append("Có phân kỳ âm RSI (Bearish Divergence).")
+    notes: List[str] = []
+    notes.append("Bias mô tả bằng điều kiện (facts), không kết luận tốt/xấu.")
     if cross_event != "None" and cross_bars is not None:
-        notes.append(f"MACD vừa có tín hiệu {cross_event} (cách {cross_bars} bar).")
+        notes.append(f"MACD_CrossEvent={cross_event}; BarsAgo={cross_bars}")
         
     return {
         "BiasCode": bias_code,
@@ -952,6 +940,96 @@ def compute_price_action_features(df: pd.DataFrame, fib_ctx: Optional[Dict[str, 
         "Notes": notes
     }
 
+# --- STEP 7B: NEW CONTEXT FEATURES ---
+def compute_rsi_context_features(df: pd.DataFrame, rsi_col: str = "RSI") -> Dict[str, Any]:
+    if df.empty or rsi_col not in df.columns:
+        return {"Streak70": 0, "Cross70BarsAgo": None, "Delta3": np.nan, "Delta5": np.nan}
+    
+    rsi = df[rsi_col].dropna()
+    if rsi.empty: return {}
+    
+    last_r = _safe_float(rsi.iloc[-1])
+    
+    def _streak(cond_series):
+        cnt = 0
+        for v in reversed(cond_series.tolist()):
+            if bool(v): cnt += 1
+            else: break
+        return int(cnt)
+    
+    streak70 = _streak((rsi >= 70).tail(60))
+    
+    # Cross 70 up check
+    # We look back to find when it crossed 70 from below
+    cross_70_idx = None
+    vals = rsi.values
+    for i in range(len(vals)-2, -1, -1):
+        if vals[i] < 70 and vals[i+1] >= 70:
+            cross_70_idx = len(vals) - 1 - (i+1)
+            break
+            
+    delta3 = last_r - _safe_float(rsi.iloc[-4]) if len(rsi) >= 4 else np.nan
+    delta5 = last_r - _safe_float(rsi.iloc[-6]) if len(rsi) >= 6 else np.nan
+    
+    return {
+        "Streak70": streak70,
+        "Cross70BarsAgo": int(cross_70_idx) if cross_70_idx is not None else None,
+        "Delta3": delta3,
+        "Delta5": delta5,
+        "Turning": "Falling" if pd.notna(delta3) and delta3 < -2 else ("Rising" if pd.notna(delta3) and delta3 > 2 else "Flat")
+    }
+
+def compute_volume_context_features(df: pd.DataFrame) -> Dict[str, Any]:
+    if df.empty or "Volume" not in df.columns:
+        return {"VolStreakUp": 0, "VolTrend": "N/A"}
+        
+    vol = df["Volume"].dropna()
+    if len(vol) < 5: return {"VolStreakUp": 0, "VolTrend": "N/A"}
+    
+    # Streak of rising volume
+    cnt = 0
+    vals = vol.values
+    for i in range(len(vals)-1, 0, -1):
+        if vals[i] > vals[i-1]: cnt += 1
+        else: break
+        
+    # Simple slope of Vol MA
+    avg20 = df["Avg20Vol"] if "Avg20Vol" in df.columns else sma(vol, 20)
+    slope = "Flat"
+    if len(avg20) >= 5:
+        a = avg20.dropna()
+        if len(a) >= 5:
+            delta = a.iloc[-1] - a.iloc[-5]
+            if delta > 0: slope = "Rising"
+            elif delta < 0: slope = "Falling"
+            
+    return {"VolStreakUp": int(cnt), "VolTrend": slope}
+
+def compute_level_context_features(last: pd.Series, dual_fib: Dict[str, Any]) -> Dict[str, Any]:
+    c = _safe_float(last.get("Close"))
+    if pd.isna(c): return {}
+    
+    # Merge levels
+    levels = {}
+    levels.update(dual_fib.get("auto_short", {}).get("levels", {}))
+    levels.update(dual_fib.get("fixed_long", {}).get("levels", {}))
+    
+    sorted_lv = sorted([(k, v) for k,v in levels.items() if pd.notna(v)], key=lambda x: x[1])
+    
+    sup = [(k,v, (v-c)/c*100) for k,v in sorted_lv if v <= c]
+    res = [(k,v, (v-c)/c*100) for k,v in sorted_lv if v >= c]
+    
+    sup = sorted(sup, key=lambda x: abs(x[2]))[:1] # Nearest
+    res = sorted(res, key=lambda x: abs(x[2]))[:1] # Nearest
+    
+    sup_pack = {"Label": sup[0][0], "Level": sup[0][1], "DistPct": sup[0][2]} if sup else {"Label": "N/A", "Level": np.nan, "DistPct": np.nan}
+    res_pack = {"Label": res[0][0], "Level": res[0][1], "DistPct": res[0][2]} if res else {"Label": "N/A", "Level": np.nan, "DistPct": np.nan}
+    
+    return {
+        "NearestSupport": sup_pack,
+        "NearestResistance": res_pack
+    }
+
 def compute_market_context(df_all: pd.DataFrame) -> Dict[str, Any]:
     def pack(tick: str) -> Dict[str, Any]:
         d = df_all[df_all["Ticker"].astype(str).str.upper() == tick].copy()
@@ -977,7 +1055,7 @@ def compute_market_context(df_all: pd.DataFrame) -> Dict[str, Any]:
     return {"VNINDEX": vnindex, "VN30": vn30}
 
 # ============================================================
-# 7. CONVICTION SCORE (Step 4B Update)
+# 7. CONVICTION SCORE (Step 5B Update: Key/Hit/Weight Only)
 # ============================================================
 def compute_conviction_pack(last: pd.Series) -> Dict[str, Any]:
     c = _safe_float(last.get("Close"))
@@ -989,52 +1067,47 @@ def compute_conviction_pack(last: pd.Series) -> Dict[str, Any]:
     sig = _safe_float(last.get("MACDSignal"))
     
     score = 5.0
-    comps = {"Base": 5.0}
+    components = []
     notes = []
     
     # Rule 1: Above MA200 (+2)
-    if pd.notna(c) and pd.notna(ma200) and c > ma200:
+    hit1 = bool(pd.notna(c) and pd.notna(ma200) and c > ma200)
+    if hit1:
         score += 2.0
-        comps["AboveMA200"] = 2.0
-        notes.append("Giá nằm trên MA200 (+2).")
+    components.append({"Key": "PriceAboveMA200", "Hit": hit1, "Weight": 2.0})
+    notes.append(f"PriceAboveMA200={hit1} (+2.0)")
     
     # Rule 2: RSI > 55 (+1)
-    if pd.notna(rsi) and rsi > 55:
+    hit2 = bool(pd.notna(rsi) and rsi > 55)
+    if hit2:
         score += 1.0
-        comps["RSI_Strong"] = 1.0
-        notes.append("RSI > 55 thể hiện sức mạnh (+1).")
+    components.append({"Key": "RSIAbove55", "Hit": hit2, "Weight": 1.0})
+    notes.append(f"RSIAbove55={hit2} (+1.0)")
         
-    # Rule 3: Vol > Avg (+1)
-    vol_ratio = np.nan
-    if pd.notna(vol) and pd.notna(avg) and avg != 0:
-        vol_ratio = vol / avg
-        if vol > avg:
-            score += 1.0
-            comps["Vol_Breakout"] = 1.0
-            notes.append("Volume vượt trung bình (+1).")
+    # Rule 3: Volume > Avg20Vol (+1)
+    vol_ratio = (vol / avg) if (pd.notna(vol) and pd.notna(avg) and avg != 0) else np.nan
+    hit3 = bool(pd.notna(vol_ratio) and vol_ratio > 1.0)
+    if hit3:
+        score += 1.0
+    components.append({"Key": "VolumeAboveAvg20", "Hit": hit3, "Weight": 1.0})
+    notes.append(f"VolumeAboveAvg20={hit3} (+1.0)")
             
     # Rule 4: MACD > Signal (+0.5)
-    if pd.notna(macd_v) and pd.notna(sig) and macd_v > sig:
+    hit4 = bool(pd.notna(macd_v) and pd.notna(sig) and macd_v > sig)
+    if hit4:
         score += 0.5
-        comps["MACD_Bull"] = 0.5
-        notes.append("MACD > Signal (fact).")
+    components.append({"Key": "MACDAboveSignal", "Hit": hit4, "Weight": 0.5})
+    notes.append(f"MACDAboveSignal={hit4} (+0.5)")
         
     score = float(min(10.0, score))
     return {
         "Score": round(score, 2),
-        "Components": comps,
+        "Components": components,
+        "Notes": notes, # Now fully neutral tags
         "Facts": {
-            "Close": c,
-            "MA200": ma200,
-            "RSI": rsi,
-            "Volume": vol,
-            "Avg20Vol": avg,
-            "VolRatio": vol_ratio,
-            "MACD": macd_v,
-            "MACDSignal": sig
-        },
-        "Notes": notes,
-        "Policy": "Python cung cấp facts + breakdown; GPT tự diễn giải conviction theo bối cảnh."
+            "Close": c, "MA200": ma200, "RSI": rsi,
+            "VolRatio": vol_ratio, "MACD": macd_v, "Signal": sig
+        }
     }
 
 def compute_conviction(last: pd.Series) -> float:
@@ -1087,6 +1160,15 @@ def _nearest_above(levels: Dict[str, Any], x: float) -> Tuple[Optional[str], flo
         if pd.isna(fv) or pd.isna(x): continue
         if fv > x:
             if (best_k is None) or (fv < best_v): best_k, best_v = str(k), fv
+    return best_k, best_v
+
+def _nearest_below(levels: Dict[str, Any], x: float) -> Tuple[Optional[str], float]:
+    best_k, best_v = None, np.nan
+    for k, v in (levels or {}).items():
+        fv = _safe_float(v)
+        if pd.isna(fv) or pd.isna(x): continue
+        if fv < x:
+            if (best_k is None) or (fv > best_v): best_k, best_v = str(k), fv
     return best_k, best_v
 
 def _vol_ratio(df: pd.DataFrame) -> float:
@@ -1204,7 +1286,7 @@ def classify_scenario(last: pd.Series) -> str:
         elif c < ma200 and ma50 < ma200: return "Downtrend – Weak Phase"
     return "Neutral / Sideways"
 
-# --- STEP 2B: SCENARIO 12 NEUTRAL ---
+# --- STEP 6B (v5.4): SCENARIO 12 NEUTRAL ("Extended" -> "RSI_70Plus") ---
 def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
     c = _safe_float(last.get("Close"))
     ma50 = _safe_float(last.get("MA50"))
@@ -1237,13 +1319,13 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
     if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
         rsi_up = (rsi >= 55)
         rsi_down = (rsi <= 45)
-        rsi_ext = (rsi >= 70)
+        rsi_pos_ext = (rsi >= 70)
         macd_up = (macd_v >= sig)
         macd_down = (macd_v < sig)
         
-        if rsi_ext:
-            mom = "Extended"
-            rules_hit.append("Momentum=Extended (RSI>=70)")
+        if rsi_pos_ext:
+            mom = "RSI_70Plus" # 6B Change
+            rules_hit.append("Momentum=RSI_70Plus (RSI>=70)")
         elif rsi_up and macd_up:
             mom = "Aligned"
             rules_hit.append("Momentum=Aligned_Up (RSI>=55 & MACD>=Sig)")
@@ -1271,22 +1353,22 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
         rules_hit.append("Volume=N/A (missing Volume/Avg20Vol)")
         
     trend_order = {"Up": 0, "Neutral": 1, "Down": 2}
-    mom_order = {"Aligned": 0, "Mixed": 1, "Counter": 2, "Extended": 3}
+    mom_order = {"Aligned": 0, "Mixed": 1, "Counter": 2, "RSI_70Plus": 3}
     code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1
     
     name_map = {
         ("Up", "Aligned"):   "S1 – Uptrend + Momentum Aligned",
         ("Up", "Mixed"):     "S2 – Uptrend + Momentum Mixed",
         ("Up", "Counter"):   "S3 – Uptrend + Momentum Counter",
-        ("Up", "Extended"):  "S4 – Uptrend + RSI Extended",
+        ("Up", "RSI_70Plus"):  "S4 – Uptrend + RSI 70+",
         ("Neutral", "Aligned"):  "S5 – Range + Momentum Aligned",
         ("Neutral", "Mixed"):    "S6 – Range + Balanced/Mixed",
         ("Neutral", "Counter"):  "S7 – Range + Momentum Counter",
-        ("Neutral", "Extended"): "S8 – Range + RSI Extended",
+        ("Neutral", "RSI_70Plus"): "S8 – Range + RSI 70+",
         ("Down", "Aligned"):  "S9 – Downtrend + Momentum Aligned",
         ("Down", "Mixed"):    "S10 – Downtrend + Momentum Mixed",
         ("Down", "Counter"):  "S11 – Downtrend + Momentum Counter",
-        ("Down", "Extended"): "S12 – Downtrend + RSI Extended",
+        ("Down", "RSI_70Plus"): "S12 – Downtrend + RSI 70+",
     }
     
     return {
@@ -1300,13 +1382,21 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
             "TrendUp": (trend=="Up"),
             "TrendDown": (trend=="Down"),
             "MomAligned": (mom=="Aligned"),
-            "MomExtended": (mom=="Extended"),
+            "Mom70Plus": (mom=="RSI_70Plus"),
             "VolHigh": (vol_reg=="High")
         }
     }
 
-# --- STEP 1B: MASTER SCORE (FACTS ONLY) ---
-def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans: Dict[str, TradeSetup], fund_row: Dict[str, Any]) -> Dict[str, Any]:
+# --- STEP 5B: MASTER SCORE (FACT ONLY) ---
+# --- STEP 5B: MASTER SCORE (FACT ONLY | FUNDAMENTAL-FREE) ---
+
+def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans: Dict[str, TradeSetup]) -> Dict[str, Any]:
+    """
+    IMPORTANT:
+    - Fundamental (Target/Upside/Recommendation) MUST NOT affect any score computation.
+    - This MasterScore is 100% technical + tradeplan RR only.
+    """
+
     c = _safe_float(last.get("Close"))
     ma50 = _safe_float(last.get("MA50"))
     ma200 = _safe_float(last.get("MA200"))
@@ -1315,65 +1405,50 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
     sig = _safe_float(last.get("MACDSignal"))
     vol = _safe_float(last.get("Volume"))
     avg_vol = _safe_float(last.get("Avg20Vol"))
-    
+
     comps = {}
-    facts = {}
-    notes = []
-    
-    # 1. Trend
+    notes = []  # neutral condition tags only
+
+    # 1) Trend (pure MA structure)
     trend = 0.0
-    trend_sig = "N/A"
     if pd.notna(c) and pd.notna(ma50) and pd.notna(ma200):
         if (c >= ma50) and (ma50 >= ma200):
             trend = 2.0
-            trend_sig = "StrongUp"
-            notes.append("Trend: Cấu trúc tăng mạnh (Close > MA50 > MA200).")
+            notes.append("TrendTag=Structure_Up_Strong")
         elif (c >= ma200):
             trend = 1.2
-            trend_sig = "ModUp"
-            notes.append("Trend: Tăng trung hạn (Trên MA200).")
+            notes.append("TrendTag=Structure_Up_Moderate")
         else:
             trend = 0.4
-            trend_sig = "Down/Weak"
-            notes.append("Trend: Yếu (Dưới MA200).")
+            notes.append("TrendTag=Structure_Down_Weak")
     comps["Trend"] = trend
-    facts["TrendSignal"] = trend_sig
-    
-    # 2. Momentum
+
+    # 2) Momentum (RSI + MACD relation only)
     mom = 0.0
-    mom_sig = "N/A"
     if pd.notna(rsi) and pd.notna(macd_v) and pd.notna(sig):
         if (rsi >= 55) and (macd_v >= sig):
             mom = 2.0
-            mom_sig = "RSI>=55 & MACD>=Signal"
-            notes.append("Momentum: RSI > 55 và MACD nằm trên Signal.")
+            notes.append("MomTag=Aligned_Bullish")
         elif (rsi <= 45) and (macd_v < sig):
             mom = 0.4
-            mom_sig = "RSI<=45 & MACD<Signal"
-            notes.append("Momentum: RSI <=45 và MACD nằm dưới Signal.")
+            notes.append("MomTag=Aligned_Bearish")
         else:
             mom = 1.1
-            mom_sig = "Mixed"
-            notes.append("Momentum: RSI/MACD đang ở trạng thái pha trộn, cần đọc theo bối cảnh.")
+            notes.append("MomTag=Mixed")
     comps["Momentum"] = mom
-    facts["MomentumSignal"] = mom_sig
-    
-    # 3. Volume
+
+    # 3) Volume (relative to Avg20Vol only)
     vcomp = 0.0
-    vol_sig = "N/A"
     if pd.notna(vol) and pd.notna(avg_vol) and avg_vol != 0:
         if vol > avg_vol:
             vcomp = 1.6
-            vol_sig = "Vol>Avg20"
-            notes.append("Volume: khối lượng lớn hơn trung bình 20 phiên.")
+            notes.append("VolTag=Above_Avg")
         else:
             vcomp = 0.9
-            vol_sig = "Vol<=Avg20"
-            notes.append("Volume: khối lượng không vượt trung bình 20 phiên.")
+            notes.append("VolTag=Below_Avg")
     comps["Volume"] = vcomp
-    facts["VolumeSignal"] = vol_sig
-    
-    # 4. Fibonacci
+
+    # 4) Fibonacci (position vs key bands, no fundamental)
     fibc = 0.0
     try:
         s_lv = (dual_fib or {}).get("auto_short", {}).get("levels", {}) or {}
@@ -1382,52 +1457,54 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
         s_382 = _safe_float(s_lv.get("38.2"))
         l_618 = _safe_float(l_lv.get("61.8"))
         l_382 = _safe_float(l_lv.get("38.2"))
+
         if pd.notna(c) and pd.notna(s_618) and pd.notna(s_382):
-            if c >= s_618: fibc += 1.2
-            elif c >= s_382: fibc += 0.8
-            else: fibc += 0.4
+            if c >= s_618:
+                fibc += 1.2
+            elif c >= s_382:
+                fibc += 0.8
+            else:
+                fibc += 0.4
+
         if pd.notna(c) and pd.notna(l_618) and pd.notna(l_382):
-            if c >= l_618: fibc += 0.8
-            elif c >= l_382: fibc += 0.5
-            else: fibc += 0.2
-    except: fibc = 0.0
+            if c >= l_618:
+                fibc += 0.8
+            elif c >= l_382:
+                fibc += 0.5
+            else:
+                fibc += 0.2
+    except:
+        fibc = 0.0
     comps["Fibonacci"] = fibc
-    
-    # 5. RR Quality
+
+    # 5) RR Quality (from trade plans only)
     best_rr = np.nan
     if trade_plans:
-        rrs = [s.rr for s in trade_plans.values() if pd.notna(s.rr)]
+        rrs = [s.rr for s in trade_plans.values() if pd.notna(getattr(s, "rr", np.nan))]
         best_rr = max(rrs) if rrs else np.nan
+
     rrcomp = 0.0
-    rr_sig = "N/A"
     if pd.notna(best_rr):
         if best_rr >= 4.0:
             rrcomp = 2.0
-            rr_sig = "RR>=4.0"
+            notes.append("RRTag=Excellent_Gt4")
         elif best_rr >= 3.0:
             rrcomp = 1.5
-            rr_sig = "RR>=3.0"
+            notes.append("RRTag=Good_Gt3")
         else:
             rrcomp = 1.0
-            rr_sig = "RR<3.0"
+            notes.append("RRTag=Normal_Lt3")
     comps["RRQuality"] = rrcomp
-    facts["RRSignal"] = rr_sig
-    facts["BestRR"] = best_rr if pd.notna(best_rr) else np.nan
-    
+
     total = float(sum(comps.values()))
-    
-    notes.append("MasterScore: Technical-only (Fundamental excluded).")
-    notes.append("MasterScore: Tier/Sizing returned as N/A (GPT must decide).")
-    
+
     return {
         "Components": comps,
         "Total": round(total, 2),
-        "Tier": "N/A",           # Unlocked
-        "PositionSizing": "N/A", # Unlocked
-        "Facts": facts,
+        "Tier": "N/A",            # Unlocked
+        "PositionSizing": "N/A",  # Unlocked
         "Notes": notes
     }
-
 # ============================================================
 # 9D. RISK–REWARD SIMULATION PACK
 # ============================================================
@@ -1476,7 +1553,7 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     fib_ctx = compute_fibonacci_context_pack(last, dual_fib)
     
     conviction = compute_conviction(last)
-    conviction_pack = compute_conviction_pack(last) # Step 4B Add
+    conviction_pack = compute_conviction_pack(last) # Step 4B/5B Add
     
     scenario = classify_scenario(last)
     trade_plans = build_trade_plan(df, dual_fib)
@@ -1496,24 +1573,29 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     fund_row["UpsidePct"] = upside_pct
     fund_row["TargetK"] = (target_vnd / 1000.0) if pd.notna(target_vnd) else np.nan
     
-    # --- Step 2B Scenario Neutral ---
+    # --- Step 2B+6B Scenario Neutral ---
     scenario12 = classify_scenario12(last)
     
     rrsim = build_rr_sim(trade_plans)
     
-    # --- Step 1B Master Score (Fact Only) ---
-    master = compute_master_score(last, dual_fib, trade_plans, fund_row)
+    # --- Step 1B/5B Master Score (Fact Only) ---
+    master = compute_master_score(last, dual_fib, trade_plans)
     
     ma_feat = compute_ma_features(df)
     rsi_feat = compute_rsi_features(df)
     macd_feat = compute_macd_features(df)
     vol_feat = compute_volume_features(df)
     
-    # --- Step 3B Bias (Fact Only) ---
+    # --- Step 3B+6B Bias (Fact Only) ---
     bias_feat = compute_rsi_macd_bias_features(rsi_feat, macd_feat)
     
     # --- Step 6 Price Action ---
     pa_feat = compute_price_action_features(df, fib_ctx=fib_ctx, vol_feat=vol_feat, tol_pct=0.8)
+    
+    # --- STEP 7B (New Context Features) ---
+    rsi_ctx = compute_rsi_context_features(df)
+    vol_ctx = compute_volume_context_features(df)
+    lvl_ctx = compute_level_context_features(last, dual_fib)
     
     market_ctx = compute_market_context(df_all)
     stock_chg = np.nan
@@ -1543,7 +1625,7 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
         "ScenarioBase": scenario,
         "Scenario12": scenario12,
         "Conviction": conviction,
-        "ConvictionPack": conviction_pack, # Step 4B
+        "ConvictionPack": conviction_pack, # Step 4B/5B
         "Fibonacci": {
             "ShortWindow": dual_fib.get("short_window"),
             "LongWindow": dual_fib.get("long_window"),
@@ -1579,7 +1661,11 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
             "MACD": macd_feat,
             "Volume": vol_feat,
             "Bias": bias_feat,
-            "PriceAction": pa_feat
+            "PriceAction": pa_feat,
+            # 7B: New Context Packs
+            "RSIContext": rsi_ctx,
+            "VolumeContext": vol_ctx,
+            "LevelContext": lvl_ctx
         },
         "Market": {
             "VNINDEX": market_ctx.get("VNINDEX", {}),
@@ -1734,7 +1820,7 @@ Dữ liệu (AnalysisPack JSON):
 # ============================================================
 # 12. STREAMLIT UI & APP LAYOUT
 # ============================================================
-st.markdown("<h1 style='color:#A855F7; margin-bottom:6px;'>INCEPTION v5.2</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#A855F7; margin-bottom:6px;'>INCEPTION v5.4</h1>", unsafe_allow_html=True)
 st.divider()
 with st.sidebar:
     st.markdown("### 🔐 Đăng nhập người dùng")
@@ -1767,7 +1853,7 @@ st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
     © 2025 INCEPTION Research Framework<br>
-    Phiên bản 5.2 | Engine GPT-4 Turbo
+    Phiên bản 5.4 | Engine GPT-4 Turbo
     </p>
     """,
     unsafe_allow_html=True
