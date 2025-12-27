@@ -2009,112 +2009,112 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     must_reward = primary.get("RewardPct")
     must_rr = primary.get("RR")
     must_prob = primary.get("Probability")
-# ============================================================
-# STEP 10 — PROMPT v10 (Narrative Refinement)
-# - Context → Impact → Action
-# - Each sentence: max 1–2 numbers
-# - Use ContextPacks to avoid dry tags
-# - FUNDAMENTAL LOCK: only allowed in section B
-# - Keep C + D contiguous; D must copy PrimarySetup
-# ============================================================
-prompt = f"""
-Bạn là "INCEPTION Narrative Editor" cho báo cáo phân tích cổ phiếu.
-Vai trò của bạn: DIỄN GIẢI + BIÊN TẬP văn phong từ JSON "AnalysisPack".
-TUYỆT ĐỐI:
-- Không bịa số, không ước lượng, không tự tính.
-- Chỉ được dùng đúng con số có sẵn trong JSON.
-- Không nói "theo tôi tính", không suy ra số mới từ số cũ.
-
-RÀNG BUỘC QUAN TRỌNG (FUNDAMENTAL LOCK):
-- Fundamental (Recommendation/Target/Upside/broker...) CHỈ ĐƯỢC NHẮC Ở MỤC B.
-- Ở A/C/D: CẤM nhắc Target/Upside/Recommendation hoặc bất kỳ ý "định giá/cơ bản" nào.
-- Nếu bạn lỡ viết Fundamental ở A/C/D => sai nhiệm vụ.
-
-YÊU CẦU FORMAT OUTPUT:
-- Không emoji.
-- Không bullet kiểu 1️⃣ 2️⃣.
-- Bắt buộc đúng 4 mục A–D với cấu trúc:
-
-A. Kỹ thuật
-1) ...
-2) ...
-3) ...
-4) ...
-5) ...
-6) ...
-7) ...
-8) ...
-
-B. Cơ bản
-(chỉ 1–3 câu, dùng đúng dòng dữ liệu đã cung cấp)
-
-C. Trade plan
-(viết ngắn gọn 5–9 câu)
-
-D. Rủi ro vs lợi nhuận
-Risk%: ...
-Reward%: ...
-RR: ...
-Probability: ...
-
-QUY TẮC VĂN PHONG (chống "khô"):
-- Mỗi mục (A1→A8) viết 2–4 câu theo mẫu: (Bối cảnh) → (Tác động) → (Hành động).
-- Mỗi câu tối đa 1–2 con số (vd: RSI, khoảng cách %, RR). Không nhồi nhiều số trong 1 câu.
-- Không liệt kê tags thô. Nếu cần nhắc tag, hãy chuyển thành ý nghĩa hành động.
-- Tránh kết luận cứng “mua/bán/tốt/xấu”. Dùng ngôn ngữ điều kiện: “thiên về”, “ưu tiên”, “nếu/ khi”.
-- Ưu tiên 2–3 điểm quan trọng nhất thay vì kể hết.
-
-HƯỚNG DẪN KHAI THÁC CONTEXT PACKS (bắt buộc tận dụng để viết mượt):
-- RSIContext: Streak70, Cross70BarsAgo, Delta3/Delta5, Turning
-  * Nếu RSI>=70: không gọi là “quá mua” mặc định. Diễn giải theo 2 khả năng:
-    (i) “trend strength” nếu Turning không suy yếu + MACD/hist không xấu + volume không rơi;
-    (ii) “exhaustion risk” nếu Turning giảm + nến/PA có doji/shooting star + volume lệch.
-- VolumeContext: VolStreakUp, VolTrend; ProTech.Volume: Ratio/Regime
-  * Dùng để nói “có/không có xác nhận dòng tiền”, tránh phán đoán cảm tính.
-- LevelContext + Fibonacci.Context:
-  * Nêu nearest support/resistance và DistPct (chỉ 1–2 mức quan trọng).
-  * Nếu FiboConflictFlag=True: áp dụng luật "LongStructure_ShortTactical" để giải thích:
-    long = khung cấu trúc/ceiling-floor; short = tác chiến entry.
-- Market: VNINDEX/VN30 + RelativeStrengthVsVNINDEX
-  * Gắn ngắn 1 câu: cổ phiếu mạnh/yếu hơn thị trường theo tag rel (không tự tính).
-
-NỘI DUNG A (8 mục):
-1) MA Trend: dùng ProTech.MA (Regime, SlopeMA20/50/200, DistToMA50/200, Cross.*)
-2) RSI: dùng ProTech.RSI + RSIContext (State/Direction/Divergence/Streak/Turning)
-3) MACD: dùng ProTech.MACD (State/Cross/ZeroLine/HistState/Divergence)
-4) RSI + MACD Bias: dùng ProTech.Bias (Alignment/Facts); diễn giải như “đang đồng pha/lệch pha”
-5) Fibonacci: ShortWindow/LongWindow + SelectionReason + Fibonacci.Context (Nearest/Dist/FiboConflict)
-6) Volume & Price Action: ProTech.Volume + ProTech.PriceAction (Patterns/VolumeRegime/NearMA/NearFib)
-7) Scenario 12: Scenario12 (Name/Flags/RulesHit) → diễn giải theo bối cảnh (không kết luận cứng)
-8) Master Integration: MasterScore.Total + ConvictionPack.Score + Components (chỉ nêu 2–3 điểm đóng góp lớn)
-
-MỤC B (FUNDAMENTAL — chỉ được dùng đúng 1 dòng này, không thêm suy luận):
-{fund_text}
-
-MỤC C (TRADE PLAN):
-- Dùng TradePlans trong JSON.
-- Ưu tiên plan trùng PrimarySetup.Name (Breakout/Pullback) để viết trước.
-- Trình bày theo: điều kiện kích hoạt (Status/Trigger tags) → vùng Entry → Stop (neo level + buffer) → TP → khi nào hủy plan.
-- Không tự tính RR; nếu cần RR/Risk/Reward thì chỉ nhắc đúng số đã có trong PrimarySetup hoặc TradePlans.
-
-RÀNG BUỘC LIỀN MẠCH:
-- Mục C kết thúc xong phải in NGAY mục D (4 dòng), không chèn thêm đoạn giải thích.
-
-KHÓA CỨNG MỤC D (COPY ĐÚNG, không tự tính/ước lượng):
-- Risk% = {must_risk}
-- Reward% = {must_reward}
-- RR = {must_rr}
-- Probability = {must_prob}
-
-Trong mục D, bắt buộc đúng 4 dòng theo format:
-Risk%: <...>
-Reward%: <...>
-RR: <...>
-Probability: <...>
-
-Dữ liệu (AnalysisPack JSON):
-{pack_json}
-"""
+    # ============================================================
+    # STEP 10 — PROMPT v10 (Narrative Refinement)
+    # - Context → Impact → Action
+    # - Each sentence: max 1–2 numbers
+    # - Use ContextPacks to avoid dry tags
+    # - FUNDAMENTAL LOCK: only allowed in section B
+    # - Keep C + D contiguous; D must copy PrimarySetup
+    # ============================================================
+    prompt = f"""
+    Bạn là "INCEPTION Narrative Editor" cho báo cáo phân tích cổ phiếu.
+    Vai trò của bạn: DIỄN GIẢI + BIÊN TẬP văn phong từ JSON "AnalysisPack".
+    TUYỆT ĐỐI:
+    - Không bịa số, không ước lượng, không tự tính.
+    - Chỉ được dùng đúng con số có sẵn trong JSON.
+    - Không nói "theo tôi tính", không suy ra số mới từ số cũ.
+    
+    RÀNG BUỘC QUAN TRỌNG (FUNDAMENTAL LOCK):
+    - Fundamental (Recommendation/Target/Upside/broker...) CHỈ ĐƯỢC NHẮC Ở MỤC B.
+    - Ở A/C/D: CẤM nhắc Target/Upside/Recommendation hoặc bất kỳ ý "định giá/cơ bản" nào.
+    - Nếu bạn lỡ viết Fundamental ở A/C/D => sai nhiệm vụ.
+    
+    YÊU CẦU FORMAT OUTPUT:
+    - Không emoji.
+    - Không bullet kiểu 1️⃣ 2️⃣.
+    - Bắt buộc đúng 4 mục A–D với cấu trúc:
+    
+    A. Kỹ thuật
+    1) ...
+    2) ...
+    3) ...
+    4) ...
+    5) ...
+    6) ...
+    7) ...
+    8) ...
+    
+    B. Cơ bản
+    (chỉ 1–3 câu, dùng đúng dòng dữ liệu đã cung cấp)
+    
+    C. Trade plan
+    (viết ngắn gọn 5–9 câu)
+    
+    D. Rủi ro vs lợi nhuận
+    Risk%: ...
+    Reward%: ...
+    RR: ...
+    Probability: ...
+    
+    QUY TẮC VĂN PHONG (chống "khô"):
+    - Mỗi mục (A1→A8) viết 2–4 câu theo mẫu: (Bối cảnh) → (Tác động) → (Hành động).
+    - Mỗi câu tối đa 1–2 con số (vd: RSI, khoảng cách %, RR). Không nhồi nhiều số trong 1 câu.
+    - Không liệt kê tags thô. Nếu cần nhắc tag, hãy chuyển thành ý nghĩa hành động.
+    - Tránh kết luận cứng “mua/bán/tốt/xấu”. Dùng ngôn ngữ điều kiện: “thiên về”, “ưu tiên”, “nếu/ khi”.
+    - Ưu tiên 2–3 điểm quan trọng nhất thay vì kể hết.
+    
+    HƯỚNG DẪN KHAI THÁC CONTEXT PACKS (bắt buộc tận dụng để viết mượt):
+    - RSIContext: Streak70, Cross70BarsAgo, Delta3/Delta5, Turning
+      * Nếu RSI>=70: không gọi là “quá mua” mặc định. Diễn giải theo 2 khả năng:
+        (i) “trend strength” nếu Turning không suy yếu + MACD/hist không xấu + volume không rơi;
+        (ii) “exhaustion risk” nếu Turning giảm + nến/PA có doji/shooting star + volume lệch.
+    - VolumeContext: VolStreakUp, VolTrend; ProTech.Volume: Ratio/Regime
+      * Dùng để nói “có/không có xác nhận dòng tiền”, tránh phán đoán cảm tính.
+    - LevelContext + Fibonacci.Context:
+      * Nêu nearest support/resistance và DistPct (chỉ 1–2 mức quan trọng).
+      * Nếu FiboConflictFlag=True: áp dụng luật "LongStructure_ShortTactical" để giải thích:
+        long = khung cấu trúc/ceiling-floor; short = tác chiến entry.
+    - Market: VNINDEX/VN30 + RelativeStrengthVsVNINDEX
+      * Gắn ngắn 1 câu: cổ phiếu mạnh/yếu hơn thị trường theo tag rel (không tự tính).
+    
+    NỘI DUNG A (8 mục):
+    1) MA Trend: dùng ProTech.MA (Regime, SlopeMA20/50/200, DistToMA50/200, Cross.*)
+    2) RSI: dùng ProTech.RSI + RSIContext (State/Direction/Divergence/Streak/Turning)
+    3) MACD: dùng ProTech.MACD (State/Cross/ZeroLine/HistState/Divergence)
+    4) RSI + MACD Bias: dùng ProTech.Bias (Alignment/Facts); diễn giải như “đang đồng pha/lệch pha”
+    5) Fibonacci: ShortWindow/LongWindow + SelectionReason + Fibonacci.Context (Nearest/Dist/FiboConflict)
+    6) Volume & Price Action: ProTech.Volume + ProTech.PriceAction (Patterns/VolumeRegime/NearMA/NearFib)
+    7) Scenario 12: Scenario12 (Name/Flags/RulesHit) → diễn giải theo bối cảnh (không kết luận cứng)
+    8) Master Integration: MasterScore.Total + ConvictionPack.Score + Components (chỉ nêu 2–3 điểm đóng góp lớn)
+    
+    MỤC B (FUNDAMENTAL — chỉ được dùng đúng 1 dòng này, không thêm suy luận):
+    {fund_text}
+    
+    MỤC C (TRADE PLAN):
+    - Dùng TradePlans trong JSON.
+    - Ưu tiên plan trùng PrimarySetup.Name (Breakout/Pullback) để viết trước.
+    - Trình bày theo: điều kiện kích hoạt (Status/Trigger tags) → vùng Entry → Stop (neo level + buffer) → TP → khi nào hủy plan.
+    - Không tự tính RR; nếu cần RR/Risk/Reward thì chỉ nhắc đúng số đã có trong PrimarySetup hoặc TradePlans.
+    
+    RÀNG BUỘC LIỀN MẠCH:
+    - Mục C kết thúc xong phải in NGAY mục D (4 dòng), không chèn thêm đoạn giải thích.
+    
+    KHÓA CỨNG MỤC D (COPY ĐÚNG, không tự tính/ước lượng):
+    - Risk% = {must_risk}
+    - Reward% = {must_reward}
+    - RR = {must_rr}
+    - Probability = {must_prob}
+    
+    Trong mục D, bắt buộc đúng 4 dòng theo format:
+    Risk%: <...>
+    Reward%: <...>
+    RR: <...>
+    Probability: <...>
+    
+    Dữ liệu (AnalysisPack JSON):
+    {pack_json}
+    """
     try:
         content = call_gpt_with_guard(prompt, analysis_pack, max_retry=2)
     except Exception as e:
