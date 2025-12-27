@@ -271,7 +271,7 @@ def validate_section_d(text: str, primary: Dict[str, Any]) -> bool:
 def _call_openai(prompt: str, temperature: float) -> str:
     client = OpenAI()
     response = client.chat.completions.create(
-        model="gpt-4-turbo",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": "Bạn là INCEPTION AI, chuyên gia phân tích đầu tư."},
             {"role": "user", "content": prompt}
@@ -2162,3 +2162,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
