@@ -1,8 +1,10 @@
 # ============================================================
-# INCEPTION v4.8 FINAL | Strategic Investor Edition
+# INCEPTION v4.9 FINAL | Strategic Investor Edition
 # app.py — Streamlit + GPT-4 Turbo
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
+# NOTE (v4.9): ONLY change is A.1 MA Trend data pack (compute_ma_features)
+#              -> remove "hard conclusion" regime, add more raw facts.
 # ============================================================
 
 import streamlit as st
@@ -20,7 +22,7 @@ from typing import Dict, Any, Tuple, List, Optional
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
 
-st.set_page_config(page_title="INCEPTION v4.8",
+st.set_page_config(page_title="INCEPTION v4.9",
                    layout="wide",
                    page_icon="🟣")
 
@@ -114,6 +116,7 @@ def _pct_change(a: float, b: float) -> float:
     return (a - b) / b * 100
 
 def _trend_label_from_slope(slope: float, eps: float = 1e-9) -> str:
+    # Kept for compatibility, used elsewhere if needed
     if pd.isna(slope): return "N/A"
     if slope > eps: return "Up"
     if slope < -eps: return "Down"
@@ -137,7 +140,6 @@ def _find_last_cross(series_a: pd.Series, series_b: pd.Series, lookback: int = 2
     diff = df["a"] - df["b"]
     sign = diff.apply(_sgn)
 
-    # Find most recent index where sign changed non-zero
     last_event = None
     last_bars_ago = None
     s = sign.values
@@ -168,7 +170,6 @@ def _detect_divergence_simple(close: pd.Series, osc: pd.Series, lookback: int = 
     c = c.tail(n).reset_index(drop=True)
     o = o.tail(n).reset_index(drop=True)
 
-    # local minima/maxima indices
     lows = []
     highs = []
     for i in range(2, n-2):
@@ -541,6 +542,12 @@ def compute_dual_fibonacci_auto(df: pd.DataFrame, long_window: int = 250) -> Dic
 # ============================================================
 
 def compute_ma_features(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    v4.9 CHANGE (A.1 MA Trend only):
+    - Remove "hard conclusion" Regime=Up/Down/Neutral.
+    - Replace with factual structure snapshot + add raw slope values.
+    - Keep existing keys for backward compatibility (Regime, SlopeMA*, Dist*, Cross, Structure).
+    """
     if df.empty:
         return {}
 
@@ -550,38 +557,60 @@ def compute_ma_features(df: pd.DataFrame) -> Dict[str, Any]:
     ma50 = _safe_float(last.get("MA50"))
     ma200 = _safe_float(last.get("MA200"))
 
-    def slope(series: pd.Series, n: int = 10) -> float:
+    def slope_value(series: pd.Series, n: int = 10) -> float:
         s = series.dropna()
         if len(s) < n + 1:
             return np.nan
         return _safe_float(s.iloc[-1] - s.iloc[-(n+1)])
 
-    s20 = slope(df["MA20"], 10)
-    s50 = slope(df["MA50"], 10)
-    s200 = slope(df["MA200"], 10)
+    def slope_label(val: float, eps: float = 1e-9) -> str:
+        if pd.isna(val):
+            return "N/A"
+        if val > eps:
+            return "Positive"
+        if val < -eps:
+            return "Negative"
+        return "Flat"
 
-    regime = "Neutral"
+    # Raw slope deltas (10 bars)
+    s20_v = slope_value(df["MA20"], 10)
+    s50_v = slope_value(df["MA50"], 10)
+    s200_v = slope_value(df["MA200"], 10)
+
+    # Factual MA stack snapshot (no Up/Down "regime" conclusion)
+    structure_snapshot = "N/A"
     if pd.notna(close) and pd.notna(ma50) and pd.notna(ma200):
         if close >= ma50 and ma50 >= ma200:
-            regime = "Up"
+            structure_snapshot = "Close>=MA50>=MA200"
         elif close < ma50 and ma50 < ma200:
-            regime = "Down"
+            structure_snapshot = "Close<MA50<MA200"
         else:
-            regime = "Neutral"
+            structure_snapshot = "MixedStructure"
 
+    # Distances remain raw facts
     dist50 = ((close - ma50) / ma50 * 100) if (pd.notna(close) and pd.notna(ma50) and ma50 != 0) else np.nan
     dist200 = ((close - ma200) / ma200 * 100) if (pd.notna(close) and pd.notna(ma200) and ma200 != 0) else np.nan
 
+    # Cross facts remain unchanged
     cross_price_ma50 = _find_last_cross(df["Close"], df["MA50"], lookback=20)
     cross_price_ma200 = _find_last_cross(df["Close"], df["MA200"], lookback=60)
     cross_ma20_ma50 = _find_last_cross(df["MA20"], df["MA50"], lookback=60)
     cross_ma50_ma200 = _find_last_cross(df["MA50"], df["MA200"], lookback=120)
 
     return {
-        "Regime": regime,
-        "SlopeMA20": _trend_label_from_slope(s20),
-        "SlopeMA50": _trend_label_from_slope(s50),
-        "SlopeMA200": _trend_label_from_slope(s200),
+        # Backward-compatible key, but now factual snapshot
+        "Regime": structure_snapshot,
+
+        # Backward-compatible slope labels (now factual direction labels)
+        "SlopeMA20": slope_label(s20_v),
+        "SlopeMA50": slope_label(s50_v),
+        "SlopeMA200": slope_label(s200_v),
+
+        # NEW raw slope values (adds nuance without breaking existing prompt)
+        "SlopeMA20Value": s20_v,
+        "SlopeMA50Value": s50_v,
+        "SlopeMA200Value": s200_v,
+
         "DistToMA50Pct": dist50,
         "DistToMA200Pct": dist200,
         "Cross": {
@@ -883,18 +912,18 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
     code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1
 
     name_map = {
-        ( "Up","Bull" ): "S1 – Uptrend + Bullish Momentum",
-        ( "Up","Neutral" ): "S2 – Uptrend + Neutral Momentum",
-        ( "Up","Bear" ): "S3 – Uptrend + Bearish Pullback",
-        ( "Up","Exhaust" ): "S4 – Uptrend + Overbought/Exhaust",
-        ( "Neutral","Bull" ): "S5 – Range + Bullish Attempt",
-        ( "Neutral","Neutral" ): "S6 – Range + Balanced",
-        ( "Neutral","Bear" ): "S7 – Range + Bearish Pressure",
-        ( "Neutral","Exhaust" ): "S8 – Range + Overbought Risk",
-        ( "Down","Bull" ): "S9 – Downtrend + Short-covering Bounce",
-        ( "Down","Neutral" ): "S10 – Downtrend + Weak Stabilization",
-        ( "Down","Bear" ): "S11 – Downtrend + Bearish Momentum",
-        ( "Down","Exhaust" ): "S12 – Downtrend + Overbought Rebound Risk",
+        ("Up","Bull"): "S1 – Uptrend + Bullish Momentum",
+        ("Up","Neutral"): "S2 – Uptrend + Neutral Momentum",
+        ("Up","Bear"): "S3 – Uptrend + Bearish Pullback",
+        ("Up","Exhaust"): "S4 – Uptrend + Overbought/Exhaust",
+        ("Neutral","Bull"): "S5 – Range + Bullish Attempt",
+        ("Neutral","Neutral"): "S6 – Range + Balanced",
+        ("Neutral","Bear"): "S7 – Range + Bearish Pressure",
+        ("Neutral","Exhaust"): "S8 – Range + Overbought Risk",
+        ("Down","Bull"): "S9 – Downtrend + Short-covering Bounce",
+        ("Down","Neutral"): "S10 – Downtrend + Weak Stabilization",
+        ("Down","Bear"): "S11 – Downtrend + Bearish Momentum",
+        ("Down","Exhaust"): "S12 – Downtrend + Overbought Rebound Risk",
     }
 
     return {
@@ -1308,7 +1337,7 @@ Dữ liệu (AnalysisPack JSON):
 # 12. STREAMLIT UI & APP LAYOUT
 # ============================================================
 
-st.markdown("<h1 style='color:#A855F7; margin-bottom:6px;'>INCEPTION v4.8</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#A855F7; margin-bottom:6px;'>INCEPTION v4.9</h1>", unsafe_allow_html=True)
 st.divider()
 
 with st.sidebar:
@@ -1345,7 +1374,7 @@ st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
     © 2025 INCEPTION Research Framework<br>
-    Phiên bản 4.8 | Engine GPT-4 Turbo
+    Phiên bản 4.9 | Engine GPT-4 Turbo
     </p>
     """,
     unsafe_allow_html=True
