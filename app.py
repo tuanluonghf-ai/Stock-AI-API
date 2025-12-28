@@ -42,7 +42,7 @@ st.markdown("""
         color: #0F172A !important;
     }
     [data-testid="stSidebar"] * {
-        color: #0F172A !important;
+        color: #0F172A !important; /* labels/text default dark */
     }
     strong {
         color: #0F172A;
@@ -85,6 +85,8 @@ st.markdown("""
   div[data-testid="stDecoration"] { background: #ffffff !important; }
 
   /* Sidebar inputs/button text color */
+  section[data-testid="stSidebar"] { color: #0F172A !important; }
+  section[data-testid="stSidebar"] * { color: #0F172A !important; }
   section[data-testid="stSidebar"] input { color: #ffffff !important; }
   section[data-testid="stSidebar"] textarea { color: #ffffff !important; }
   section[data-testid="stSidebar"] button { color: #ffffff !important; }
@@ -139,6 +141,15 @@ st.markdown("""
   }
   .right-panel .t { font-weight: 900; color:#0F172A; margin-bottom: 8px; }
   .right-panel .d { color:#64748B; font-size: 13px; line-height: 1.5; }
+
+  /* Sidebar toggle button always black */
+  button[aria-label="Toggle sidebar"],
+  button[title="Collapse sidebar"],
+  [data-testid="collapsedControl"] button {
+    background: #000000 !important;
+    color: #ffffff !important;
+    border-radius: 10px !important;
+  }
 </style>
 """, unsafe_allow_html=True)
 
