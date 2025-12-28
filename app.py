@@ -37,6 +37,13 @@ st.markdown("""
         color: #0F172A;
         font-family: 'Segoe UI', sans-serif;
     }
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .main, .block-container {
+        background: #FFFFFF !important;
+        color: #0F172A !important;
+    }
+    [data-testid="stSidebar"] * {
+        color: #0F172A !important;
+    }
     strong {
         color: #0F172A;
         font-weight: 700;
