@@ -113,6 +113,33 @@ st.markdown("""
     border: 1px solid #0B0F17 !important;
   }
 
+  /* Sidebar "Phân tích" button: white bg, black border, black text */
+  section[data-testid="stSidebar"] .stButton > button{
+    background: #FFFFFF !important;
+    border: 1px solid #0F172A !important;
+    color: #0F172A !important;
+    box-shadow: none !important;
+  }
+  /* Hover state */
+  section[data-testid="stSidebar"] .stButton > button:hover{
+    background: #F8FAFC !important;
+    border: 1px solid #0F172A !important;
+    color: #0F172A !important;
+  }
+  /* Active/pressed state */
+  section[data-testid="stSidebar"] .stButton > button:active{
+    background: #F1F5F9 !important;
+    border: 1px solid #0F172A !important;
+    color: #0F172A !important;
+  }
+  /* Disabled state (keep readable) */
+  section[data-testid="stSidebar"] .stButton > button:disabled{
+    background: #E2E8F0 !important;
+    border: 1px solid #94A3B8 !important;
+    color: #334155 !important;
+    opacity: 1 !important;
+  }
+
   /* Report section titles (match header line 1 size) */
   .sec-title { font-size: 34px; font-weight: 900; letter-spacing: 0.6px; margin: 18px 0 10px 0; }
 
