@@ -91,11 +91,27 @@ st.markdown("""
   section[data-testid="stSidebar"] textarea { color: #ffffff !important; }
   section[data-testid="stSidebar"] button { color: #ffffff !important; }
 
+  /* Sidebar background + border */
+  section[data-testid="stSidebar"]{
+    background: #F4F6F8 !important;
+    border-right: 1px solid #E2E8F0 !important;
+  }
+  section[data-testid="stSidebar"] > div{
+    background: transparent !important;
+  }
+
   /* If your inputs are created via st.text_input, the visible text is inside this */
   .stTextInput input { color: #ffffff !important; }
 
   /* Button label (Streamlit uses nested div/span) */
   .stButton > button { color: #ffffff !important; }
+  /* Sidebar button text white (normal + hover) and dark background */
+  section[data-testid="stSidebar"] .stButton > button,
+  section[data-testid="stSidebar"] .stButton > button:hover{
+    color: #FFFFFF !important;
+    background: #0B0F17 !important;
+    border: 1px solid #0B0F17 !important;
+  }
 
   /* Report section titles (match header line 1 size) */
   .sec-title { font-size: 34px; font-weight: 900; letter-spacing: 0.6px; margin: 18px 0 10px 0; }
@@ -2426,7 +2442,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.divider()
 with st.sidebar:
-    st.markdown("### 🔐 Đăng nhập người dùng")
     user_key = st.text_input("Client Code", type="password")
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
     run_btn = st.button("Phân tích", type="primary", use_container_width=True)
