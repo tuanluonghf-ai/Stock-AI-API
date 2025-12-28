@@ -69,6 +69,79 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+  /* App container */
+  .incept-wrap { max-width: 1200px; margin: 0 auto; }
+  .incept-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding: 6px 0 8px 0; }
+  .incept-brand { font-size: 34px; font-weight: 900; letter-spacing: 0.5px; }
+  .incept-nav { display:flex; gap:18px; align-items:center; }
+  .incept-nav a { text-decoration:none; font-weight:800; color:#0F172A; font-size:14px; letter-spacing:0.6px; }
+  .incept-nav a:hover { opacity: 0.75; }
+
+  /* Streamlit top header */
+  header[data-testid="stHeader"] { background: #ffffff !important; }
+  /* Remove any dark tint behind header */
+  div[data-testid="stDecoration"] { background: #ffffff !important; }
+
+  /* Sidebar inputs/button text color */
+  section[data-testid="stSidebar"] input { color: #ffffff !important; }
+  section[data-testid="stSidebar"] textarea { color: #ffffff !important; }
+  section[data-testid="stSidebar"] button { color: #ffffff !important; }
+
+  /* If your inputs are created via st.text_input, the visible text is inside this */
+  .stTextInput input { color: #ffffff !important; }
+
+  /* Button label (Streamlit uses nested div/span) */
+  .stButton > button { color: #ffffff !important; }
+
+  /* Report section titles (match header line 1 size) */
+  .sec-title { font-size: 34px; font-weight: 900; letter-spacing: 0.6px; margin: 18px 0 10px 0; }
+
+  /* Cards / callouts / metrics */
+  .incept-card {
+    background: #F7F7F9;
+    border: 1px solid #DDDEE2;
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin: 10px 0;
+  }
+  .incept-callout {
+    background: #FFF7ED;
+    border: 1px solid #FDBA74;
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin: 10px 0;
+  }
+  .incept-divider { height: 1px; background: #E2E8F0; margin: 16px 0; }
+  .incept-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .incept-metric {
+    background: #0F172A;
+    color: white;
+    border-radius: 14px;
+    padding: 12px 14px;
+  }
+  .incept-metric .k { font-size: 12px; color: #CBD5E1; margin-bottom: 6px; font-weight: 700; }
+  .incept-metric .v { font-size: 20px; font-weight: 900; line-height: 1.2; }
+
+  /* Right placeholder panel */
+  .right-panel {
+    border: 1px dashed #CBD5E1;
+    border-radius: 14px;
+    padding: 14px 14px;
+    min-height: 520px;
+    background: #ffffff;
+  }
+  .right-panel .t { font-weight: 900; color:#0F172A; margin-bottom: 8px; }
+  .right-panel .d { color:#64748B; font-size: 13px; line-height: 1.5; }
+</style>
+""", unsafe_allow_html=True)
+
 # ============================================================
 # 2. PATHS & CONSTANTS
 # ============================================================
@@ -2129,16 +2202,223 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     return f"{header_html}\n\n{content}"
 
 # ============================================================
+# 11B. UI HELPERS (PRESENTATION ONLY)
+# ============================================================
+def _split_sections(report_text: str) -> dict:
+    parts = {"A": "", "B": "", "C": "", "D": ""}
+    if not report_text:
+        return parts
+    text = report_text.replace("\r\n", "\n")
+    pattern = re.compile(r"(?m)^(A|B|C|D)\.\s")
+    matches = list(pattern.finditer(text))
+    if not matches:
+        parts["A"] = text
+        return parts
+    for i, m in enumerate(matches):
+        key = m.group(1)
+        start = m.start()
+        end = matches[i+1].start() if i+1 < len(matches) else len(text)
+        parts[key] = text[start:end].strip()
+    return parts
+
+def _extract_a_items(a_text: str) -> list:
+    if not a_text:
+        return []
+    text = a_text.replace("\r\n", "\n")
+    text = re.sub(r"(?m)^A\..*\n?", "", text).strip()
+    item_pat = re.compile(r"(?ms)^\s*(\d)\.\s*(.*?)(?=^\s*\d\.|\Z)")
+    found = item_pat.findall(text)
+    items = [""] * 8
+    for num, body in found:
+        idx = int(num) - 1
+        if 0 <= idx < 8:
+            items[idx] = body.strip()
+    non_empty = sum(1 for x in items if x.strip())
+    return items if non_empty >= 4 else []
+
+def render_report_pretty(report_text: str, analysis_pack: dict):
+    sections = _split_sections(report_text)
+    a_items = _extract_a_items(sections.get("A", ""))
+
+    st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
+
+    st.markdown('<div class="sec-title">KỸ THUẬT</div>', unsafe_allow_html=True)
+    if a_items:
+        for i, body in enumerate(a_items, start=1):
+            if not body.strip():
+                continue
+            st.markdown(
+                f"""
+                <div class="incept-card">
+                  <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
+                  <div>{body}</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+    else:
+        st.markdown(sections.get("A", ""), unsafe_allow_html=False)
+
+    st.markdown('<div class="sec-title">CƠ BẢN</div>', unsafe_allow_html=True)
+    b = sections.get("B", "").strip()
+    if b:
+        b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
+        st.markdown(
+            f"""
+            <div class="incept-callout">
+              {b_body}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.info("N/A")
+
+    st.markdown('<div class="sec-title">TRADE PLAN</div>', unsafe_allow_html=True)
+    c = sections.get("C", "").strip()
+    if c:
+        c_body = re.sub(r"(?m)^C\..*\n?", "", c).strip()
+        st.markdown(
+            f"""
+            <div class="incept-card">
+              <div style="font-weight:800; margin-bottom:6px;">Trade plan</div>
+              <div>{c_body}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.info("N/A")
+
+    st.markdown('<div class="sec-title">RỦI RO &amp; LỢI NHUẬN</div>', unsafe_allow_html=True)
+    ps = (analysis_pack or {}).get("PrimarySetup") or {}
+    risk = ps.get("RiskPct", None)
+    reward = ps.get("RewardPct", None)
+    rr = ps.get("RR", None)
+    prob = ps.get("Probability", "N/A")
+
+    def _fmt_pct_local(x):
+        return "N/A" if x is None else f"{float(x):.2f}%"
+
+    def _fmt_rr_local(x):
+        return "N/A" if x is None else f"{float(x):.2f}"
+
+    st.markdown(
+        f"""
+        <div class="incept-metrics">
+          <div class="incept-metric"><div class="k">Risk%</div><div class="v">{_fmt_pct_local(risk)}</div></div>
+          <div class="incept-metric"><div class="k">Reward%</div><div class="v">{_fmt_pct_local(reward)}</div></div>
+          <div class="incept-metric"><div class="k">RR</div><div class="v">{_fmt_rr_local(rr)}</div></div>
+          <div class="incept-metric"><div class="k">Probability</div><div class="v">{prob}</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# Override with clean typography (later definition takes precedence)
+def render_report_pretty(report_text: str, analysis_pack: dict):
+    sections = _split_sections(report_text)
+    a_items = _extract_a_items(sections.get("A", ""))
+
+    st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
+
+    st.markdown('<div class="sec-title">KỸ THUẬT</div>', unsafe_allow_html=True)
+    if a_items:
+        for i, body in enumerate(a_items, start=1):
+            if not body.strip():
+                continue
+            st.markdown(
+                f"""
+                <div class="incept-card">
+                  <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
+                  <div>{body}</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+    else:
+        st.markdown(sections.get("A", ""), unsafe_allow_html=False)
+
+    st.markdown('<div class="sec-title">CƠ BẢN</div>', unsafe_allow_html=True)
+    b = sections.get("B", "").strip()
+    if b:
+        b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
+        st.markdown(
+            f"""
+            <div class="incept-callout">
+              {b_body}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.info("N/A")
+
+    st.markdown('<div class="sec-title">TRADE PLAN</div>', unsafe_allow_html=True)
+    c = sections.get("C", "").strip()
+    if c:
+        c_body = re.sub(r"(?m)^C\..*\n?", "", c).strip()
+        st.markdown(
+            f"""
+            <div class="incept-card">
+              <div style="font-weight:800; margin-bottom:6px;">Trade plan</div>
+              <div>{c_body}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.info("N/A")
+
+    st.markdown('<div class="sec-title">RỦI RO &amp; LỢI NHUẬN</div>', unsafe_allow_html=True)
+    ps = (analysis_pack or {}).get("PrimarySetup") or {}
+    risk = ps.get("RiskPct", None)
+    reward = ps.get("RewardPct", None)
+    rr = ps.get("RR", None)
+    prob = ps.get("Probability", "N/A")
+
+    def _fmt_pct_local(x):
+        return "N/A" if x is None else f"{float(x):.2f}%"
+
+    def _fmt_rr_local(x):
+        return "N/A" if x is None else f"{float(x):.2f}"
+
+    st.markdown(
+        f"""
+        <div class="incept-metrics">
+          <div class="incept-metric"><div class="k">Risk%</div><div class="v">{_fmt_pct_local(risk)}</div></div>
+          <div class="incept-metric"><div class="k">Reward%</div><div class="v">{_fmt_pct_local(reward)}</div></div>
+          <div class="incept-metric"><div class="k">RR</div><div class="v">{_fmt_rr_local(rr)}</div></div>
+          <div class="incept-metric"><div class="k">Probability</div><div class="v">{prob}</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ============================================================
 # 12. STREAMLIT UI & APP LAYOUT
 # ============================================================
-st.markdown("<h1 style='color:#A855F7; margin-bottom:6px;'>INCEPTION v5.6</h1>", unsafe_allow_html=True)
+st.markdown("""
+<div class="incept-wrap">
+  <div class="incept-header">
+    <div class="incept-brand">INCEPTION v5.6</div>
+    <div class="incept-nav">
+      <a href="javascript:void(0)">CỔ PHIẾU</a>
+      <a href="javascript:void(0)">DANH MỤC</a>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 st.divider()
 with st.sidebar:
     st.markdown("### 🔐 Đăng nhập người dùng")
-    user_key = st.text_input("Nhập Mã VIP:", type="password")
+    user_key = st.text_input("Client Code", type="password")
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
     run_btn = st.button("Phân tích", type="primary", use_container_width=True)
-col_main, = st.columns([1])
 
 # ============================================================
 # 13. MAIN EXECUTION
@@ -2152,7 +2432,20 @@ if run_btn:
                 result = analyze_ticker(ticker_input)
                 report = generate_insight_report(result)
                 st.markdown("<hr>", unsafe_allow_html=True)
-                st.markdown(report, unsafe_allow_html=True)
+                left, right = st.columns([0.68, 0.32], gap="large")
+                with left:
+                    analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
+                    render_report_pretty(report, analysis_pack)
+                with right:
+                    st.markdown(
+                        """
+                        <div class="right-panel">
+                          <div class="t">KHU VỰC BIỂU ĐỒ (SẮP CÓ)</div>
+                          <div class="d">Chừa sẵn không gian cho charts / heatmap / timeline / notes. Hiện tại chưa gắn chức năng.</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
             except Exception as e:
                 st.error(f"⚠️ Lỗi xử lý: {e}")
 
