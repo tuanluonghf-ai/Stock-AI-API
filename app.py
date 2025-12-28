@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.5 | Strategic Investor Edition
+# INCEPTION v5.6 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -26,7 +26,7 @@ from typing import Dict, Any, Tuple, List, Optional
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.5",
+st.set_page_config(page_title="INCEPTION v5.6",
                    layout="wide",
                    page_icon="🟣")
 
@@ -47,62 +47,20 @@ st.markdown("""
     /* Full-width glossy black button */
     .stButton>button {
         width: 100%;
-        background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%);
-        color: #F8FAFC !important;
+        background: linear-gradient(180deg, #111827 0%, #000000 100%);
+        color: #FFFFFF !important;
         font-weight: 700;
         border-radius: 10px;
         height: 44px;
-        border: 1px solid rgba(15,23,42,0.12);
-        box-shadow: 0 6px 14px rgba(15,23,42,0.2);
+        border: 1px solid rgba(255,255,255,0.12);
+        box-shadow: 0 6px 14px rgba(0,0,0,0.45);
     }
     .stButton>button:hover {
-        background: linear-gradient(180deg, #0F172A 0%, #0B1220 100%);
-        border: 1px solid rgba(15,23,42,0.25);
+        background: linear-gradient(180deg, #0B1220 0%, #000000 100%);
+        border: 1px solid rgba(255,255,255,0.18);
     }
 </style>
 """, unsafe_allow_html=True)
-
-st.markdown(
-    """
-    <style>
-      .incept-wrap { max-width: 980px; margin: 0 auto; }
-      .incept-h1 { font-size: 34px; font-weight: 800; margin: 6px 0 8px 0; }
-      .incept-sub { color: #475569; font-size: 14px; margin-bottom: 14px; }
-      .incept-card {
-        background: #F7F7F9;
-        border: 1px solid #DDDEE2;
-        border-radius: 14px;
-        padding: 14px 16px;
-        margin: 10px 0;
-      }
-      .incept-callout {
-        background: #FFF7ED;
-        border: 1px solid #FDBA74;
-        border-radius: 14px;
-        padding: 14px 16px;
-        margin: 10px 0;
-      }
-      .incept-metrics {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 10px;
-      }
-      .incept-metric {
-        background: #0F172A;
-        color: white;
-        border-radius: 14px;
-        padding: 12px 14px;
-      }
-      .incept-metric .k { font-size: 12px; color: #CBD5E1; margin-bottom: 6px; font-weight: 700; }
-      .incept-metric .v { font-size: 20px; font-weight: 800; line-height: 1.2; }
-      .incept-divider { height: 1px; background: #E2E8F0; margin: 16px 0; }
-      /* tighten default Streamlit text a bit */
-      .stMarkdown, .stText, .stCaption { line-height: 1.6; }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 
 # ============================================================
 # 2. PATHS & CONSTANTS
@@ -1157,7 +1115,7 @@ def compute_conviction(last: pd.Series) -> float:
     return _safe_float(pack.get("Score"), default=5.0)
 
 # ============================================================
-# 8. TRADE PLAN LOGIC (Step 9+10 / v5.5 patch for Step 8)
+# 8. TRADE PLAN LOGIC (Step 9+10 / v5.6 patch for Step 8)
 # - Remove fixed % buffer
 # - Stop/Entry/TP anchored to MA+Fib (short+long) + dynamic buffer
 # - Add Probability label computed in Python (no GPT math)
@@ -2164,152 +2122,9 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     return f"{header_html}\n\n{content}"
 
 # ============================================================
-# 11B. UI HELPERS FOR PRETTY RENDER
-# ============================================================
-import re
-
-def _split_sections(report_text: str) -> dict:
-    # Expect headings like "A. ...", "B. ...", "C. ...", "D. ..."
-    parts = {"A":"", "B":"", "C":"", "D":""}
-    if not report_text:
-        return parts
-
-    # Normalize line endings
-    text = report_text.replace("\r\n", "\n")
-
-    # Find indices of section headers
-    pattern = re.compile(r"(?m)^(A|B|C|D)\.\s")
-    matches = list(pattern.finditer(text))
-    if not matches:
-        # fallback: everything into A
-        parts["A"] = text
-        return parts
-
-    for i, m in enumerate(matches):
-        key = m.group(1)
-        start = m.start()
-        end = matches[i+1].start() if i+1 < len(matches) else len(text)
-        parts[key] = text[start:end].strip()
-
-    return parts
-
-def _extract_a_items(a_text: str) -> list:
-    # Extract 1..8 blocks. If fails, return empty.
-    if not a_text:
-        return []
-    text = a_text.replace("\r\n", "\n")
-    # Remove the "A. ..." header line
-    text = re.sub(r"(?m)^A\..*\n?", "", text).strip()
-
-    # Match numbered items (1) or "1." patterns
-    item_pat = re.compile(r"(?ms)^\s*(\d)\.\s*(.*?)(?=^\s*\d\.|\Z)")
-    found = item_pat.findall(text)
-    items = [""] * 8
-    for num, body in found:
-        idx = int(num) - 1
-        if 0 <= idx < 8:
-            items[idx] = body.strip()
-
-    # Validate: need most items non-empty
-    non_empty = sum(1 for x in items if x.strip())
-    return items if non_empty >= 6 else []
-
-def render_report_pretty(report_text: str, analysis_pack: dict):
-    sections = _split_sections(report_text)
-    a_items = _extract_a_items(sections.get("A",""))
-
-    st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
-
-    tabs = st.tabs(["A. Kỹ thuật", "B. Cơ bản", "C + D. Trade plan"])
-    with tabs[0]:
-        if a_items:
-            for i, body in enumerate(a_items, start=1):
-                if not body.strip():
-                    continue
-                st.markdown(
-                    f"""
-                    <div class="incept-card">
-                      <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
-                      <div>{body}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-        else:
-            # fallback: show A as-is
-            st.markdown(sections.get("A",""), unsafe_allow_html=False)
-
-    with tabs[1]:
-        b = sections.get("B","").strip()
-        if b:
-            # remove header line "B. ..."
-            b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
-            st.markdown(
-                f"""
-                <div class="incept-callout">
-                  {b_body}
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        else:
-            st.info("N/A")
-
-    with tabs[2]:
-        c = sections.get("C","").strip()
-        if c:
-            c_body = re.sub(r"(?m)^C\..*\n?", "", c).strip()
-            st.markdown(
-                f"""
-                <div class="incept-card">
-                  <div style="font-weight:800; margin-bottom:6px;">Trade plan</div>
-                  <div>{c_body}</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        else:
-            st.info("N/A")
-
-        # D metrics from PrimarySetup (NO recompute, NO parse)
-        ps = (analysis_pack or {}).get("PrimarySetup") or {}
-        risk = ps.get("RiskPct", None)
-        reward = ps.get("RewardPct", None)
-        rr = ps.get("RR", None)
-        prob = ps.get("Probability", "N/A")
-
-        def _fmt_pct(x):
-            return "N/A" if x is None else f"{float(x):.2f}%"
-        def _fmt_rr(x):
-            return "N/A" if x is None else f"{float(x):.2f}"
-
-        st.markdown('<div class="incept-divider"></div>', unsafe_allow_html=True)
-        st.markdown("<div style='font-weight:900; font-size:16px; margin-bottom:6px;'>D. Rủi ro vs lợi nhuận</div>", unsafe_allow_html=True)
-
-        st.markdown(
-            f"""
-            <div class="incept-metrics">
-              <div class="incept-metric"><div class="k">Risk%</div><div class="v">{_fmt_pct(risk)}</div></div>
-              <div class="incept-metric"><div class="k">Reward%</div><div class="v">{_fmt_pct(reward)}</div></div>
-              <div class="incept-metric"><div class="k">RR</div><div class="v">{_fmt_rr(rr)}</div></div>
-              <div class="incept-metric"><div class="k">Probability</div><div class="v">{prob}</div></div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        with st.expander("Audit (raw PrimarySetup)"):
-            st.json(ps)
-
-    with st.expander("Show raw output (GPT)"):
-        st.code(report_text or "", language="markdown")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ============================================================
 # 12. STREAMLIT UI & APP LAYOUT
 # ============================================================
-st.markdown("<h1 style='color:#A855F7; margin-bottom:6px;'>INCEPTION v5.5</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#A855F7; margin-bottom:6px;'>INCEPTION v5.6</h1>", unsafe_allow_html=True)
 st.divider()
 with st.sidebar:
     st.markdown("### 🔐 Đăng nhập người dùng")
@@ -2330,8 +2145,7 @@ if run_btn:
                 result = analyze_ticker(ticker_input)
                 report = generate_insight_report(result)
                 st.markdown("<hr>", unsafe_allow_html=True)
-                analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
-                render_report_pretty(report, analysis_pack)
+                st.markdown(report, unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"⚠️ Lỗi xử lý: {e}")
 
@@ -2343,7 +2157,7 @@ st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
     © 2025 INCEPTION Research Framework<br>
-    Phiên bản 5.5 | Engine GPT-4o
+    Phiên bản 5.6 | Engine GPT-4o
     </p>
     """,
     unsafe_allow_html=True
