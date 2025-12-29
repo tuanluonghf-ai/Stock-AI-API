@@ -1,8 +1,8 @@
-# ============================================================
+﻿# ============================================================
 # INCEPTION v5.6 | Strategic Investor Edition
-# app.py — Streamlit + GPT-4o
+# app.py â€” Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
-# Purpose: Technical–Fundamental Integrated Research Assistant
+# Purpose: Technicalâ€“Fundamental Integrated Research Assistant
 # CHANGELOG:
 # v5.0-5.1: Core Refactoring + TradePlan v2
 # v5.2-5.3: Neutralization Phase 1 & 2 (Tags, Facts only)
@@ -28,7 +28,7 @@ from typing import Dict, Any, Tuple, List, Optional
 # ============================================================
 st.set_page_config(page_title="INCEPTION v5.6",
                    layout="wide",
-                   page_icon="🟣")
+                   page_icon="ðŸŸ£")
 
 st.markdown("""
 <style>
@@ -117,7 +117,7 @@ st.markdown("""
     border: 1px solid #0B0F17 !important;
   }
 
-  /* Sidebar "Phân tích" button: white bg, black border, black text */
+  /* Sidebar "PhÃ¢n tÃ­ch" button: white bg, black border, black text */
   section[data-testid="stSidebar"] .stButton > button{
     background: #FFFFFF !important;
     border: 1px solid #0F172A !important;
@@ -208,12 +208,12 @@ HSC_TARGET_PATH = "Tickers target price.xlsx"
 TICKER_NAME_PATH = "Ticker name.xlsx"
 
 VALID_KEYS = {
-    "VIP888": {"name": "Admin Tuấn", "quota": 999},
-    "KH01": {"name": "Khách mời 01", "quota": 5},
-    "KH02": {"name": "Khách mời 02", "quota": 5},
-    "KH03": {"name": "Khách mời 03", "quota": 5},
-    "KH04": {"name": "Khách mời 04", "quota": 5},
-    "KH05": {"name": "Khách mời 05", "quota": 5},
+    "VIP888": {"name": "Admin Tuáº¥n", "quota": 999},
+    "KH01": {"name": "KhÃ¡ch má»i 01", "quota": 5},
+    "KH02": {"name": "KhÃ¡ch má»i 02", "quota": 5},
+    "KH03": {"name": "KhÃ¡ch má»i 03", "quota": 5},
+    "KH04": {"name": "KhÃ¡ch má»i 04", "quota": 5},
+    "KH05": {"name": "KhÃ¡ch má»i 05", "quota": 5},
 }
 
 # ============================================================
@@ -329,10 +329,10 @@ def _detect_divergence_simple(close: pd.Series, osc: pd.Series, lookback: int = 
 
 def _scenario_vi(x: str) -> str:
     m = {
-        "Uptrend – Breakout Confirmation": "Xu hướng tăng — Xác nhận bứt phá",
-        "Uptrend – Pullback Phase": "Xu hướng tăng — Pha điều chỉnh",
-        "Downtrend – Weak Phase": "Xu hướng giảm — Yếu",
-        "Neutral / Sideways": "Đi ngang / Trung tính",
+        "Uptrend â€“ Breakout Confirmation": "Xu hÆ°á»›ng tÄƒng â€” XÃ¡c nháº­n bá»©t phÃ¡",
+        "Uptrend â€“ Pullback Phase": "Xu hÆ°á»›ng tÄƒng â€” Pha Ä‘iá»u chá»‰nh",
+        "Downtrend â€“ Weak Phase": "Xu hÆ°á»›ng giáº£m â€” Yáº¿u",
+        "Neutral / Sideways": "Äi ngang / Trung tÃ­nh",
     }
     return m.get(x, x)
 
@@ -340,7 +340,7 @@ def _scenario_vi(x: str) -> str:
 # 3B. GUARD-D: PRIMARYSETUP + VALIDATION + RETRY
 # ============================================================
 def _extract_d_block(text: str) -> str:
-    m = re.search(r"(^|\n)\s*D\.\s*Rủi\s*ro.*$", text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
+    m = re.search(r"(^|\n)\s*D\.\s*Rá»§i\s*ro.*$", text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
     return m.group(0) if m else text
 
 def _grab_number(block: str, label_patterns: List[str]) -> float:
@@ -370,12 +370,12 @@ def validate_section_d(text: str, primary: Dict[str, Any]) -> bool:
     block = _extract_d_block(text)
     got_risk = _grab_number(block, [
         r"Risk%\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
-        r"Rủi\s*ro\s*%\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
+        r"Rá»§i\s*ro\s*%\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
         r"RiskPct\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
     ])
     got_reward = _grab_number(block, [
         r"Reward%\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
-        r"Lợi\s*nhuận\s*%\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
+        r"Lá»£i\s*nhuáº­n\s*%\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
         r"RewardPct\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
     ])
     got_rr = _grab_number(block, [
@@ -383,8 +383,8 @@ def validate_section_d(text: str, primary: Dict[str, Any]) -> bool:
         r"R\s*[:/]\s*R\s*:\s*([0-9]+(?:\.[0-9]+)?)",
     ])
     got_prob = _grab_text(block, [
-        r"Probability\s*:\s*([A-Za-zÀ-ỹ0-9\-\s]+)",
-        r"Xác\s*suất\s*:\s*([A-Za-zÀ-ỹ0-9\-\s]+)",
+        r"Probability\s*:\s*([A-Za-zÃ€-á»¹0-9\-\s]+)",
+        r"XÃ¡c\s*suáº¥t\s*:\s*([A-Za-zÃ€-á»¹0-9\-\s]+)",
     ]) or ""
     
     exp_risk = _safe_float(primary.get("RiskPct"))
@@ -411,7 +411,7 @@ def _call_openai(prompt: str, temperature: float) -> str:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "Bạn là INCEPTION AI, chuyên gia phân tích đầu tư."},
+            {"role": "system", "content": "Báº¡n lÃ  INCEPTION AI, chuyÃªn gia phÃ¢n tÃ­ch Ä‘áº§u tÆ°."},
             {"role": "user", "content": prompt}
         ],
         temperature=temperature,
@@ -429,11 +429,11 @@ def call_gpt_with_guard(prompt: str, analysis_pack: Dict[str, Any], max_retry: i
         extra = ""
         if i > 0:
             extra = f"""
-SỬA LỖI BẮT BUỘC (chỉ sửa mục D, giữ nguyên các mục khác):
-Mục D đang sai số. Hãy sửa lại mục D bằng cách COPY ĐÚNG các số sau (không được tự tính/ước lượng):
+Sá»¬A Lá»–I Báº®T BUá»˜C (chá»‰ sá»­a má»¥c D, giá»¯ nguyÃªn cÃ¡c má»¥c khÃ¡c):
+Má»¥c D Ä‘ang sai sá»‘. HÃ£y sá»­a láº¡i má»¥c D báº±ng cÃ¡ch COPY ÄÃšNG cÃ¡c sá»‘ sau (khÃ´ng Ä‘Æ°á»£c tá»± tÃ­nh/Æ°á»›c lÆ°á»£ng):
 Risk%={primary.get('RiskPct')}, Reward%={primary.get('RewardPct')}, RR={primary.get('RR')}, Probability={primary.get('Probability')}.
 
-Mục D bắt buộc đúng format 4 dòng:
+Má»¥c D báº¯t buá»™c Ä‘Ãºng format 4 dÃ²ng:
 Risk%: <...>
 Reward%: <...>
 RR: <...>
@@ -455,7 +455,7 @@ def load_price_vol(path: str = PRICE_VOL_PATH) -> pd.DataFrame:
     try:
         df = pd.read_excel(path)
     except Exception as e:
-        st.error(f"Lỗi khi đọc file {path}: {e}")
+        st.error(f"Lá»—i khi Ä‘á»c file {path}: {e}")
         return pd.DataFrame()
     df.columns = [c.strip().title() for c in df.columns]
     rename = {"Ngay": "Date", "Ma": "Ticker", "Vol": "Volume"}
@@ -492,7 +492,7 @@ def load_hsc_targets(path: str = HSC_TARGET_PATH) -> pd.DataFrame:
             rename_map[c] = "Ticker"
         if c0 in ["TP (VND)", "Target", "Target Price", "TargetPrice", "TP"]:
             rename_map[c] = "Target"
-        if c1 in ["recommendation", "khuyennghi", "khuyến nghị"]:
+        if c1 in ["recommendation", "khuyennghi", "khuyáº¿n nghá»‹"]:
             rename_map[c] = "Recommendation"
     df.rename(columns=rename_map, inplace=True)
     if "Ticker" not in df.columns:
@@ -503,7 +503,7 @@ def load_hsc_targets(path: str = HSC_TARGET_PATH) -> pd.DataFrame:
     if "Target" not in df.columns:
         for c in df.columns:
             c1 = c.lower()
-            if ("tp" in c1) or ("target" in c1) or ("muc tieu" in c1) or ("mục tiêu" in c1):
+            if ("tp" in c1) or ("target" in c1) or ("muc tieu" in c1) or ("má»¥c tiÃªu" in c1):
                 df.rename(columns={c: "Target"}, inplace=True)
                 break
     if "Ticker" not in df.columns or "Target" not in df.columns:
@@ -944,7 +944,7 @@ def compute_rsi_macd_bias_features(rsi_feat: Dict[str, Any], macd_feat: Dict[str
     ])
     
     notes: List[str] = []
-    notes.append("Bias mô tả bằng điều kiện (facts), không kết luận tốt/xấu.")
+    notes.append("Bias mÃ´ táº£ báº±ng Ä‘iá»u kiá»‡n (facts), khÃ´ng káº¿t luáº­n tá»‘t/xáº¥u.")
     if cross_event != "None" and cross_bars is not None:
         notes.append(f"MACD_CrossEvent={cross_event}; BarsAgo={cross_bars}")
         
@@ -1679,9 +1679,9 @@ def build_trade_plan(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, Tr
 def classify_scenario(last: pd.Series) -> str:
     c, ma20, ma50, ma200 = last["Close"], last["MA20"], last["MA50"], last["MA200"]
     if all(pd.notna([c, ma20, ma50, ma200])):
-        if ma20 > ma50 > ma200 and c > ma20: return "Uptrend – Breakout Confirmation"
-        elif c > ma200 and ma20 > ma200: return "Uptrend – Pullback Phase"
-        elif c < ma200 and ma50 < ma200: return "Downtrend – Weak Phase"
+        if ma20 > ma50 > ma200 and c > ma20: return "Uptrend â€“ Breakout Confirmation"
+        elif c > ma200 and ma20 > ma200: return "Uptrend â€“ Pullback Phase"
+        elif c < ma200 and ma50 < ma200: return "Downtrend â€“ Weak Phase"
     return "Neutral / Sideways"
 
 # --- STEP 6B (v5.4): SCENARIO 12 NEUTRAL ("Extended" -> "RSI_70Plus") ---
@@ -1755,18 +1755,18 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
     code = trend_order.get(trend, 1) * 4 + mom_order.get(mom, 1) + 1
     
     name_map = {
-        ("Up", "Aligned"):   "S1 – Uptrend + Momentum Aligned",
-        ("Up", "Mixed"):     "S2 – Uptrend + Momentum Mixed",
-        ("Up", "Counter"):   "S3 – Uptrend + Momentum Counter",
-        ("Up", "RSI_70Plus"):  "S4 – Uptrend + RSI 70+",
-        ("Neutral", "Aligned"):  "S5 – Range + Momentum Aligned",
-        ("Neutral", "Mixed"):    "S6 – Range + Balanced/Mixed",
-        ("Neutral", "Counter"):  "S7 – Range + Momentum Counter",
-        ("Neutral", "RSI_70Plus"): "S8 – Range + RSI 70+",
-        ("Down", "Aligned"):  "S9 – Downtrend + Momentum Aligned",
-        ("Down", "Mixed"):    "S10 – Downtrend + Momentum Mixed",
-        ("Down", "Counter"):  "S11 – Downtrend + Momentum Counter",
-        ("Down", "RSI_70Plus"): "S12 – Downtrend + RSI 70+",
+        ("Up", "Aligned"):   "S1 â€“ Uptrend + Momentum Aligned",
+        ("Up", "Mixed"):     "S2 â€“ Uptrend + Momentum Mixed",
+        ("Up", "Counter"):   "S3 â€“ Uptrend + Momentum Counter",
+        ("Up", "RSI_70Plus"):  "S4 â€“ Uptrend + RSI 70+",
+        ("Neutral", "Aligned"):  "S5 â€“ Range + Momentum Aligned",
+        ("Neutral", "Mixed"):    "S6 â€“ Range + Balanced/Mixed",
+        ("Neutral", "Counter"):  "S7 â€“ Range + Momentum Counter",
+        ("Neutral", "RSI_70Plus"): "S8 â€“ Range + RSI 70+",
+        ("Down", "Aligned"):  "S9 â€“ Downtrend + Momentum Aligned",
+        ("Down", "Mixed"):    "S10 â€“ Downtrend + Momentum Mixed",
+        ("Down", "Counter"):  "S11 â€“ Downtrend + Momentum Counter",
+        ("Down", "RSI_70Plus"): "S12 â€“ Downtrend + RSI 70+",
     }
     
     return {
@@ -1774,7 +1774,7 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
         "TrendRegime": trend,
         "MomentumRegime": mom,
         "VolumeRegime": vol_reg,
-        "Name": name_map.get((trend, mom), "Scenario – N/A"),
+        "Name": name_map.get((trend, mom), "Scenario â€“ N/A"),
         "RulesHit": rules_hit,
         "Flags": {
             "TrendUp": (trend=="Up"),
@@ -1904,7 +1904,7 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
         "Notes": notes
     }
 # ============================================================
-# 9D. RISK–REWARD SIMULATION PACK
+# 9D. RISKâ€“REWARD SIMULATION PACK
 # ============================================================
 def build_rr_sim(trade_plans: Dict[str, TradeSetup]) -> Dict[str, Any]:
     rows = []
@@ -1932,9 +1932,9 @@ def build_rr_sim(trade_plans: Dict[str, TradeSetup]) -> Dict[str, Any]:
 # ============================================================
 def analyze_ticker(ticker: str) -> Dict[str, Any]:
     df_all = load_price_vol(PRICE_VOL_PATH)
-    if df_all.empty: return {"Error": "Không đọc được dữ liệu Price_Vol.xlsx"}
+    if df_all.empty: return {"Error": "KhÃ´ng Ä‘á»c Ä‘Æ°á»£c dá»¯ liá»‡u Price_Vol.xlsx"}
     df = df_all[df_all["Ticker"].str.upper() == ticker.upper()].copy()
-    if df.empty: return {"Error": f"Không tìm thấy mã {ticker}"}
+    if df.empty: return {"Error": f"KhÃ´ng tÃ¬m tháº¥y mÃ£ {ticker}"}
     
     df["MA20"] = sma(df["Close"], 20)
     df["MA50"] = sma(df["Close"], 50)
@@ -2126,20 +2126,20 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
 # 11. GPT-4o STRATEGIC INSIGHT GENERATION
 # ============================================================
 def generate_insight_report(data: Dict[str, Any]) -> str:
-    if "Error" in data: return f"❌ {data['Error']}"
+    if "Error" in data: return f"âŒ {data['Error']}"
     tick = data["Ticker"]
     scenario = data["Scenario"]
     conviction = data["Conviction"]
     analysis_pack = data.get("AnalysisPack", {})
     last = data["Last"]
     close = _fmt_price(last.get("Close"))
-    header_html = f"<h2 style='margin:0; padding:0; font-size:26px; line-height:1.2;'>{tick} — {close} | Điểm tin cậy: {conviction:.1f}/10 | {_scenario_vi(scenario)}</h2>"
+    header_html = f"<h2 style='margin:0; padding:0; font-size:26px; line-height:1.2;'>{tick} â€” {close} | Äiá»ƒm tin cáº­y: {conviction:.1f}/10 | {_scenario_vi(scenario)}</h2>"
     fund = data.get("Fundamental", {})
     fund_text = (
-        f"Khuyến nghị: {fund.get('Recommendation', 'N/A')} | "
-        f"Giá mục tiêu: {_fmt_thousand(fund.get('Target'))} | "
+        f"Khuyáº¿n nghá»‹: {fund.get('Recommendation', 'N/A')} | "
+        f"GiÃ¡ má»¥c tiÃªu: {_fmt_thousand(fund.get('Target'))} | "
         f"Upside: {_fmt_pct(fund.get('UpsidePct'))}"
-        if fund else "Không có dữ liệu cơ bản"
+        if fund else "KhÃ´ng cÃ³ dá»¯ liá»‡u cÆ¡ báº£n"
     )
     pack_json = json.dumps(analysis_pack, ensure_ascii=False)
     primary = (analysis_pack.get("PrimarySetup") or {})
@@ -2148,32 +2148,32 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     must_rr = primary.get("RR")
     must_prob = primary.get("Probability")
     # ============================================================
-    # STEP 10 — PROMPT v10 (Narrative Refinement)
-    # - Context → Impact → Action
-    # - Each sentence: max 1–2 numbers
+    # STEP 10 â€” PROMPT v10 (Narrative Refinement)
+    # - Context â†’ Impact â†’ Action
+    # - Each sentence: max 1â€“2 numbers
     # - Use ContextPacks to avoid dry tags
     # - FUNDAMENTAL LOCK: only allowed in section B
     # - Keep C + D contiguous; D must copy PrimarySetup
     # ============================================================
     prompt = f"""
-    Bạn là "INCEPTION Narrative Editor" cho báo cáo phân tích cổ phiếu.
-    Vai trò của bạn: DIỄN GIẢI + BIÊN TẬP văn phong từ JSON "AnalysisPack".
-    TUYỆT ĐỐI:
-    - Không bịa số, không ước lượng, không tự tính.
-    - Chỉ được dùng đúng con số có sẵn trong JSON.
-    - Không nói "theo tôi tính", không suy ra số mới từ số cũ.
+    Báº¡n lÃ  "INCEPTION Narrative Editor" cho bÃ¡o cÃ¡o phÃ¢n tÃ­ch cá»• phiáº¿u.
+    Vai trÃ² cá»§a báº¡n: DIá»„N GIáº¢I + BIÃŠN Táº¬P vÄƒn phong tá»« JSON "AnalysisPack".
+    TUYá»†T Äá»I:
+    - KhÃ´ng bá»‹a sá»‘, khÃ´ng Æ°á»›c lÆ°á»£ng, khÃ´ng tá»± tÃ­nh.
+    - Chá»‰ Ä‘Æ°á»£c dÃ¹ng Ä‘Ãºng con sá»‘ cÃ³ sáºµn trong JSON.
+    - KhÃ´ng nÃ³i "theo tÃ´i tÃ­nh", khÃ´ng suy ra sá»‘ má»›i tá»« sá»‘ cÅ©.
     
-    RÀNG BUỘC QUAN TRỌNG (FUNDAMENTAL LOCK):
-    - Fundamental (Recommendation/Target/Upside/broker...) CHỈ ĐƯỢC NHẮC Ở MỤC B.
-    - Ở A/C/D: CẤM nhắc Target/Upside/Recommendation hoặc bất kỳ ý "định giá/cơ bản" nào.
-    - Nếu bạn lỡ viết Fundamental ở A/C/D => sai nhiệm vụ.
+    RÃ€NG BUá»˜C QUAN TRá»ŒNG (FUNDAMENTAL LOCK):
+    - Fundamental (Recommendation/Target/Upside/broker...) CHá»ˆ ÄÆ¯á»¢C NHáº®C á»ž Má»¤C B.
+    - á»ž A/C/D: Cáº¤M nháº¯c Target/Upside/Recommendation hoáº·c báº¥t ká»³ Ã½ "Ä‘á»‹nh giÃ¡/cÆ¡ báº£n" nÃ o.
+    - Náº¿u báº¡n lá»¡ viáº¿t Fundamental á»Ÿ A/C/D => sai nhiá»‡m vá»¥.
     
-    YÊU CẦU FORMAT OUTPUT:
-    - Không emoji.
-    - Không bullet kiểu 1️⃣ 2️⃣.
-    - Bắt buộc đúng 4 mục A–D với cấu trúc:
+    YÃŠU Cáº¦U FORMAT OUTPUT:
+    - KhÃ´ng emoji.
+    - KhÃ´ng bullet kiá»ƒu 1ï¸âƒ£ 2ï¸âƒ£.
+    - Báº¯t buá»™c Ä‘Ãºng 4 má»¥c Aâ€“D vá»›i cáº¥u trÃºc:
     
-    A. Kỹ thuật
+    A. Ká»¹ thuáº­t
     1) ...
     2) ...
     3) ...
@@ -2183,80 +2183,80 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     7) ...
     8) ...
     
-    B. Cơ bản
-    (chỉ 1–3 câu, dùng đúng dòng dữ liệu đã cung cấp)
+    B. CÆ¡ báº£n
+    (chá»‰ 1â€“3 cÃ¢u, dÃ¹ng Ä‘Ãºng dÃ²ng dá»¯ liá»‡u Ä‘Ã£ cung cáº¥p)
     
     C. Trade plan
-    (viết ngắn gọn 5–9 câu)
+    (viáº¿t ngáº¯n gá»n 5â€“9 cÃ¢u)
     
-    D. Rủi ro vs lợi nhuận
+    D. Rá»§i ro vs lá»£i nhuáº­n
     Risk%: ...
     Reward%: ...
     RR: ...
     Probability: ...
     
-    QUY TẮC VĂN PHONG (chống "khô"):
-    - Mỗi mục (A1→A8) viết 2–4 câu theo mẫu: (Bối cảnh) → (Tác động) → (Hành động).
-    - Mỗi câu tối đa 1–2 con số (vd: RSI, khoảng cách %, RR). Không nhồi nhiều số trong 1 câu.
-    - Không liệt kê tags thô. Nếu cần nhắc tag, hãy chuyển thành ý nghĩa hành động.
-    - Tránh kết luận cứng “mua/bán/tốt/xấu”. Dùng ngôn ngữ điều kiện: “thiên về”, “ưu tiên”, “nếu/ khi”.
-    - Ưu tiên 2–3 điểm quan trọng nhất thay vì kể hết.
+    QUY Táº®C VÄ‚N PHONG (chá»‘ng "khÃ´"):
+    - Má»—i má»¥c (A1â†’A8) viáº¿t 2â€“4 cÃ¢u theo máº«u: (Bá»‘i cáº£nh) â†’ (TÃ¡c Ä‘á»™ng) â†’ (HÃ nh Ä‘á»™ng).
+    - Má»—i cÃ¢u tá»‘i Ä‘a 1â€“2 con sá»‘ (vd: RSI, khoáº£ng cÃ¡ch %, RR). KhÃ´ng nhá»“i nhiá»u sá»‘ trong 1 cÃ¢u.
+    - KhÃ´ng liá»‡t kÃª tags thÃ´. Náº¿u cáº§n nháº¯c tag, hÃ£y chuyá»ƒn thÃ nh Ã½ nghÄ©a hÃ nh Ä‘á»™ng.
+    - TrÃ¡nh káº¿t luáº­n cá»©ng â€œmua/bÃ¡n/tá»‘t/xáº¥uâ€. DÃ¹ng ngÃ´n ngá»¯ Ä‘iá»u kiá»‡n: â€œthiÃªn vá»â€, â€œÆ°u tiÃªnâ€, â€œnáº¿u/ khiâ€.
+    - Æ¯u tiÃªn 2â€“3 Ä‘iá»ƒm quan trá»ng nháº¥t thay vÃ¬ ká»ƒ háº¿t.
     
-    HƯỚNG DẪN KHAI THÁC CONTEXT PACKS (bắt buộc tận dụng để viết mượt):
+    HÆ¯á»šNG DáºªN KHAI THÃC CONTEXT PACKS (báº¯t buá»™c táº­n dá»¥ng Ä‘á»ƒ viáº¿t mÆ°á»£t):
     - RSIContext: Streak70, Cross70BarsAgo, Delta3/Delta5, Turning
-      * Nếu RSI>=70: không gọi là “quá mua” mặc định. Diễn giải theo 2 khả năng:
-        (i) “trend strength” nếu Turning không suy yếu + MACD/hist không xấu + volume không rơi;
-        (ii) “exhaustion risk” nếu Turning giảm + nến/PA có doji/shooting star + volume lệch.
+      * Náº¿u RSI>=70: khÃ´ng gá»i lÃ  â€œquÃ¡ muaâ€ máº·c Ä‘á»‹nh. Diá»…n giáº£i theo 2 kháº£ nÄƒng:
+        (i) â€œtrend strengthâ€ náº¿u Turning khÃ´ng suy yáº¿u + MACD/hist khÃ´ng xáº¥u + volume khÃ´ng rÆ¡i;
+        (ii) â€œexhaustion riskâ€ náº¿u Turning giáº£m + náº¿n/PA cÃ³ doji/shooting star + volume lá»‡ch.
     - VolumeContext: VolStreakUp, VolTrend; ProTech.Volume: Ratio/Regime
-      * Dùng để nói “có/không có xác nhận dòng tiền”, tránh phán đoán cảm tính.
+      * DÃ¹ng Ä‘á»ƒ nÃ³i â€œcÃ³/khÃ´ng cÃ³ xÃ¡c nháº­n dÃ²ng tiá»nâ€, trÃ¡nh phÃ¡n Ä‘oÃ¡n cáº£m tÃ­nh.
     - LevelContext + Fibonacci.Context:
-      * Nêu nearest support/resistance và DistPct (chỉ 1–2 mức quan trọng).
-      * Nếu FiboConflictFlag=True: áp dụng luật "LongStructure_ShortTactical" để giải thích:
-        long = khung cấu trúc/ceiling-floor; short = tác chiến entry.
+      * NÃªu nearest support/resistance vÃ  DistPct (chá»‰ 1â€“2 má»©c quan trá»ng).
+      * Náº¿u FiboConflictFlag=True: Ã¡p dá»¥ng luáº­t "LongStructure_ShortTactical" Ä‘á»ƒ giáº£i thÃ­ch:
+        long = khung cáº¥u trÃºc/ceiling-floor; short = tÃ¡c chiáº¿n entry.
     - Market: VNINDEX/VN30 + RelativeStrengthVsVNINDEX
-      * Gắn ngắn 1 câu: cổ phiếu mạnh/yếu hơn thị trường theo tag rel (không tự tính).
+      * Gáº¯n ngáº¯n 1 cÃ¢u: cá»• phiáº¿u máº¡nh/yáº¿u hÆ¡n thá»‹ trÆ°á»ng theo tag rel (khÃ´ng tá»± tÃ­nh).
     
-    NỘI DUNG A (8 mục):
-    1) MA Trend: dùng ProTech.MA (Regime, SlopeMA20/50/200, DistToMA50/200, Cross.*)
-    2) RSI: dùng ProTech.RSI + RSIContext (State/Direction/Divergence/Streak/Turning)
-    3) MACD: dùng ProTech.MACD (State/Cross/ZeroLine/HistState/Divergence)
-    4) RSI + MACD Bias: dùng ProTech.Bias (Alignment/Facts); diễn giải như “đang đồng pha/lệch pha”
+    Ná»˜I DUNG A (8 má»¥c):
+    1) MA Trend: dÃ¹ng ProTech.MA (Regime, SlopeMA20/50/200, DistToMA50/200, Cross.*)
+    2) RSI: dÃ¹ng ProTech.RSI + RSIContext (State/Direction/Divergence/Streak/Turning)
+    3) MACD: dÃ¹ng ProTech.MACD (State/Cross/ZeroLine/HistState/Divergence)
+    4) RSI + MACD Bias: dÃ¹ng ProTech.Bias (Alignment/Facts); diá»…n giáº£i nhÆ° â€œÄ‘ang Ä‘á»“ng pha/lá»‡ch phaâ€
     5) Fibonacci: ShortWindow/LongWindow + SelectionReason + Fibonacci.Context (Nearest/Dist/FiboConflict)
     6) Volume & Price Action: ProTech.Volume + ProTech.PriceAction (Patterns/VolumeRegime/NearMA/NearFib)
-    7) Scenario 12: Scenario12 (Name/Flags/RulesHit) → diễn giải theo bối cảnh (không kết luận cứng)
-    8) Master Integration: MasterScore.Total + ConvictionPack.Score + Components (chỉ nêu 2–3 điểm đóng góp lớn)
+    7) Scenario 12: Scenario12 (Name/Flags/RulesHit) â†’ diá»…n giáº£i theo bá»‘i cáº£nh (khÃ´ng káº¿t luáº­n cá»©ng)
+    8) Master Integration: MasterScore.Total + ConvictionPack.Score + Components (chá»‰ nÃªu 2â€“3 Ä‘iá»ƒm Ä‘Ã³ng gÃ³p lá»›n)
     
-    MỤC B (FUNDAMENTAL — chỉ được dùng đúng 1 dòng này, không thêm suy luận):
+    Má»¤C B (FUNDAMENTAL â€” chá»‰ Ä‘Æ°á»£c dÃ¹ng Ä‘Ãºng 1 dÃ²ng nÃ y, khÃ´ng thÃªm suy luáº­n):
     {fund_text}
     
-    MỤC C (TRADE PLAN):
-    - Dùng TradePlans trong JSON.
-    - Ưu tiên plan trùng PrimarySetup.Name (Breakout/Pullback) để viết trước.
-    - Trình bày theo: điều kiện kích hoạt (Status/Trigger tags) → vùng Entry → Stop (neo level + buffer) → TP → khi nào hủy plan.
-    - Không tự tính RR; nếu cần RR/Risk/Reward thì chỉ nhắc đúng số đã có trong PrimarySetup hoặc TradePlans.
+    Má»¤C C (TRADE PLAN):
+    - DÃ¹ng TradePlans trong JSON.
+    - Æ¯u tiÃªn plan trÃ¹ng PrimarySetup.Name (Breakout/Pullback) Ä‘á»ƒ viáº¿t trÆ°á»›c.
+    - TrÃ¬nh bÃ y theo: Ä‘iá»u kiá»‡n kÃ­ch hoáº¡t (Status/Trigger tags) â†’ vÃ¹ng Entry â†’ Stop (neo level + buffer) â†’ TP â†’ khi nÃ o há»§y plan.
+    - KhÃ´ng tá»± tÃ­nh RR; náº¿u cáº§n RR/Risk/Reward thÃ¬ chá»‰ nháº¯c Ä‘Ãºng sá»‘ Ä‘Ã£ cÃ³ trong PrimarySetup hoáº·c TradePlans.
     
-    RÀNG BUỘC LIỀN MẠCH:
-    - Mục C kết thúc xong phải in NGAY mục D (4 dòng), không chèn thêm đoạn giải thích.
+    RÃ€NG BUá»˜C LIá»€N Máº CH:
+    - Má»¥c C káº¿t thÃºc xong pháº£i in NGAY má»¥c D (4 dÃ²ng), khÃ´ng chÃ¨n thÃªm Ä‘oáº¡n giáº£i thÃ­ch.
     
-    KHÓA CỨNG MỤC D (COPY ĐÚNG, không tự tính/ước lượng):
+    KHÃ“A Cá»¨NG Má»¤C D (COPY ÄÃšNG, khÃ´ng tá»± tÃ­nh/Æ°á»›c lÆ°á»£ng):
     - Risk% = {must_risk}
     - Reward% = {must_reward}
     - RR = {must_rr}
     - Probability = {must_prob}
     
-    Trong mục D, bắt buộc đúng 4 dòng theo format:
+    Trong má»¥c D, báº¯t buá»™c Ä‘Ãºng 4 dÃ²ng theo format:
     Risk%: <...>
     Reward%: <...>
     RR: <...>
     Probability: <...>
     
-    Dữ liệu (AnalysisPack JSON):
+    Dá»¯ liá»‡u (AnalysisPack JSON):
     {pack_json}
     """
     try:
         content = call_gpt_with_guard(prompt, analysis_pack, max_retry=2)
     except Exception as e:
-        content = f"⚠️ Lỗi khi gọi GPT: {e}"
+        content = f"âš ï¸ Lá»—i khi gá»i GPT: {e}"
     return f"{header_html}\n\n{content}"
 
 # ============================================================
@@ -2308,7 +2308,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 
     st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
 
-    st.markdown('<div class="sec-title">KỸ THUẬT</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
     if a_items:
         for i, body in enumerate(a_items, start=1):
             if not body.strip():
@@ -2325,7 +2325,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     else:
         st.markdown(a_body, unsafe_allow_html=False)
 
-    st.markdown('<div class="sec-title">CƠ BẢN</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-title">FUNDAMENTAL ANALYSIS</div>', unsafe_allow_html=True)
     if b_body:
         st.markdown(
             f"""
@@ -2343,7 +2343,6 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
         st.markdown(
             f"""
             <div class="incept-card">
-              <div style="font-weight:800; margin-bottom:6px;">Trade plan</div>
               <div>{c_body}</div>
             </div>
             """,
@@ -2352,7 +2351,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     else:
         st.info("N/A")
 
-    st.markdown('<div class="sec-title">RỦI RO &amp; LỢI NHUẬN</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-title">Rá»¦I RO &amp; Lá»¢I NHUáº¬N</div>', unsafe_allow_html=True)
     ps = (analysis_pack or {}).get("PrimarySetup") or {}
     risk = ps.get("RiskPct", None)
     reward = ps.get("RewardPct", None)
@@ -2379,109 +2378,38 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-# Override with clean typography (later definition takes precedence)
-def render_report_pretty(report_text: str, analysis_pack: dict):
+def extract_scenario_from_a7(report_text: str) -> str:
     sections = _split_sections(report_text)
     a_raw = sections.get("A", "")
-    b_raw = sections.get("B", "")
-    c_raw = sections.get("C", "")
-
     a_body = re.sub(r"(?m)^A\..*\n?", "", a_raw).strip()
-    b_body = re.sub(r"(?m)^B\..*\n?", "", b_raw).strip()
-    c_body = re.sub(r"(?m)^C\..*\n?", "", c_raw).strip()
+    items = _extract_a_items(a_body)
+    if not items or len(items) < 7 or not items[6].strip():
+        return "N/A"
+    s = items[6].strip()
+    s = re.sub(r"(?i)^k\u1ecbch b\u1ea3n\s*", "", s)
+    s = s.replace("\u201c", "").replace("\u201d", "").replace('"', "")
+    s = s.split("\n")[0].strip()
+    s = s.split(".")[0].strip()
+    return s if s else "N/A"
 
-    a_items = _extract_a_items(a_body)
-
-    st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
-
-    st.markdown('<div class="sec-title">KỸ THUẬT</div>', unsafe_allow_html=True)
-    if a_items:
-        for i, body in enumerate(a_items, start=1):
-            if not body.strip():
-                continue
-            st.markdown(
-                f"""
-                <div class="incept-card">
-                  <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
-                  <div>{body}</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-    else:
-        st.markdown(a_body, unsafe_allow_html=False)
-
-    st.markdown('<div class="sec-title">CƠ BẢN</div>', unsafe_allow_html=True)
-    if b_body:
-        st.markdown(
-            f"""
-            <div class="incept-callout">
-              {b_body}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.info("N/A")
-
-    st.markdown('<div class="sec-title">TRADE PLAN</div>', unsafe_allow_html=True)
-    if c_body:
-        st.markdown(
-            f"""
-            <div class="incept-card">
-              <div style="font-weight:800; margin-bottom:6px;">Trade plan</div>
-              <div>{c_body}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.info("N/A")
-
-    st.markdown('<div class="sec-title">RỦI RO &amp; LỢI NHUẬN</div>', unsafe_allow_html=True)
-    ps = (analysis_pack or {}).get("PrimarySetup") or {}
-    risk = ps.get("RiskPct", None)
-    reward = ps.get("RewardPct", None)
-    rr = ps.get("RR", None)
-    prob = ps.get("Probability", "N/A")
-
-    def _fmt_pct_local(x):
-        return "N/A" if x is None else f"{float(x):.2f}%"
-
-    def _fmt_rr_local(x):
-        return "N/A" if x is None else f"{float(x):.2f}"
+def render_report_header(analysis_pack: dict, report_text: str):
+    ap = analysis_pack or {}
+    ticker = ap.get("Ticker") or ap.get("ticker") or ap.get("Symbol") or "N/A"
+    scenario = extract_scenario_from_a7(report_text)
+    master = ap.get("MasterScore") or ap.get("TotalScore") or "N/A"
+    conf = ap.get("Confidence") or ap.get("ConfidenceScore") or ap.get("TrustScore") or "N/A"
 
     st.markdown(
         f"""
-        <div class="incept-metrics">
-          <div class="incept-metric"><div class="k">Risk%</div><div class="v">{_fmt_pct_local(risk)}</div></div>
-          <div class="incept-metric"><div class="k">Reward%</div><div class="v">{_fmt_pct_local(reward)}</div></div>
-          <div class="incept-metric"><div class="k">RR</div><div class="v">{_fmt_rr_local(rr)}</div></div>
-          <div class="incept-metric"><div class="k">Probability</div><div class="v">{prob}</div></div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-def render_report_header(analysis_pack: dict):
-    ap = analysis_pack or {}
-    t = ap.get("Ticker") or ap.get("ticker") or ap.get("Symbol") or "N/A"
-    px = ap.get("Price") or ap.get("LastPrice") or ap.get("Close") or "N/A"
-    scenario = ap.get("Scenario", {}).get("Name") if isinstance(ap.get("Scenario"), dict) else (ap.get("Scenario") or "N/A")
-    conv = ap.get("Conviction") or ap.get("ConvictionScore") or "N/A"
-
-    st.markdown(
-        """
         <div class="incept-card">
-          <div style="font-size:34px; font-weight:900; letter-spacing:0.6px;">{ticker} — {price}</div>
-          <div style="display:flex; gap:10px; margin-top:8px; flex-wrap:wrap;">
-            <span style="padding:6px 10px; border-radius:999px; background:#EEF2FF; border:1px solid #C7D2FE; font-weight:800;">KỊCH BẢN: {scenario}</span>
-            <span style="padding:6px 10px; border-radius:999px; background:#ECFDF5; border:1px solid #A7F3D0; font-weight:800;">CONVICTION: {conv}</span>
+          <div style="font-size:34px; font-weight:900; letter-spacing:0.6px;">
+            {ticker} - {scenario}
+          </div>
+          <div style="margin-top:8px; color:#334155; font-size:16px; font-weight:800;">
+            \u0110i\u1ec3m t\u1ed5ng h\u1ee3p: {master} &nbsp;|&nbsp; \u0110i\u1ec3m tin c\u1eady: {conf}
           </div>
         </div>
-        """.format(ticker=t, price=px, scenario=scenario, conv=conv),
+        """,
         unsafe_allow_html=True
     )
 
@@ -2493,8 +2421,8 @@ st.markdown("""
   <div class="incept-header">
     <div class="incept-brand">INCEPTION v5.6</div>
     <div class="incept-nav">
-      <a href="javascript:void(0)">CỔ PHIẾU</a>
-      <a href="javascript:void(0)">DANH MỤC</a>
+      <a href="javascript:void(0)">Cá»” PHIáº¾U</a>
+      <a href="javascript:void(0)">DANH Má»¤C</a>
     </div>
   </div>
 </div>
@@ -2502,17 +2430,17 @@ st.markdown("""
 st.divider()
 with st.sidebar:
     user_key = st.text_input("Client Code", type="password")
-    ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
-    run_btn = st.button("Phân tích", type="primary", use_container_width=True)
+    ticker_input = st.text_input("MÃ£ Cá»• Phiáº¿u:", value="VCB").upper()
+    run_btn = st.button("PhÃ¢n tÃ­ch", type="primary", use_container_width=True)
 
 # ============================================================
 # 13. MAIN EXECUTION
 # ============================================================
 if run_btn:
     if user_key not in VALID_KEYS:
-        st.error("❌ Mã VIP không đúng. Vui lòng nhập lại.")
+        st.error("âŒ MÃ£ VIP khÃ´ng Ä‘Ãºng. Vui lÃ²ng nháº­p láº¡i.")
     else:
-        with st.spinner(f"Đang xử lý phân tích {ticker_input}..."):
+        with st.spinner(f"Äang xá»­ lÃ½ phÃ¢n tÃ­ch {ticker_input}..."):
             try:
                 result = analyze_ticker(ticker_input)
                 report = generate_insight_report(result)
@@ -2520,20 +2448,20 @@ if run_btn:
                 left, right = st.columns([0.68, 0.32], gap="large")
                 with left:
                     analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
-                    render_report_header(analysis_pack)
+                    render_report_header(analysis_pack, report)
                     render_report_pretty(report, analysis_pack)
                 with right:
                     st.markdown(
                         """
                         <div class="right-panel">
-                          <div class="t">KHU VỰC BIỂU ĐỒ (SẮP CÓ)</div>
-                          <div class="d">Chừa sẵn không gian cho charts / heatmap / timeline / notes. Hiện tại chưa gắn chức năng.</div>
+                          <div class="t">KHU Vá»°C BIá»‚U Äá»’ (Sáº®P CÃ“)</div>
+                          <div class="d">Chá»«a sáºµn khÃ´ng gian cho charts / heatmap / timeline / notes. Hiá»‡n táº¡i chÆ°a gáº¯n chá»©c nÄƒng.</div>
                         </div>
                         """,
                         unsafe_allow_html=True
                     )
             except Exception as e:
-                st.error(f"⚠️ Lỗi xử lý: {e}")
+                st.error(f"âš ï¸ Lá»—i xá»­ lÃ½: {e}")
 
 # ============================================================
 # 14. FOOTER
@@ -2542,12 +2470,19 @@ st.divider()
 st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
-    © 2025 INCEPTION Research Framework<br>
-    Phiên bản 5.6 | Engine GPT-4o
+    Â© 2025 INCEPTION Research Framework<br>
+    PhiÃªn báº£n 5.6 | Engine GPT-4o
     </p>
     """,
     unsafe_allow_html=True
 )
+
+
+
+
+
+
+
 
 
 
