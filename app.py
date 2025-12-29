@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.7.0 | Strategic Investor Edition
+# INCEPTION v5.7.2 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.7.0",
+st.set_page_config(page_title="INCEPTION v5.7.2",
                    layout="wide",
                    page_icon="🟣")
 
@@ -2619,6 +2619,35 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     }
     size_guidance = size_map.get(tier, "N/A")
 
+    # ===== Practical rails (Mode B: trader-thực dụng) =====
+    # Align Game Character Conviction with existing engine outputs to avoid "white contradiction".
+    master_score = _safe_float(ap.get("MasterScore"))
+    rrsim = ap.get("RRSim") or {}
+    if not isinstance(rrsim, dict):
+        rrsim = {}
+    prob = str(rrsim.get("Probability") or "").strip().lower()
+    primary = ap.get("PrimarySetup") or {}
+    if not isinstance(primary, dict):
+        primary = {}
+    setup_status = str(primary.get("Status") or "").strip().lower()
+    primary_rr = _safe_float(primary.get("RR"))
+
+    # Rail 1: If engine says probability is Medium/High and MasterScore is strong, must be at least tradeable.
+    if (prob in ("high", "medium") and pd.notna(master_score) and master_score >= 8.5):
+        tier = max(tier, 3)
+
+    # Rail 2: If there is an actionable setup (Watch/Active) with acceptable RR, must be at least tradeable.
+    if (setup_status in ("watch", "active") and pd.notna(primary_rr) and primary_rr >= 1.8):
+        tier = max(tier, 3)
+
+    # Rail 3: Very strong confluence (MasterScore + High prob) -> at least Tier 4
+    if (prob == "high" and pd.notna(master_score) and master_score >= 9.0):
+        tier = max(tier, 4)
+
+    # Keep points consistent with tier floor (optional but helps UI)
+    tier_floor = {1: 0.0, 2: 2.0, 3: 3.0, 4: 4.0, 5: 5.0, 6: 6.0, 7: 7.0}
+    points = float(max(points, tier_floor.get(tier, points)))
+
     # Character class
     if trend >= 7 and stability >= 7:
         cclass = "Trend Tank"
@@ -3148,7 +3177,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.7.0</div>
+    <div class="incept-brand">INCEPTION v5.7.2</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
