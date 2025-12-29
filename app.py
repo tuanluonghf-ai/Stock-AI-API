@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.6.8 | Strategic Investor Edition
+# INCEPTION v5.6.9 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.6.8",
+st.set_page_config(page_title="INCEPTION v5.6.9",
                    layout="wide",
                    page_icon="🟣")
 
@@ -2310,9 +2310,21 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     ma50 = _safe_float(last.get("MA50"))
     ma200 = _safe_float(last.get("MA200"))
 
-    s20 = (ma.get("SlopeMA20") or {}).get("Label") or ma.get("SlopeMA20Label")
-    s50 = (ma.get("SlopeMA50") or {}).get("Label") or ma.get("SlopeMA50Label")
-    s200 = (ma.get("SlopeMA200") or {}).get("Label") or ma.get("SlopeMA200Label")
+    def _safe_label(obj: Any) -> Optional[str]:
+        if obj is None:
+            return None
+        if isinstance(obj, dict):
+            v = obj.get("Label")
+            return str(v) if v is not None else None
+        # allow plain strings like "Positive"/"Negative"/"Flat"
+        if isinstance(obj, (str, int, float)):
+            s = str(obj).strip()
+            return s if s else None
+        return None
+
+    s20 = _safe_label(ma.get("SlopeMA20")) or ma.get("SlopeMA20Label")
+    s50 = _safe_label(ma.get("SlopeMA50")) or ma.get("SlopeMA50Label")
+    s200 = _safe_label(ma.get("SlopeMA200")) or ma.get("SlopeMA200Label")
     structure = ma.get("Structure") or ma.get("StructureSnapshot") or ma.get("StructureSnapshotV2") or ma.get("StructureSnapshot")
 
     rsi14 = _safe_float(rsi.get("RSI"))
@@ -3082,7 +3094,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.6.8</div>
+    <div class="incept-brand">INCEPTION v5.6.9</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
