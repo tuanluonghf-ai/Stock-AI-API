@@ -1,5 +1,5 @@
-﻿# ============================================================
-# INCEPTION v5.6 | Strategic Investor Edition
+# ============================================================
+# INCEPTION v5.6.6 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -18,15 +18,48 @@ import numpy as np
 import os
 import json
 import re
-from datetime import datetime
+from datetime import datetime, date
 from openai import OpenAI
 from dataclasses import dataclass, field
 from typing import Dict, Any, Tuple, List, Optional
 
+
+# ------------------------------
+# JSON safe-serialization helpers
+# ------------------------------
+def _json_default(obj):
+    """Convert non-JSON-serializable objects (Timestamp, numpy types, etc.) to JSON-safe forms."""
+    try:
+        # pandas NaT / missing
+        if obj is pd.NaT:
+            return None
+    except Exception:
+        pass
+
+    if isinstance(obj, (pd.Timestamp, datetime, date)):
+        try:
+            return obj.isoformat()
+        except Exception:
+            return str(obj)
+
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.ndarray,)):
+        return obj.tolist()
+    if isinstance(obj, set):
+        return list(obj)
+
+    return str(obj)
+
+def safe_json_dumps(x) -> str:
+    return json.dumps(x, ensure_ascii=False, default=_json_default)
+
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.6",
+st.set_page_config(page_title="INCEPTION v5.6.6",
                    layout="wide",
                    page_icon="🟣")
 
@@ -66,6 +99,30 @@ st.markdown("""
         background: linear-gradient(180deg, #0B1220 0%, #000000 100%);
         border: 1px solid rgba(255,255,255,0.18);
     }
+
+/* =========================
+   GAME CHARACTER CARD
+   ========================= */
+.gc-card{border:1px solid #E5E7EB;border-radius:16px;padding:14px 14px 10px;background:#ffffff;}
+.gc-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;}
+.gc-title{font-weight:800;letter-spacing:.6px;font-size:12px;color:#6B7280;}
+.gc-class{font-weight:800;font-size:14px;color:#111827;}
+.gc-sec{margin-top:10px;padding-top:10px;border-top:1px dashed #E5E7EB;}
+.gc-sec-t{font-weight:800;font-size:12px;color:#374151;margin-bottom:8px;}
+.gc-row{display:flex;gap:10px;align-items:center;margin:6px 0;}
+.gc-k{width:120px;font-size:12px;color:#374151;}
+.gc-bar{flex:1;height:10px;background:#F3F4F6;border-radius:99px;overflow:hidden;}
+.gc-fill{height:10px;background:#111827;border-radius:99px;}
+.gc-v{width:64px;text-align:right;font-size:12px;color:#111827;font-weight:700;}
+.gc-flag{display:flex;gap:8px;align-items:center;margin:6px 0;padding:6px 8px;background:#F9FAFB;border-radius:10px;border:1px solid #EEF2F7;}
+.gc-sev{font-size:11px;font-weight:800;color:#111827;background:#E5E7EB;border-radius:8px;padding:2px 6px;}
+.gc-code{font-size:11px;font-weight:800;color:#374151;}
+.gc-note{font-size:12px;color:#6B7280;}
+.gc-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+.gc-tag{font-size:11px;background:#111827;color:#fff;border-radius:999px;padding:4px 10px;}
+.gc-conv{display:grid;gap:6px;}
+.gc-conv-tier,.gc-conv-pts{font-size:12px;color:#111827;}
+.gc-conv-guide{font-size:12px;color:#6B7280;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -214,7 +271,7 @@ HSC_TARGET_PATH = "Tickers target price.xlsx"
 TICKER_NAME_PATH = "Ticker name.xlsx"
 
 VALID_KEYS = {
-    "VI" "P888": {"name": "Admin Tuấn", "quota": 999},
+    "VIP888": {"name": "Admin Tuấn", "quota": 999},
     "KH01": {"name": "Khách mời 01", "quota": 5},
     "KH02": {"name": "Khách mời 02", "quota": 5},
     "KH03": {"name": "Khách mời 03", "quota": 5},
@@ -1267,6 +1324,39 @@ def compute_conviction(last: pd.Series) -> float:
 from dataclasses import dataclass, field
 from typing import Dict, Any, Tuple, List, Optional
 
+
+# ------------------------------
+# JSON safe-serialization helpers
+# ------------------------------
+def _json_default(obj):
+    """Convert non-JSON-serializable objects (Timestamp, numpy types, etc.) to JSON-safe forms."""
+    try:
+        # pandas NaT / missing
+        if obj is pd.NaT:
+            return None
+    except Exception:
+        pass
+
+    if isinstance(obj, (pd.Timestamp, datetime, date)):
+        try:
+            return obj.isoformat()
+        except Exception:
+            return str(obj)
+
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.ndarray,)):
+        return obj.tolist()
+    if isinstance(obj, set):
+        return list(obj)
+
+    return str(obj)
+
+def safe_json_dumps(x) -> str:
+    return json.dumps(x, ensure_ascii=False, default=_json_default)
+
 @dataclass
 class TradeSetup:
     name: str
@@ -2125,8 +2215,442 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
         "Scenario12": scenario12,
         "MasterScore": master,
         "RRSim": rrsim,
-        "AnalysisPack": analysis_pack
+        "AnalysisPack": analysis_pack,
+        "_DF": df
     }
+
+
+# ============================================================
+# 10B. GAME CHARACTER MODULE (PYTHON-ONLY, NON-BREAKING)
+# ============================================================
+from typing import Tuple
+
+def _clip(x: float, lo: float, hi: float) -> float:
+    if pd.isna(x): return np.nan
+    return float(max(lo, min(hi, x)))
+
+def _bucket_score(x: float, bins: list, scores: list) -> float:
+    """
+    bins: ascending thresholds (len = n)
+    scores: corresponding scores (len = n+1)
+    """
+    if pd.isna(x): return np.nan
+    for i, b in enumerate(bins):
+        if x < b:
+            return float(scores[i])
+    return float(scores[-1])
+
+def _avg(*xs: float) -> float:
+    vals = [x for x in xs if pd.notna(x)]
+    return float(np.mean(vals)) if vals else np.nan
+
+def _atr_last(df: pd.DataFrame, period: int = 14) -> float:
+    a = atr_wilder(df, period)
+    if a is None or getattr(a, "empty", True):
+        return np.nan
+    s = a.dropna()
+    return _safe_float(s.iloc[-1]) if not s.empty else np.nan
+
+def _candle_strength_from_class(candle_class: str) -> float:
+    """
+    Returns [0..1] strength multiplier from candle label.
+    """
+    c = (candle_class or "").strip().lower()
+    if c in ("strong_bull", "bull_engulf", "bull_engulfing", "marubozu_bull"):
+        return 1.0
+    if c in ("bull", "hammer", "bullish_hammer"):
+        return 0.7
+    if c in ("doji_high_vol", "shooting_star", "gravestone", "spinning_top"):
+        return 0.35
+    if c in ("strong_bear", "bear_engulf", "bear_engulfing", "marubozu_bear"):
+        return 0.0
+    if c in ("bear",):
+        return 0.2
+    return 0.5
+
+def _derive_liquidity_score(vol_ratio: float, liquidity_base: float) -> float:
+    """
+    Non-invasive fallback:
+    - If liquidity_base exists (0..10), use it.
+    - Else approximate using vol_ratio (not perfect but stable).
+    """
+    if pd.notna(liquidity_base):
+        return _clip(liquidity_base, 0, 10)
+    vr = _safe_float(vol_ratio)
+    if pd.isna(vr): return 5.0
+    return _bucket_score(vr, bins=[0.6, 0.9, 1.2, 1.6, 2.2], scores=[3, 4.5, 6, 7.5, 8.5, 9.5])
+
+def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Produces CharacterPack without breaking any existing keys.
+    Uses ONLY already-computed features inside AnalysisPack + df series.
+    """
+    ap = analysis_pack or {}
+    last = ap.get("Last") or {}
+    protech = (ap.get("ProTech") or {})
+    ma = (protech.get("MA") or {})
+    rsi = (protech.get("RSI") or {})
+    macd = (protech.get("MACD") or {})
+    vol = (protech.get("Volume") or {})
+    pa = (protech.get("PriceAction") or {})
+    lvl = (protech.get("LevelContext") or {})
+    fib_ctx = (ap.get("FibonacciContext") or {})  # if present
+    primary = (ap.get("PrimarySetup") or {})
+    rrsim = (ap.get("RRSim") or {})
+
+    close = _safe_float(last.get("Close"))
+    ma20 = _safe_float(last.get("MA20"))
+    ma50 = _safe_float(last.get("MA50"))
+    ma200 = _safe_float(last.get("MA200"))
+
+    s20 = (ma.get("SlopeMA20") or {}).get("Label") or ma.get("SlopeMA20Label")
+    s50 = (ma.get("SlopeMA50") or {}).get("Label") or ma.get("SlopeMA50Label")
+    s200 = (ma.get("SlopeMA200") or {}).get("Label") or ma.get("SlopeMA200Label")
+    structure = ma.get("Structure") or ma.get("StructureSnapshot") or ma.get("StructureSnapshotV2") or ma.get("StructureSnapshot")
+
+    rsi14 = _safe_float(rsi.get("RSI"))
+    rsi_state = (rsi.get("State") or rsi.get("Zone") or "").strip()
+    rsi_div = (rsi.get("Divergence") or "").strip().lower()
+
+    macd_state = (macd.get("State") or "").strip().lower()
+    macd_zero = (macd.get("ZeroLine") or "").strip().lower()
+    hist_state = (macd.get("HistState") or "").strip().lower()
+    macd_div = (macd.get("Divergence") or "").strip().lower()
+
+    vol_ratio = _safe_float(vol.get("Ratio"))
+    vol_regime = (vol.get("Regime") or "").strip().lower()
+
+    candle_class = (pa.get("CandleClass") or pa.get("Candle") or "").strip()
+    climax = bool(pa.get("ClimaxFlag") or pa.get("ClimacticFlag") or False)
+    gap = bool(pa.get("GapFlag") or pa.get("Gap") or False)
+
+    atr = _atr_last(df, 14)
+    vol_proxy = _safe_float(ap.get("VolProxy")) if pd.notna(_safe_float(ap.get("VolProxy"))) else _dynamic_vol_proxy(df, 20)
+
+    # Levels / distances (prefer LevelContext / FibonacciContext packs)
+    nearest_sup = (lvl.get("NearestSupport") or {}).get("Value") if isinstance(lvl.get("NearestSupport"), dict) else lvl.get("NearestSupport")
+    nearest_res = (lvl.get("NearestResistance") or {}).get("Value") if isinstance(lvl.get("NearestResistance"), dict) else lvl.get("NearestResistance")
+    nearest_sup = _safe_float(nearest_sup)
+    nearest_res = _safe_float(nearest_res)
+
+    upside = _safe_float(lvl.get("UpsideToResistance"))
+    downside = _safe_float(lvl.get("DownsideToSupport"))
+    if pd.isna(upside) and pd.notna(nearest_res) and pd.notna(close):
+        upside = max(0.0, nearest_res - close)
+    if pd.isna(downside) and pd.notna(nearest_sup) and pd.notna(close):
+        downside = max(0.0, close - nearest_sup)
+
+    denom = atr if pd.notna(atr) and atr > 0 else (vol_proxy if pd.notna(vol_proxy) and vol_proxy > 0 else np.nan)
+    upside_n = upside / denom if pd.notna(denom) and denom > 0 else np.nan
+    downside_n = downside / denom if pd.notna(denom) and denom > 0 else np.nan
+    rr = (upside / downside) if (pd.notna(upside) and pd.notna(downside) and downside > 0) else _safe_float(primary.get("RR"))
+
+    fib_conflict = bool((ap.get("FibonacciContext") or {}).get("FiboConflictFlag") or False)
+    confluence_count = _safe_float((ap.get("FibonacciContext") or {}).get("ConfluenceCount"))
+    if pd.isna(confluence_count):
+        # fallback: infer from "Confluence*WithMA" hits count
+        fc = (ap.get("FibonacciContext") or {})
+        conf_short = fc.get("ConfluenceShortWithMA") or {}
+        conf_long = fc.get("ConfluenceLongWithMA") or {}
+        confluence_count = float(sum(len(v or []) for v in (conf_short or {}).values()) + sum(len(v or []) for v in (conf_long or {}).values()))
+        confluence_count = min(confluence_count, 5.0) if pd.notna(confluence_count) else np.nan
+
+    # --------------------------
+    # CORE STATS (0–10)
+    # --------------------------
+    # Trend: 4 components
+    t1 = 2.5 if (pd.notna(close) and pd.notna(ma200) and close >= ma200) else 0.5
+    t2 = 2.5 if (pd.notna(ma20) and pd.notna(ma50) and ma20 >= ma50) else 0.5
+    t3 = 2.5 if (str(s50).lower() == "positive" and str(s200).lower() != "negative") else (1.25 if str(s50).lower() == "positive" else 0.5)
+    cross = (ma.get("Cross") or {}).get("Name") if isinstance(ma.get("Cross"), dict) else (ma.get("Cross") or "")
+    cross_l = (cross or "").strip().lower()
+    t4 = 2.5 if "golden" in cross_l else (0.5 if "death" in cross_l else 1.25)
+    trend = _clip(_avg(t1, t2, t3, t4) * 1.0, 0, 10)
+
+    # Momentum: RSI + MACD + Hist + candle
+    # RSI best zone: ~60–70 (bullish but not overheated)
+    if pd.isna(rsi14):
+        m1 = 1.25
+    else:
+        if 60 <= rsi14 <= 70: m1 = 2.5
+        elif 55 <= rsi14 < 60: m1 = 2.0
+        elif 70 < rsi14 <= 78: m1 = 1.8
+        elif 45 <= rsi14 < 55: m1 = 1.25
+        else: m1 = 0.8
+    m2 = 2.5 if ("bull" in macd_state and "above" in macd_zero) else (1.8 if "bull" in macd_state else 0.8)
+    m3 = 2.5 if "expanding" in hist_state else (1.6 if "flat" in hist_state or "neutral" in hist_state else 1.0)
+    m4 = 2.5 * _candle_strength_from_class(candle_class)
+    momentum = _clip(_avg(m1, m2, m3, m4) * 1.0, 0, 10)
+
+    # Stability: inverse volatility + whipsaw penalty + shock penalty
+    # Use denom as proxy for ATR; higher denom relative to price => more volatile.
+    if pd.notna(close) and close > 0 and pd.notna(denom):
+        vol_pct = denom / close * 100
+        s1 = _bucket_score(vol_pct, bins=[1.2, 2.0, 3.0, 4.5], scores=[9.0, 8.0, 6.5, 5.0, 3.5])
+    else:
+        s1 = 5.5
+    structure_l = (structure or "").lower()
+    whipsaw = ("mixed" in structure_l) or ("side" in structure_l)
+    s2 = 7.5 if not whipsaw else 4.5
+    s3 = 7.0 if (str(s50).lower() != "flat") else 5.0
+    s4_pen = 1.5 if (climax or gap) else 0.0
+    stability = _clip(_avg(s1, s2, s3) - s4_pen, 0, 10)
+
+    # Reliability: alignment + volume confirm - divergence - whipsaw
+    align = 1.0 if (pd.notna(close) and pd.notna(ma50) and pd.notna(ma200) and ((close >= ma50 >= ma200) or (close < ma50 < ma200))) else 0.5
+    r1 = 2.5 if align >= 1.0 else 1.25
+    r2 = _bucket_score(vol_ratio, bins=[0.8, 1.0, 1.3, 1.8], scores=[0.8, 1.4, 2.0, 2.3, 2.5])
+    div_pen = 2.0 if ("bear" in rsi_div or "bear" in macd_div) else 0.0
+    r4_pen = 1.5 if whipsaw else 0.0
+    reliability = _clip(_avg(r1, r2, 2.0) - div_pen - r4_pen, 0, 10)
+
+    # Liquidity: base if exists, else from vol_ratio
+    liquidity_base = _safe_float(ap.get("LiquidityScoreBase"))
+    liquidity = _derive_liquidity_score(vol_ratio, liquidity_base)
+
+    core_stats = {
+        "Trend": float(trend),
+        "Momentum": float(momentum),
+        "Stability": float(stability),
+        "Reliability": float(reliability),
+        "Liquidity": float(liquidity)
+    }
+
+    # --------------------------
+    # COMBAT STATS (0–10)
+    # --------------------------
+    upside_power = _bucket_score(upside_n, bins=[0.8, 1.5, 2.5], scores=[2.5, 5.0, 7.5, 9.5])
+    downside_risk = (10.0 - _bucket_score(downside_n, bins=[0.8, 1.5, 2.5], scores=[2.5, 5.0, 7.5, 9.5])) if pd.notna(downside_n) else 5.5
+    downside_risk = _clip(downside_risk, 0, 10)
+
+    rr_eff = _bucket_score(rr, bins=[1.2, 1.8, 2.5], scores=[2.5, 5.0, 7.5, 9.5]) if pd.notna(rr) else 5.0
+
+    # Breakout Force: close above key + vol confirm + candle - divergence/overheat
+    above_ma200 = (pd.notna(close) and pd.notna(ma200) and close >= ma200)
+    b1 = 3.5 if above_ma200 else 1.5
+    b2 = _bucket_score(vol_ratio, bins=[0.9, 1.2, 1.6, 2.2], scores=[0.8, 1.6, 2.4, 3.0, 3.5])
+    b3 = 3.0 * _candle_strength_from_class(candle_class)
+    overheat_pen = 1.5 if (pd.notna(rsi14) and rsi14 >= 75 and "contract" in hist_state) else 0.0
+    div_pen2 = 1.5 if ("bear" in rsi_div or "bear" in macd_div) else 0.0
+    breakout_force = _clip(b1 + b2 + b3 - overheat_pen - div_pen2, 0, 10)
+
+    # Support Resilience: confluence + absorption + RSI integrity
+    conf = 3.5 if (pd.notna(confluence_count) and confluence_count >= 3) else (2.0 if pd.notna(confluence_count) and confluence_count >= 2 else 1.0)
+    absorption = 2.5 if (bool(pa.get("NoSupplyFlag") or False) or "hammer" in (candle_class or "").lower()) else 1.2
+    rsi_ok = 2.5 if (pd.notna(rsi14) and rsi14 >= 50) else 1.2
+    support_resilience = _clip(conf + absorption + rsi_ok, 0, 10)
+
+    combat_stats = {
+        "UpsidePower": float(_clip(upside_power, 0, 10)),
+        "DownsideRisk": float(downside_risk),
+        "RREfficiency": float(_clip(rr_eff, 0, 10)),
+        "BreakoutForce": float(breakout_force),
+        "SupportResilience": float(support_resilience)
+    }
+
+    # --------------------------
+    # WEAKNESS FLAGS (severity 1–3)
+    # --------------------------
+    flags = []
+    def add_flag(code: str, severity: int, note: str):
+        flags.append({"code": code, "severity": int(severity), "note": note})
+
+    if pd.notna(upside_n) and upside_n < 1.0:
+        add_flag("NearMajorResistance", 2, "Upside ngắn trước kháng cự gần")
+    if pd.notna(vol_ratio) and vol_ratio < 0.9:
+        add_flag("NoVolumeConfirm", 2, "Thiếu xác nhận dòng tiền")
+    if "bear" in rsi_div:
+        add_flag("RSI_BearDiv", 3, "RSI phân kỳ giảm")
+    if "bear" in macd_div:
+        add_flag("MACD_BearDiv", 3, "MACD phân kỳ giảm")
+    if fib_conflict:
+        add_flag("TrendConflict", 2, "Xung đột Fib short vs long (ưu tiên luật cấu trúc)")
+    if whipsaw:
+        add_flag("WhipsawZone", 2, "Vùng nhiễu quanh MA/structure pha trộn")
+    if pd.notna(rsi14) and rsi14 >= 75 and "contract" in hist_state:
+        add_flag("Overheated", 2, "Đà nóng nhưng histogram co lại")
+    if liquidity <= 4.5:
+        add_flag("LiquidityLow", 2, "Thanh khoản thấp, dễ trượt giá")
+    if climax or gap:
+        add_flag("VolShockRisk", 2, "Có dấu hiệu shock/gap")
+
+    # --------------------------
+    # CONVICTION TIER (0–7)
+    # --------------------------
+    points = 0.0
+    points += 1.0 if trend >= 7 else (0.5 if trend >= 5 else 0.0)
+    points += 1.0 if momentum >= 7 else (0.5 if momentum >= 5 else 0.0)
+    # Location: confluence or breakout strength
+    points += 1.0 if (pd.notna(confluence_count) and confluence_count >= 3) else (0.5 if breakout_force >= 6.5 else 0.0)
+    points += 1.0 if (pd.notna(vol_ratio) and vol_ratio >= 1.2) else (0.5 if pd.notna(vol_ratio) and vol_ratio >= 1.0 else 0.0)
+    points += 1.0 if (pd.notna(rr) and rr >= 1.8) else (0.5 if pd.notna(rr) and rr >= 1.4 else 0.0)
+    points += 1.0 if reliability >= 7 else (0.5 if reliability >= 5 else 0.0)
+
+    # Bonus: killer zone (confluence>=4 + strong candle + vol confirm)
+    if (pd.notna(confluence_count) and confluence_count >= 4 and _candle_strength_from_class(candle_class) >= 0.7 and pd.notna(vol_ratio) and vol_ratio >= 1.2):
+        points += 1.0
+
+    # Penalties
+    for f in flags:
+        if f["severity"] == 2: points -= 0.5
+        if f["severity"] == 3: points -= 1.0
+        if f["code"] == "TrendConflict" and f["severity"] >= 2: points -= 0.5
+
+    points = float(max(0.0, min(7.0, points)))
+
+    # Map points to tier (same thresholds as spec)
+    if points <= 1.5: tier = 1
+    elif points <= 2.5: tier = 2
+    elif points <= 3.5: tier = 3
+    elif points <= 4.5: tier = 4
+    elif points <= 5.5: tier = 5
+    elif points <= 6.5: tier = 6
+    else: tier = 7
+
+    # Size guidance
+    size_map = {
+        1: "No edge — đứng ngoài",
+        2: "Edge yếu — quan sát / size nhỏ",
+        3: "Trade được — 30–50% size",
+        4: "Edge tốt — full size",
+        5: "Edge mạnh — full size + có thể add",
+        6: "Hiếm — có thể overweight có kiểm soát",
+        7: "God-tier — ưu tiên cao nhất, quản trị rủi ro chặt"
+    }
+    size_guidance = size_map.get(tier, "N/A")
+
+    # Character class
+    if trend >= 7 and stability >= 7:
+        cclass = "Trend Tank"
+    elif momentum >= 7 and stability <= 5:
+        cclass = "Glass Cannon"
+    elif trend >= 6 and momentum >= 6 and rr_eff >= 7:
+        cclass = "Momentum Fighter"
+    elif whipsaw or (trend <= 4 and reliability <= 5):
+        cclass = "Range Rogue"
+    else:
+        cclass = "Balanced"
+
+    # Action tags (lightweight, for GPT/UI)
+    tags = []
+    if tier >= 4 and (pd.notna(confluence_count) and confluence_count >= 3):
+        tags.append("Pullback-buy zone (confluence)")
+    if breakout_force >= 7:
+        tags.append("Breakout attempt (needs follow-through)")
+    if any(f["code"] == "NoVolumeConfirm" for f in flags):
+        tags.append("Wait for volume confirmation")
+    if any(f["code"] in ("NearMajorResistance", "Overheated") for f in flags):
+        tags.append("Tight risk control near resistance")
+    if fib_conflict:
+        tags.append("Use LongStructure_ShortTactical rule")
+
+    return {
+        "CharacterClass": cclass,
+        "CoreStats": core_stats,
+        "CombatStats": combat_stats,
+        "Flags": flags,
+        "Conviction": {"Points": points, "Tier": tier, "SizeGuidance": size_guidance},
+        "ActionTags": tags,
+        "Meta": {
+            "DenomUsed": "ATR14" if pd.notna(atr) and atr > 0 else "VolProxy",
+            "ATR14": float(atr) if pd.notna(atr) else np.nan,
+            "VolProxy": float(vol_proxy) if pd.notna(vol_proxy) else np.nan,
+            "UpsideNorm": float(upside_n) if pd.notna(upside_n) else np.nan,
+            "DownsideNorm": float(downside_n) if pd.notna(downside_n) else np.nan,
+            "RR": float(rr) if pd.notna(rr) else np.nan
+        }
+    }
+
+def render_character_card(character_pack: Dict[str, Any]) -> None:
+    """
+    Streamlit rendering for Game Character Card.
+    Does not affect existing report A–D.
+    """
+    cp = character_pack or {}
+    core = cp.get("CoreStats") or {}
+    combat = cp.get("CombatStats") or {}
+    conv = cp.get("Conviction") or {}
+    flags = cp.get("Flags") or []
+    cclass = cp.get("CharacterClass") or "N/A"
+
+    def bar(label: str, val: float, maxv: float = 10.0):
+        v = 0.0 if pd.isna(val) else float(val)
+        pct = _clip(v / maxv * 100, 0, 100)
+        st.markdown(
+            f"""
+            <div class="gc-row">
+              <div class="gc-k">{label}</div>
+              <div class="gc-bar"><div class="gc-fill" style="width:{pct:.0f}%"></div></div>
+              <div class="gc-v">{v:.1f}/{maxv:.0f}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.markdown(
+        f"""
+        <div class="gc-card">
+          <div class="gc-head">
+            <div class="gc-title">GAME CHARACTER CARD</div>
+            <div class="gc-class">{cclass}</div>
+          </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
+    bar("Trend", core.get("Trend"))
+    bar("Momentum", core.get("Momentum"))
+    bar("Stability", core.get("Stability"))
+    bar("Reliability", core.get("Reliability"))
+    bar("Liquidity", core.get("Liquidity"))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">COMBAT STATS</div>', unsafe_allow_html=True)
+    bar("Upside Power", combat.get("UpsidePower"))
+    bar("Downside Risk", combat.get("DownsideRisk"))
+    bar("RR Efficiency", combat.get("RREfficiency"))
+    bar("Breakout Force", combat.get("BreakoutForce"))
+    bar("Support Resilience", combat.get("SupportResilience"))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    tier = conv.get("Tier", "N/A")
+    pts = conv.get("Points", np.nan)
+    guide = conv.get("SizeGuidance", "")
+    st.markdown(
+        f"""
+        <div class="gc-sec">
+          <div class="gc-sec-t">CONVICTION</div>
+          <div class="gc-conv">
+            <div class="gc-conv-tier">Tier: <b>{tier}</b> / 7</div>
+            <div class="gc-conv-pts">Points: {pts:.1f}</div>
+            <div class="gc-conv-guide">{guide}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    if flags:
+        st.markdown('<div class="gc-sec"><div class="gc-sec-t">WEAKNESSES</div>', unsafe_allow_html=True)
+        for f in flags[:8]:
+            sev = int(f.get("severity", 1))
+            note = f.get("note", "")
+            code = f.get("code", "")
+            st.markdown(
+                f"""<div class="gc-flag"><span class="gc-sev">S{sev}</span><span class="gc-code">{code}</span><span class="gc-note">{note}</span></div>""",
+                unsafe_allow_html=True
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    tags = cp.get("ActionTags") or []
+    if tags:
+        st.markdown('<div class="gc-sec"><div class="gc-sec-t">PLAYSTYLE TAGS</div>', unsafe_allow_html=True)
+        st.markdown("<div class='gc-tags'>" + "".join([f"<span class='gc-tag'>{t}</span>" for t in tags[:8]]) + "</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ============================================================
 # 11. GPT-4o STRATEGIC INSIGHT GENERATION
@@ -2147,7 +2671,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
         f"Upside: {_fmt_pct(fund.get('UpsidePct'))}"
         if fund else "Không có dữ liệu cơ bản"
     )
-    pack_json = json.dumps(analysis_pack, ensure_ascii=False)
+    pack_json = safe_json_dumps(analysis_pack)
     primary = (analysis_pack.get("PrimarySetup") or {})
     must_risk = primary.get("RiskPct")
     must_reward = primary.get("RewardPct")
@@ -2517,7 +3041,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.6</div>
+    <div class="incept-brand">INCEPTION v5.6.6</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
@@ -2531,6 +3055,8 @@ with st.sidebar:
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
     run_btn = st.button("Phân tích", type="primary", use_container_width=True)
 
+    output_mode = st.radio("Chế độ hiển thị:", ["Report A–D", "Game Character"], index=0)
+
 # ============================================================
 # 13. MAIN EXECUTION
 # ============================================================
@@ -2541,11 +3067,31 @@ if run_btn:
         with st.spinner(f"Đang xử lý phân tích {ticker_input}..."):
             try:
                 result = analyze_ticker(ticker_input)
+
+                # Game Character (non-breaking attach)
+                try:
+                    ap = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
+                    # ensure Character module can read required packs
+                    ap["Last"] = result.get("Last", {}) if isinstance(result, dict) else {}
+                    ap["RRSim"] = result.get("RRSim", {}) if isinstance(result, dict) else {}
+                    ap["DualFibo"] = result.get("DualFibo", {}) if isinstance(result, dict) else {}
+                    df_used = result.get("_DF", None)
+                    if isinstance(df_used, pd.DataFrame) and not df_used.empty:
+                        ap["CharacterPack"] = compute_character_pack(df_used, ap)
+                    else:
+                        ap["CharacterPack"] = compute_character_pack(pd.DataFrame(), ap)
+                    result["AnalysisPack"] = ap
+                except Exception:
+                    pass
                 report = generate_insight_report(result)
                 st.markdown("<hr>", unsafe_allow_html=True)
                 left, right = st.columns([0.68, 0.32], gap="large")
                 with left:
                     analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
+                    if 'output_mode' in locals() and output_mode == 'Game Character':
+                        cp = (analysis_pack or {}).get('CharacterPack') or {}
+                        render_character_card(cp)
+                        st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
                     render_report_pretty(report, analysis_pack)
                 with right:
                     st.markdown(
@@ -2568,7 +3114,7 @@ st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
     © 2025 INCEPTION Research Framework<br>
-    Phiên bản 5.6 | Engine GPT-4o
+    Phiên bản 5.6.6 | Engine GPT-4o
     </p>
     """,
     unsafe_allow_html=True
