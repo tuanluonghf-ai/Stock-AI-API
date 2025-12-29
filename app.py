@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.6.6 | Strategic Investor Edition
+# INCEPTION v5.6.7 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.6.6",
+st.set_page_config(page_title="INCEPTION v5.6.7",
                    layout="wide",
                    page_icon="🟣")
 
@@ -2294,7 +2294,14 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     vol = (protech.get("Volume") or {})
     pa = (protech.get("PriceAction") or {})
     lvl = (protech.get("LevelContext") or {})
-    fib_ctx = (ap.get("FibonacciContext") or {})  # if present
+    fib_ctx = (ap.get("FibonacciContext") or {})
+    # prefer nested AnalysisPack["Fibonacci"]["Context"] if available
+    if not fib_ctx:
+        try:
+            fib_ctx = (ap.get("Fibonacci") or {}).get("Context") or {}
+        except Exception:
+            fib_ctx = {}
+
     primary = (ap.get("PrimarySetup") or {})
     rrsim = (ap.get("RRSim") or {})
 
@@ -2345,15 +2352,42 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     downside_n = downside / denom if pd.notna(denom) and denom > 0 else np.nan
     rr = (upside / downside) if (pd.notna(upside) and pd.notna(downside) and downside > 0) else _safe_float(primary.get("RR"))
 
-    fib_conflict = bool((ap.get("FibonacciContext") or {}).get("FiboConflictFlag") or False)
-    confluence_count = _safe_float((ap.get("FibonacciContext") or {}).get("ConfluenceCount"))
+    fib_conflict = False
+    try:
+        fib_conflict = bool((fib_ctx or {}).get("FiboConflictFlag") or False)
+    except Exception:
+        fib_conflict = False
+
+    confluence_count = np.nan
+    try:
+        confluence_count = _safe_float((fib_ctx or {}).get("ConfluenceCount"))
+    except Exception:
+        confluence_count = np.nan
+
     if pd.isna(confluence_count):
-        # fallback: infer from "Confluence*WithMA" hits count
-        fc = (ap.get("FibonacciContext") or {})
-        conf_short = fc.get("ConfluenceShortWithMA") or {}
-        conf_long = fc.get("ConfluenceLongWithMA") or {}
-        confluence_count = float(sum(len(v or []) for v in (conf_short or {}).values()) + sum(len(v or []) for v in (conf_long or {}).values()))
-        confluence_count = min(confluence_count, 5.0) if pd.notna(confluence_count) else np.nan
+        # robust fallback: infer from any iterable hits inside Confluence*WithMA
+        try:
+            fc = (fib_ctx or {})
+            conf_short = fc.get("ConfluenceShortWithMA") or {}
+            conf_long = fc.get("ConfluenceLongWithMA") or {}
+
+            def _count_hits(obj):
+                # obj can be dict/list/str/number
+                if obj is None: return 0
+                if isinstance(obj, dict):
+                    return sum(_count_hits(v) for v in obj.values())
+                if isinstance(obj, (list, tuple, set)):
+                    return len(obj)
+                # if it's a scalar/str -> treat as 1 hit only if non-empty string
+                if isinstance(obj, str):
+                    return 1 if obj.strip() else 0
+                return 1
+
+            confluence_count = float(_count_hits(conf_short) + _count_hits(conf_long))
+            confluence_count = min(confluence_count, 5.0) if pd.notna(confluence_count) else np.nan
+        except Exception:
+            confluence_count = np.nan
+
 
     # --------------------------
     # CORE STATS (0–10)
@@ -2572,6 +2606,8 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     conv = cp.get("Conviction") or {}
     flags = cp.get("Flags") or []
     cclass = cp.get("CharacterClass") or "N/A"
+    err = (cp.get("Error") or "")
+
 
     def bar(label: str, val: float, maxv: float = 10.0):
         v = 0.0 if pd.isna(val) else float(val)
@@ -2598,7 +2634,12 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
         unsafe_allow_html=True
     )
 
-    st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
+    
+    # show CharacterPack error if present
+    if cp.get("Error"):
+        st.warning(f"Game Character module error: {cp.get('Error')}")
+
+st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
     bar("Trend", core.get("Trend"))
     bar("Momentum", core.get("Momentum"))
     bar("Stability", core.get("Stability"))
@@ -3041,7 +3082,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.6.6</div>
+    <div class="incept-brand">INCEPTION v5.6.7</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
@@ -3081,8 +3122,11 @@ if run_btn:
                     else:
                         ap["CharacterPack"] = compute_character_pack(pd.DataFrame(), ap)
                     result["AnalysisPack"] = ap
-                except Exception:
-                    pass
+                except Exception as _e:
+                    ap = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
+                    ap["CharacterPackError"] = f"{type(_e).__name__}: {_e}"
+                    ap["CharacterPack"] = {"Error": ap["CharacterPackError"]}
+                    result["AnalysisPack"] = ap
                 report = generate_insight_report(result)
                 st.markdown("<hr>", unsafe_allow_html=True)
                 left, right = st.columns([0.68, 0.32], gap="large")
