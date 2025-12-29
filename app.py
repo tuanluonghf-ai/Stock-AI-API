@@ -87,9 +87,6 @@ st.markdown("""
   /* Sidebar inputs/button text color */
   section[data-testid="stSidebar"] { color: #0F172A !important; }
   section[data-testid="stSidebar"] * { color: #0F172A !important; }
-  section[data-testid="stSidebar"] input { color: #ffffff !important; }
-  section[data-testid="stSidebar"] textarea { color: #ffffff !important; }
-  section[data-testid="stSidebar"] button { color: #ffffff !important; }
 
   /* Sidebar background + border */
   section[data-testid="stSidebar"]{
@@ -99,9 +96,16 @@ st.markdown("""
   section[data-testid="stSidebar"] > div{
     background: transparent !important;
   }
-
-  /* If your inputs are created via st.text_input, the visible text is inside this */
-  .stTextInput input { color: #ffffff !important; }
+  /* Sidebar inputs readable: dark text on white background */
+  section[data-testid="stSidebar"] .stTextInput input{
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    border: 1px solid #CBD5E1 !important;
+  }
+  /* Placeholder text slightly lighter */
+  section[data-testid="stSidebar"] .stTextInput input::placeholder{
+    color: #64748B !important;
+  }
 
   /* Button label (Streamlit uses nested div/span) */
   .stButton > button { color: #ffffff !important; }
@@ -2279,7 +2283,7 @@ def _extract_a_items(a_text: str) -> list:
     if not a_text:
         return []
     text = a_text.replace("\r\n", "\n")
-    text = re.sub(r"(?m)^A\..*\n?", "", text).strip()
+    text = text.strip()
     item_pat = re.compile(r"(?ms)^\s*(\d)\.\s*(.*?)(?=^\s*\d\.|\Z)")
     found = item_pat.findall(text)
     items = [""] * 8
@@ -2292,7 +2296,15 @@ def _extract_a_items(a_text: str) -> list:
 
 def render_report_pretty(report_text: str, analysis_pack: dict):
     sections = _split_sections(report_text)
-    a_items = _extract_a_items(sections.get("A", ""))
+    a_raw = sections.get("A", "")
+    b_raw = sections.get("B", "")
+    c_raw = sections.get("C", "")
+
+    a_body = re.sub(r"(?m)^A\..*\n?", "", a_raw).strip()
+    b_body = re.sub(r"(?m)^B\..*\n?", "", b_raw).strip()
+    c_body = re.sub(r"(?m)^C\..*\n?", "", c_raw).strip()
+
+    a_items = _extract_a_items(a_body)
 
     st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
 
@@ -2311,12 +2323,10 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
                 unsafe_allow_html=True
             )
     else:
-        st.markdown(sections.get("A", ""), unsafe_allow_html=False)
+        st.markdown(a_body, unsafe_allow_html=False)
 
     st.markdown('<div class="sec-title">CƠ BẢN</div>', unsafe_allow_html=True)
-    b = sections.get("B", "").strip()
-    if b:
-        b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
+    if b_body:
         st.markdown(
             f"""
             <div class="incept-callout">
@@ -2329,9 +2339,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
         st.info("N/A")
 
     st.markdown('<div class="sec-title">TRADE PLAN</div>', unsafe_allow_html=True)
-    c = sections.get("C", "").strip()
-    if c:
-        c_body = re.sub(r"(?m)^C\..*\n?", "", c).strip()
+    if c_body:
         st.markdown(
             f"""
             <div class="incept-card">
@@ -2374,7 +2382,15 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 # Override with clean typography (later definition takes precedence)
 def render_report_pretty(report_text: str, analysis_pack: dict):
     sections = _split_sections(report_text)
-    a_items = _extract_a_items(sections.get("A", ""))
+    a_raw = sections.get("A", "")
+    b_raw = sections.get("B", "")
+    c_raw = sections.get("C", "")
+
+    a_body = re.sub(r"(?m)^A\..*\n?", "", a_raw).strip()
+    b_body = re.sub(r"(?m)^B\..*\n?", "", b_raw).strip()
+    c_body = re.sub(r"(?m)^C\..*\n?", "", c_raw).strip()
+
+    a_items = _extract_a_items(a_body)
 
     st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
 
@@ -2393,12 +2409,10 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
                 unsafe_allow_html=True
             )
     else:
-        st.markdown(sections.get("A", ""), unsafe_allow_html=False)
+        st.markdown(a_body, unsafe_allow_html=False)
 
     st.markdown('<div class="sec-title">CƠ BẢN</div>', unsafe_allow_html=True)
-    b = sections.get("B", "").strip()
-    if b:
-        b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
+    if b_body:
         st.markdown(
             f"""
             <div class="incept-callout">
@@ -2411,9 +2425,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
         st.info("N/A")
 
     st.markdown('<div class="sec-title">TRADE PLAN</div>', unsafe_allow_html=True)
-    c = sections.get("C", "").strip()
-    if c:
-        c_body = re.sub(r"(?m)^C\..*\n?", "", c).strip()
+    if c_body:
         st.markdown(
             f"""
             <div class="incept-card">
@@ -2453,6 +2465,26 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+def render_report_header(analysis_pack: dict):
+    ap = analysis_pack or {}
+    t = ap.get("Ticker") or ap.get("ticker") or ap.get("Symbol") or "N/A"
+    px = ap.get("Price") or ap.get("LastPrice") or ap.get("Close") or "N/A"
+    scenario = ap.get("Scenario", {}).get("Name") if isinstance(ap.get("Scenario"), dict) else (ap.get("Scenario") or "N/A")
+    conv = ap.get("Conviction") or ap.get("ConvictionScore") or "N/A"
+
+    st.markdown(
+        """
+        <div class="incept-card">
+          <div style="font-size:34px; font-weight:900; letter-spacing:0.6px;">{ticker} — {price}</div>
+          <div style="display:flex; gap:10px; margin-top:8px; flex-wrap:wrap;">
+            <span style="padding:6px 10px; border-radius:999px; background:#EEF2FF; border:1px solid #C7D2FE; font-weight:800;">KỊCH BẢN: {scenario}</span>
+            <span style="padding:6px 10px; border-radius:999px; background:#ECFDF5; border:1px solid #A7F3D0; font-weight:800;">CONVICTION: {conv}</span>
+          </div>
+        </div>
+        """.format(ticker=t, price=px, scenario=scenario, conv=conv),
+        unsafe_allow_html=True
+    )
+
 # ============================================================
 # 12. STREAMLIT UI & APP LAYOUT
 # ============================================================
@@ -2488,6 +2520,7 @@ if run_btn:
                 left, right = st.columns([0.68, 0.32], gap="large")
                 with left:
                     analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
+                    render_report_header(analysis_pack)
                     render_report_pretty(report, analysis_pack)
                 with right:
                     st.markdown(
