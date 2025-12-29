@@ -87,7 +87,12 @@ st.markdown("""
   /* Sidebar inputs/button text color */
   section[data-testid="stSidebar"] { color: #0F172A !important; }
   section[data-testid="stSidebar"] * { color: #0F172A !important; }
-  section[data-testid="stSidebar"] input { color: #ffffff !important; }
+  section[data-testid="stSidebar"] input {
+    color: #0F172A !important;
+    background: #FFFFFF !important;
+    border: 1px solid #CBD5E1 !important;
+  }
+  section[data-testid="stSidebar"] input::placeholder { color: #475569 !important; }
   section[data-testid="stSidebar"] textarea { color: #ffffff !important; }
   section[data-testid="stSidebar"] button { color: #ffffff !important; }
 
@@ -101,7 +106,12 @@ st.markdown("""
   }
 
   /* If your inputs are created via st.text_input, the visible text is inside this */
-  .stTextInput input { color: #ffffff !important; }
+  .stTextInput input {
+    color: #0F172A !important;
+    background: #FFFFFF !important;
+    border: 1px solid #CBD5E1 !important;
+  }
+  .stTextInput input::placeholder { color: #475569 !important; }
 
   /* Button label (Streamlit uses nested div/span) */
   .stButton > button { color: #ffffff !important; }
@@ -204,7 +214,7 @@ HSC_TARGET_PATH = "Tickers target price.xlsx"
 TICKER_NAME_PATH = "Ticker name.xlsx"
 
 VALID_KEYS = {
-    "VIP888": {"name": "Admin Tuấn", "quota": 999},
+    "VI" "P888": {"name": "Admin Tuấn", "quota": 999},
     "KH01": {"name": "Khách mời 01", "quota": 5},
     "KH02": {"name": "Khách mời 02", "quota": 5},
     "KH03": {"name": "Khách mời 03", "quota": 5},
@@ -2182,7 +2192,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     B. Cơ bản
     (chỉ 1–3 câu, dùng đúng dòng dữ liệu đã cung cấp)
     
-    C. Trade plan
+    C. TRADE PLAN
     (viết ngắn gọn 5–9 câu)
     
     D. Rủi ro vs lợi nhuận
@@ -2296,7 +2306,32 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 
     st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
 
-    st.markdown('<div class="sec-title">KỸ THUẬT</div>', unsafe_allow_html=True)
+    ap = analysis_pack or {}
+    scenario_pack = ap.get("Scenario12") or {}
+    master_pack = ap.get("MasterScore") or {}
+    conviction_score = ap.get("Conviction", "N/A")
+
+    def _val_or_na(v):
+        if v is None: return "N/A"
+        if isinstance(v, float) and pd.isna(v): return "N/A"
+        text = str(v).strip()
+        return text if text else "N/A"
+
+    st.markdown(
+        f"""
+        <div class="report-header">
+          <h2 style="margin:0; padding:0;">{_val_or_na(ap.get("Ticker"))} - {_val_or_na(scenario_pack.get("Name"))}</h2>
+          <div style="font-size:16px; font-weight:700; margin-top:4px;">
+            Điểm tổng hợp: {_val_or_na(master_pack.get("Total"))} | Điểm tin cậy: {_val_or_na(conviction_score)}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
+    a_raw = sections.get("A", "").strip()
+    a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
     if a_items:
         for i, body in enumerate(a_items, start=1):
             if not body.strip():
@@ -2311,9 +2346,9 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
                 unsafe_allow_html=True
             )
     else:
-        st.markdown(sections.get("A", ""), unsafe_allow_html=False)
+        st.markdown(a_body, unsafe_allow_html=False)
 
-    st.markdown('<div class="sec-title">CƠ BẢN</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-title">FUNDAMENTAL ANALYSIS</div>', unsafe_allow_html=True)
     b = sections.get("B", "").strip()
     if b:
         b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
@@ -2335,7 +2370,6 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
         st.markdown(
             f"""
             <div class="incept-card">
-              <div style="font-weight:800; margin-bottom:6px;">Trade plan</div>
               <div>{c_body}</div>
             </div>
             """,
@@ -2378,7 +2412,32 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 
     st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
 
-    st.markdown('<div class="sec-title">KỸ THUẬT</div>', unsafe_allow_html=True)
+    ap = analysis_pack or {}
+    scenario_pack = ap.get("Scenario12") or {}
+    master_pack = ap.get("MasterScore") or {}
+    conviction_score = ap.get("Conviction", "N/A")
+
+    def _val_or_na(v):
+        if v is None: return "N/A"
+        if isinstance(v, float) and pd.isna(v): return "N/A"
+        text = str(v).strip()
+        return text if text else "N/A"
+
+    st.markdown(
+        f"""
+        <div class="report-header">
+          <h2 style="margin:0; padding:0;">{_val_or_na(ap.get("Ticker"))} - {_val_or_na(scenario_pack.get("Name"))}</h2>
+          <div style="font-size:16px; font-weight:700; margin-top:4px;">
+            Điểm tổng hợp: {_val_or_na(master_pack.get("Total"))} | Điểm tin cậy: {_val_or_na(conviction_score)}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
+    a_raw = sections.get("A", "").strip()
+    a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
     if a_items:
         for i, body in enumerate(a_items, start=1):
             if not body.strip():
@@ -2393,9 +2452,9 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
                 unsafe_allow_html=True
             )
     else:
-        st.markdown(sections.get("A", ""), unsafe_allow_html=False)
+        st.markdown(a_body, unsafe_allow_html=False)
 
-    st.markdown('<div class="sec-title">CƠ BẢN</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-title">FUNDAMENTAL ANALYSIS</div>', unsafe_allow_html=True)
     b = sections.get("B", "").strip()
     if b:
         b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
@@ -2417,7 +2476,6 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
         st.markdown(
             f"""
             <div class="incept-card">
-              <div style="font-weight:800; margin-bottom:6px;">Trade plan</div>
               <div>{c_body}</div>
             </div>
             """,
@@ -2469,7 +2527,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.divider()
 with st.sidebar:
-    user_key = st.text_input("Client Code", type="password")
+    user_key = st.text_input("Client Code", type="password", placeholder="Client Code")
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
     run_btn = st.button("Phân tích", type="primary", use_container_width=True)
 
@@ -2478,7 +2536,7 @@ with st.sidebar:
 # ============================================================
 if run_btn:
     if user_key not in VALID_KEYS:
-        st.error("❌ Mã VIP không đúng. Vui lòng nhập lại.")
+        st.error("❌ Client Code không đúng. Vui lòng nhập lại.")
     else:
         with st.spinner(f"Đang xử lý phân tích {ticker_input}..."):
             try:
@@ -2515,6 +2573,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-
-
