@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.6.9 | Strategic Investor Edition
+# INCEPTION v5.7.0 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.6.9",
+st.set_page_config(page_title="INCEPTION v5.7.0",
                    layout="wide",
                    page_icon="🟣")
 
@@ -2285,26 +2285,63 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     Produces CharacterPack without breaking any existing keys.
     Uses ONLY already-computed features inside AnalysisPack + df series.
     """
-    ap = analysis_pack or {}
+    # Defensive checks but preserve data
+    ap = analysis_pack if isinstance(analysis_pack, dict) else {}
+    
     last = ap.get("Last") or {}
-    protech = (ap.get("ProTech") or {})
-    ma = (protech.get("MA") or {})
-    rsi = (protech.get("RSI") or {})
-    macd = (protech.get("MACD") or {})
-    vol = (protech.get("Volume") or {})
-    pa = (protech.get("PriceAction") or {})
-    lvl = (protech.get("LevelContext") or {})
-    fib_ctx = (ap.get("FibonacciContext") or {})
-    # prefer nested AnalysisPack["Fibonacci"]["Context"] if available
-    if not fib_ctx:
-        try:
-            fib_ctx = (ap.get("Fibonacci") or {}).get("Context") or {}
-        except Exception:
-            fib_ctx = {}
+    if not isinstance(last, dict):
+        last = {}
+    
+    protech = ap.get("ProTech") or {}
+    if not isinstance(protech, dict):
+        protech = {}
+    
+    # CRITICAL FIX: Don't overwrite valid dictionaries
+    ma_data = protech.get("MA")
+    ma = ma_data if isinstance(ma_data, dict) else {}
+    
+    rsi_data = protech.get("RSI")
+    rsi = rsi_data if isinstance(rsi_data, dict) else {}
+    
+    macd_data = protech.get("MACD")
+    macd = macd_data if isinstance(macd_data, dict) else {}
+    
+    vol_data = protech.get("Volume")
+    vol = vol_data if isinstance(vol_data, dict) else {}
+    
+    pa_data = protech.get("PriceAction")
+    pa = pa_data if isinstance(pa_data, dict) else {}
+    
+    lvl_data = protech.get("LevelContext")
+    lvl = lvl_data if isinstance(lvl_data, dict) else {}
+    
+    # Fibonacci context
+    fib_ctx = ap.get("Fibonacci", {}).get("Context") or {}
+    if not isinstance(fib_ctx, dict):
+        fib_ctx = {}
 
-    primary = (ap.get("PrimarySetup") or {})
-    rrsim = (ap.get("RRSim") or {})
+    primary = ap.get("PrimarySetup") or {}
+    if not isinstance(primary, dict):
+        primary = {}
+        
+    rrsim = ap.get("RRSim") or {}
+    if not isinstance(rrsim, dict):
+        rrsim = {}
 
+    # Debug logging (optional - remove in production)
+    if not ma and not rsi and not macd:
+        return {
+            "Error": "Missing ProTech data. MA/RSI/MACD all empty.",
+            "CharacterClass": "N/A",
+            "CoreStats": {},
+            "CombatStats": {},
+            "Flags": [],
+            "Conviction": {"Points": 0, "Tier": 1, "SizeGuidance": "N/A"},
+            "ActionTags": [],
+            "Meta": {}
+        }
+
+    # Extract values with safe fallbacks
     close = _safe_float(last.get("Close"))
     ma20 = _safe_float(last.get("MA20"))
     ma50 = _safe_float(last.get("MA50"))
@@ -2316,90 +2353,103 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         if isinstance(obj, dict):
             v = obj.get("Label")
             return str(v) if v is not None else None
-        # allow plain strings like "Positive"/"Negative"/"Flat"
         if isinstance(obj, (str, int, float)):
             s = str(obj).strip()
             return s if s else None
         return None
 
-    s20 = _safe_label(ma.get("SlopeMA20")) or ma.get("SlopeMA20Label")
-    s50 = _safe_label(ma.get("SlopeMA50")) or ma.get("SlopeMA50Label")
-    s200 = _safe_label(ma.get("SlopeMA200")) or ma.get("SlopeMA200Label")
-    structure = ma.get("Structure") or ma.get("StructureSnapshot") or ma.get("StructureSnapshotV2") or ma.get("StructureSnapshot")
+    # Extract MA slopes
+    s20 = _safe_label(ma.get("SlopeMA20"))
+    s50 = _safe_label(ma.get("SlopeMA50"))
+    s200 = _safe_label(ma.get("SlopeMA200"))
+    structure = ma.get("Regime") or ma.get("Structure") or "N/A"
 
-    rsi14 = _safe_float(rsi.get("RSI"))
-    rsi_state = (rsi.get("State") or rsi.get("Zone") or "").strip()
-    rsi_div = (rsi.get("Divergence") or "").strip().lower()
+    # RSI data
+    rsi14 = _safe_float(rsi.get("Value"))
+    rsi_state = (rsi.get("State") or "").strip()
+    rsi_div_data = rsi.get("Divergence")
+    if isinstance(rsi_div_data, dict):
+        rsi_div = (rsi_div_data.get("Type") or "").strip().lower()
+    else:
+        rsi_div = ""
 
+    # MACD data
     macd_state = (macd.get("State") or "").strip().lower()
     macd_zero = (macd.get("ZeroLine") or "").strip().lower()
     hist_state = (macd.get("HistState") or "").strip().lower()
-    macd_div = (macd.get("Divergence") or "").strip().lower()
+    macd_div_data = macd.get("Divergence")
+    if isinstance(macd_div_data, dict):
+        macd_div = (macd_div_data.get("Type") or "").strip().lower()
+    else:
+        macd_div = ""
 
+    # Volume data
     vol_ratio = _safe_float(vol.get("Ratio"))
     vol_regime = (vol.get("Regime") or "").strip().lower()
 
-    candle_class = (pa.get("CandleClass") or pa.get("Candle") or "").strip()
-    climax = bool(pa.get("ClimaxFlag") or pa.get("ClimacticFlag") or False)
-    gap = bool(pa.get("GapFlag") or pa.get("Gap") or False)
+    # Price action
+    candle_data = pa.get("Candle")
+    if isinstance(candle_data, dict):
+        candle_class = candle_data.get("Direction") or ""
+    else:
+        candle_class = ""
+    
+    pa_context = pa.get("Context") or {}
+    climax = bool(pa_context.get("ClimaxFlag")) if isinstance(pa_context, dict) else False
+    gap_pct = _safe_float(pa.get("Candle", {}).get("GapPct")) if isinstance(pa.get("Candle"), dict) else np.nan
+    gap = bool(pd.notna(gap_pct) and abs(gap_pct) > 1.0)
 
+    # ATR and volatility
     atr = _atr_last(df, 14)
-    vol_proxy = _safe_float(ap.get("VolProxy")) if pd.notna(_safe_float(ap.get("VolProxy"))) else _dynamic_vol_proxy(df, 20)
+    vol_proxy = _dynamic_vol_proxy(df, 20)
 
-    # Levels / distances (prefer LevelContext / FibonacciContext packs)
-    nearest_sup = (lvl.get("NearestSupport") or {}).get("Value") if isinstance(lvl.get("NearestSupport"), dict) else lvl.get("NearestSupport")
-    nearest_res = (lvl.get("NearestResistance") or {}).get("Value") if isinstance(lvl.get("NearestResistance"), dict) else lvl.get("NearestResistance")
-    nearest_sup = _safe_float(nearest_sup)
-    nearest_res = _safe_float(nearest_res)
+    # Level context
+    nearest_sup_data = lvl.get("NearestSupport")
+    if isinstance(nearest_sup_data, dict):
+        nearest_sup = _safe_float(nearest_sup_data.get("Level"))
+    else:
+        nearest_sup = _safe_float(nearest_sup_data)
+
+    nearest_res_data = lvl.get("NearestResistance")
+    if isinstance(nearest_res_data, dict):
+        nearest_res = _safe_float(nearest_res_data.get("Level"))
+    else:
+        nearest_res = _safe_float(nearest_res_data)
 
     upside = _safe_float(lvl.get("UpsideToResistance"))
     downside = _safe_float(lvl.get("DownsideToSupport"))
+    
     if pd.isna(upside) and pd.notna(nearest_res) and pd.notna(close):
         upside = max(0.0, nearest_res - close)
     if pd.isna(downside) and pd.notna(nearest_sup) and pd.notna(close):
         downside = max(0.0, close - nearest_sup)
 
     denom = atr if pd.notna(atr) and atr > 0 else (vol_proxy if pd.notna(vol_proxy) and vol_proxy > 0 else np.nan)
-    upside_n = upside / denom if pd.notna(denom) and denom > 0 else np.nan
-    downside_n = downside / denom if pd.notna(denom) and denom > 0 else np.nan
+    upside_n = upside / denom if pd.notna(denom) and denom > 0 and pd.notna(upside) else np.nan
+    downside_n = downside / denom if pd.notna(denom) and denom > 0 and pd.notna(downside) else np.nan
     rr = (upside / downside) if (pd.notna(upside) and pd.notna(downside) and downside > 0) else _safe_float(primary.get("RR"))
 
-    fib_conflict = False
-    try:
-        fib_conflict = bool((fib_ctx or {}).get("FiboConflictFlag") or False)
-    except Exception:
-        fib_conflict = False
+    # Fibonacci conflict
+    fib_conflict = bool(fib_ctx.get("FiboConflictFlag")) if isinstance(fib_ctx, dict) else False
 
+    # Confluence count
     confluence_count = np.nan
     try:
-        confluence_count = _safe_float((fib_ctx or {}).get("ConfluenceCount"))
-    except Exception:
+        conf_short = fib_ctx.get("ConfluenceShortWithMA") or {}
+        conf_long = fib_ctx.get("ConfluenceLongWithMA") or {}
+        
+        def _count_hits(obj):
+            if obj is None: return 0
+            if isinstance(obj, dict):
+                return sum(len(v) if isinstance(v, (list, tuple)) else (1 if v else 0) for v in obj.values())
+            if isinstance(obj, (list, tuple, set)):
+                return len(obj)
+            return 1 if obj else 0
+        
+        confluence_count = float(_count_hits(conf_short) + _count_hits(conf_long))
+        confluence_count = min(confluence_count, 5.0)
+    except:
         confluence_count = np.nan
-
-    if pd.isna(confluence_count):
-        # robust fallback: infer from any iterable hits inside Confluence*WithMA
-        try:
-            fc = (fib_ctx or {})
-            conf_short = fc.get("ConfluenceShortWithMA") or {}
-            conf_long = fc.get("ConfluenceLongWithMA") or {}
-
-            def _count_hits(obj):
-                # obj can be dict/list/str/number
-                if obj is None: return 0
-                if isinstance(obj, dict):
-                    return sum(_count_hits(v) for v in obj.values())
-                if isinstance(obj, (list, tuple, set)):
-                    return len(obj)
-                # if it's a scalar/str -> treat as 1 hit only if non-empty string
-                if isinstance(obj, str):
-                    return 1 if obj.strip() else 0
-                return 1
-
-            confluence_count = float(_count_hits(conf_short) + _count_hits(conf_long))
-            confluence_count = min(confluence_count, 5.0) if pd.notna(confluence_count) else np.nan
-        except Exception:
-            confluence_count = np.nan
-
 
     # --------------------------
     # CORE STATS (0–10)
@@ -2408,13 +2458,18 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     t1 = 2.5 if (pd.notna(close) and pd.notna(ma200) and close >= ma200) else 0.5
     t2 = 2.5 if (pd.notna(ma20) and pd.notna(ma50) and ma20 >= ma50) else 0.5
     t3 = 2.5 if (str(s50).lower() == "positive" and str(s200).lower() != "negative") else (1.25 if str(s50).lower() == "positive" else 0.5)
-    cross = (ma.get("Cross") or {}).get("Name") if isinstance(ma.get("Cross"), dict) else (ma.get("Cross") or "")
-    cross_l = (cross or "").strip().lower()
-    t4 = 2.5 if "golden" in cross_l else (0.5 if "death" in cross_l else 1.25)
+    
+    cross = ma.get("Cross") or {}
+    if isinstance(cross, dict):
+        cross_name = cross.get("Name") or cross.get("Event") or ""
+    else:
+        cross_name = str(cross)
+    cross_l = cross_name.strip().lower()
+    t4 = 2.5 if "golden" in cross_l or "crossup" in cross_l else (0.5 if "death" in cross_l or "crossdown" in cross_l else 1.25)
+    
     trend = _clip(_avg(t1, t2, t3, t4) * 1.0, 0, 10)
 
     # Momentum: RSI + MACD + Hist + candle
-    # RSI best zone: ~60–70 (bullish but not overheated)
     if pd.isna(rsi14):
         m1 = 1.25
     else:
@@ -2423,34 +2478,35 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         elif 70 < rsi14 <= 78: m1 = 1.8
         elif 45 <= rsi14 < 55: m1 = 1.25
         else: m1 = 0.8
-    m2 = 2.5 if ("bull" in macd_state and "above" in macd_zero) else (1.8 if "bull" in macd_state else 0.8)
+    
+    m2 = 2.5 if ("above" in macd_state and "above" in macd_zero) else (1.8 if "above" in macd_state else 0.8)
     m3 = 2.5 if "expanding" in hist_state else (1.6 if "flat" in hist_state or "neutral" in hist_state else 1.0)
     m4 = 2.5 * _candle_strength_from_class(candle_class)
     momentum = _clip(_avg(m1, m2, m3, m4) * 1.0, 0, 10)
 
-    # Stability: inverse volatility + whipsaw penalty + shock penalty
-    # Use denom as proxy for ATR; higher denom relative to price => more volatile.
+    # Stability
     if pd.notna(close) and close > 0 and pd.notna(denom):
         vol_pct = denom / close * 100
         s1 = _bucket_score(vol_pct, bins=[1.2, 2.0, 3.0, 4.5], scores=[9.0, 8.0, 6.5, 5.0, 3.5])
     else:
         s1 = 5.5
-    structure_l = (structure or "").lower()
+    
+    structure_l = str(structure).lower()
     whipsaw = ("mixed" in structure_l) or ("side" in structure_l)
     s2 = 7.5 if not whipsaw else 4.5
     s3 = 7.0 if (str(s50).lower() != "flat") else 5.0
     s4_pen = 1.5 if (climax or gap) else 0.0
     stability = _clip(_avg(s1, s2, s3) - s4_pen, 0, 10)
 
-    # Reliability: alignment + volume confirm - divergence - whipsaw
+    # Reliability
     align = 1.0 if (pd.notna(close) and pd.notna(ma50) and pd.notna(ma200) and ((close >= ma50 >= ma200) or (close < ma50 < ma200))) else 0.5
     r1 = 2.5 if align >= 1.0 else 1.25
-    r2 = _bucket_score(vol_ratio, bins=[0.8, 1.0, 1.3, 1.8], scores=[0.8, 1.4, 2.0, 2.3, 2.5])
+    r2 = _bucket_score(vol_ratio, bins=[0.8, 1.0, 1.3, 1.8], scores=[0.8, 1.4, 2.0, 2.3, 2.5]) if pd.notna(vol_ratio) else 1.5
     div_pen = 2.0 if ("bear" in rsi_div or "bear" in macd_div) else 0.0
     r4_pen = 1.5 if whipsaw else 0.0
     reliability = _clip(_avg(r1, r2, 2.0) - div_pen - r4_pen, 0, 10)
 
-    # Liquidity: base if exists, else from vol_ratio
+    # Liquidity
     liquidity_base = _safe_float(ap.get("LiquidityScoreBase"))
     liquidity = _derive_liquidity_score(vol_ratio, liquidity_base)
 
@@ -2465,24 +2521,24 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     # --------------------------
     # COMBAT STATS (0–10)
     # --------------------------
-    upside_power = _bucket_score(upside_n, bins=[0.8, 1.5, 2.5], scores=[2.5, 5.0, 7.5, 9.5])
+    upside_power = _bucket_score(upside_n, bins=[0.8, 1.5, 2.5], scores=[2.5, 5.0, 7.5, 9.5]) if pd.notna(upside_n) else 5.0
     downside_risk = (10.0 - _bucket_score(downside_n, bins=[0.8, 1.5, 2.5], scores=[2.5, 5.0, 7.5, 9.5])) if pd.notna(downside_n) else 5.5
     downside_risk = _clip(downside_risk, 0, 10)
 
     rr_eff = _bucket_score(rr, bins=[1.2, 1.8, 2.5], scores=[2.5, 5.0, 7.5, 9.5]) if pd.notna(rr) else 5.0
 
-    # Breakout Force: close above key + vol confirm + candle - divergence/overheat
+    # Breakout Force
     above_ma200 = (pd.notna(close) and pd.notna(ma200) and close >= ma200)
     b1 = 3.5 if above_ma200 else 1.5
-    b2 = _bucket_score(vol_ratio, bins=[0.9, 1.2, 1.6, 2.2], scores=[0.8, 1.6, 2.4, 3.0, 3.5])
+    b2 = _bucket_score(vol_ratio, bins=[0.9, 1.2, 1.6, 2.2], scores=[0.8, 1.6, 2.4, 3.0, 3.5]) if pd.notna(vol_ratio) else 1.5
     b3 = 3.0 * _candle_strength_from_class(candle_class)
     overheat_pen = 1.5 if (pd.notna(rsi14) and rsi14 >= 75 and "contract" in hist_state) else 0.0
     div_pen2 = 1.5 if ("bear" in rsi_div or "bear" in macd_div) else 0.0
     breakout_force = _clip(b1 + b2 + b3 - overheat_pen - div_pen2, 0, 10)
 
-    # Support Resilience: confluence + absorption + RSI integrity
+    # Support Resilience
     conf = 3.5 if (pd.notna(confluence_count) and confluence_count >= 3) else (2.0 if pd.notna(confluence_count) and confluence_count >= 2 else 1.0)
-    absorption = 2.5 if (bool(pa.get("NoSupplyFlag") or False) or "hammer" in (candle_class or "").lower()) else 1.2
+    absorption = 2.5 if ("hammer" in candle_class.lower()) else 1.2
     rsi_ok = 2.5 if (pd.notna(rsi14) and rsi14 >= 50) else 1.2
     support_resilience = _clip(conf + absorption + rsi_ok, 0, 10)
 
@@ -2495,7 +2551,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     }
 
     # --------------------------
-    # WEAKNESS FLAGS (severity 1–3)
+    # WEAKNESS FLAGS
     # --------------------------
     flags = []
     def add_flag(code: str, severity: int, note: str):
@@ -2510,29 +2566,28 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     if "bear" in macd_div:
         add_flag("MACD_BearDiv", 3, "MACD phân kỳ giảm")
     if fib_conflict:
-        add_flag("TrendConflict", 2, "Xung đột Fib short vs long (ưu tiên luật cấu trúc)")
+        add_flag("TrendConflict", 2, "Xung đột Fib short vs long")
     if whipsaw:
-        add_flag("WhipsawZone", 2, "Vùng nhiễu quanh MA/structure pha trộn")
+        add_flag("WhipsawZone", 2, "Vùng nhiễu quanh MA")
     if pd.notna(rsi14) and rsi14 >= 75 and "contract" in hist_state:
-        add_flag("Overheated", 2, "Đà nóng nhưng histogram co lại")
+        add_flag("Overheated", 2, "Đã nóng nhưng histogram co lại")
     if liquidity <= 4.5:
-        add_flag("LiquidityLow", 2, "Thanh khoản thấp, dễ trượt giá")
+        add_flag("LiquidityLow", 2, "Thanh khoản thấp")
     if climax or gap:
         add_flag("VolShockRisk", 2, "Có dấu hiệu shock/gap")
 
     # --------------------------
-    # CONVICTION TIER (0–7)
+    # CONVICTION TIER
     # --------------------------
     points = 0.0
     points += 1.0 if trend >= 7 else (0.5 if trend >= 5 else 0.0)
     points += 1.0 if momentum >= 7 else (0.5 if momentum >= 5 else 0.0)
-    # Location: confluence or breakout strength
     points += 1.0 if (pd.notna(confluence_count) and confluence_count >= 3) else (0.5 if breakout_force >= 6.5 else 0.0)
     points += 1.0 if (pd.notna(vol_ratio) and vol_ratio >= 1.2) else (0.5 if pd.notna(vol_ratio) and vol_ratio >= 1.0 else 0.0)
     points += 1.0 if (pd.notna(rr) and rr >= 1.8) else (0.5 if pd.notna(rr) and rr >= 1.4 else 0.0)
     points += 1.0 if reliability >= 7 else (0.5 if reliability >= 5 else 0.0)
 
-    # Bonus: killer zone (confluence>=4 + strong candle + vol confirm)
+    # Bonus
     if (pd.notna(confluence_count) and confluence_count >= 4 and _candle_strength_from_class(candle_class) >= 0.7 and pd.notna(vol_ratio) and vol_ratio >= 1.2):
         points += 1.0
 
@@ -2544,7 +2599,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
 
     points = float(max(0.0, min(7.0, points)))
 
-    # Map points to tier (same thresholds as spec)
+    # Map to tier
     if points <= 1.5: tier = 1
     elif points <= 2.5: tier = 2
     elif points <= 3.5: tier = 3
@@ -2553,15 +2608,14 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     elif points <= 6.5: tier = 6
     else: tier = 7
 
-    # Size guidance
     size_map = {
-        1: "No edge — đứng ngoài",
-        2: "Edge yếu — quan sát / size nhỏ",
-        3: "Trade được — 30–50% size",
-        4: "Edge tốt — full size",
-        5: "Edge mạnh — full size + có thể add",
-        6: "Hiếm — có thể overweight có kiểm soát",
-        7: "God-tier — ưu tiên cao nhất, quản trị rủi ro chặt"
+        1: "No edge – đứng ngoài",
+        2: "Edge yếu – quan sát / size nhỏ",
+        3: "Trade được – 30–50% size",
+        4: "Edge tốt – full size",
+        5: "Edge mạnh – full size + có thể add",
+        6: "Hiếm – có thể overweight có kiểm soát",
+        7: "God-tier – Ưu tiên cao nhất, quản trị rủi ro chặt"
     }
     size_guidance = size_map.get(tier, "N/A")
 
@@ -2577,7 +2631,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     else:
         cclass = "Balanced"
 
-    # Action tags (lightweight, for GPT/UI)
+    # Action tags
     tags = []
     if tier >= 4 and (pd.notna(confluence_count) and confluence_count >= 3):
         tags.append("Pullback-buy zone (confluence)")
@@ -3094,7 +3148,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.6.9</div>
+    <div class="incept-brand">INCEPTION v5.7.0</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
