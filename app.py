@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.7.2 | Strategic Investor Edition
+# INCEPTION v5.7.3 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.7.2",
+st.set_page_config(page_title="INCEPTION v5.7.3",
                    layout="wide",
                    page_icon="🟣")
 
@@ -2619,34 +2619,72 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     }
     size_guidance = size_map.get(tier, "N/A")
 
-    # ===== Practical rails (Mode B: trader-thực dụng) =====
-    # Align Game Character Conviction with existing engine outputs to avoid "white contradiction".
-    master_score = _safe_float(ap.get("MasterScore"))
+    # ----------------------------
+    # EDGE MODE (Trader-practical)
+    # ----------------------------
+    # Soft edge = tradeable watch/probe even when not "perfect".
+    def _txt(x: Any) -> str:
+        if x is None:
+            return ""
+        if isinstance(x, dict):
+            for k in ("Label", "Name", "State", "Zone", "Value", "Text"):
+                v = x.get(k)
+                if v is not None:
+                    return str(v)
+            return ""
+        return str(x)
+
+    # Pull supporting signals from existing engine outputs (do not break old keys)
     rrsim = ap.get("RRSim") or {}
     if not isinstance(rrsim, dict):
         rrsim = {}
-    prob = str(rrsim.get("Probability") or "").strip().lower()
     primary = ap.get("PrimarySetup") or {}
     if not isinstance(primary, dict):
         primary = {}
-    setup_status = str(primary.get("Status") or "").strip().lower()
-    primary_rr = _safe_float(primary.get("RR"))
 
-    # Rail 1: If engine says probability is Medium/High and MasterScore is strong, must be at least tradeable.
-    if (prob in ("high", "medium") and pd.notna(master_score) and master_score >= 8.5):
-        tier = max(tier, 3)
+    prob_label = (_txt(rrsim.get("Probability") or rrsim.get("ProbabilityLabel") or primary.get("Probability"))).strip().lower()
+    status = (_txt(primary.get("Status"))).strip().lower()
 
-    # Rail 2: If there is an actionable setup (Watch/Active) with acceptable RR, must be at least tradeable.
-    if (setup_status in ("watch", "active") and pd.notna(primary_rr) and primary_rr >= 1.8):
-        tier = max(tier, 3)
+    master_obj = ap.get("MasterScore") or {}
+    if not isinstance(master_obj, dict):
+        master_obj = {}
+    master_total = _safe_float(master_obj.get("Total") or ap.get("MasterScoreTotal") or ap.get("MasterScore_Total"))
 
-    # Rail 3: Very strong confluence (MasterScore + High prob) -> at least Tier 4
-    if (prob == "high" and pd.notna(master_score) and master_score >= 9.0):
+    # Flags severity summary
+    sev3 = any(isinstance(f, dict) and int(f.get("Severity", 0) or 0) >= 3 for f in flags)
+    sev2plus = sum(1 for f in flags if isinstance(f, dict) and int(f.get("Severity", 0) or 0) >= 2)
+
+    # Determine edge mode
+    edge_mode = "NO_EDGE"
+    edge_action = "Stand aside"
+
+    prob_is_high = ("high" in prob_label)
+    prob_is_med = ("medium" in prob_label) or ("med" in prob_label)
+
+    # HARD EDGE: setup + RR + probability + no severe risk
+    if (status in ("active", "watch") and pd.notna(rr) and rr >= 1.8 and (prob_is_high or (prob_is_med and master_total >= 8.5)) and not sev3):
+        edge_mode = "HARD_EDGE"
+        edge_action = "Trade (normal size per tier)"
+    else:
+        # SOFT EDGE: trader-practical watch/probe when engine is positive but timing not perfect
+        if ((prob_is_high or prob_is_med) and master_total >= 7.5 and trend >= 5 and not sev3 and sev2plus <= 3):
+            edge_mode = "SOFT_EDGE"
+            edge_action = "Watch / Probe (small size)"
+        elif (status in ("active", "watch") and pd.notna(rr) and rr >= 1.4 and (prob_is_high or prob_is_med) and not sev3):
+            edge_mode = "SOFT_EDGE"
+            edge_action = "Watch / Probe (small size)"
+
+    # Conviction tier rails for trader-practical mode
+    if edge_mode == "HARD_EDGE":
         tier = max(tier, 4)
+    elif edge_mode == "SOFT_EDGE":
+        tier = max(tier, 2)
+        # If engine is clearly positive (high prob + strong master), ensure tradeable tier
+        if prob_is_high and master_total >= 8.5:
+            tier = max(tier, 3)
 
-    # Keep points consistent with tier floor (optional but helps UI)
-    tier_floor = {1: 0.0, 2: 2.0, 3: 3.0, 4: 4.0, 5: 5.0, 6: 6.0, 7: 7.0}
-    points = float(max(points, tier_floor.get(tier, points)))
+    # Recompute size guidance after rail
+    size_guidance = size_map.get(tier, "N/A")
 
     # Character class
     if trend >= 7 and stability >= 7:
@@ -2679,6 +2717,8 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         "CombatStats": combat_stats,
         "Flags": flags,
         "Conviction": {"Points": points, "Tier": tier, "SizeGuidance": size_guidance},
+        "EdgeMode": edge_mode,
+        "EdgeAction": edge_action,
         "ActionTags": tags,
         "Meta": {
             "DenomUsed": "ATR14" if pd.notna(atr) and atr > 0 else "VolProxy",
@@ -2702,6 +2742,8 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     flags = cp.get("Flags") or []
     cclass = cp.get("CharacterClass") or "N/A"
     err = (cp.get("Error") or "")
+    edge_mode = cp.get("EdgeMode") or "NO_EDGE"
+    edge_action = cp.get("EdgeAction") or ""
 
 
     def bar(label: str, val: float, maxv: float = 10.0):
@@ -2728,6 +2770,8 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
         """,
         unsafe_allow_html=True
     )
+
+    st.markdown(f"<div style='margin:6px 0 10px 0;'><b>EdgeMode:</b> {edge_mode} &nbsp; | &nbsp; <b>Action:</b> {edge_action}</div>", unsafe_allow_html=True)
 
     
     # show CharacterPack error if present
@@ -3177,7 +3221,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.7.2</div>
+    <div class="incept-brand">INCEPTION v5.7.3</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
