@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.6.7 | Strategic Investor Edition
+# INCEPTION v5.6.8 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.6.7",
+st.set_page_config(page_title="INCEPTION v5.6.8",
                    layout="wide",
                    page_icon="🟣")
 
@@ -2639,7 +2639,7 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     if cp.get("Error"):
         st.warning(f"Game Character module error: {cp.get('Error')}")
 
-st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
     bar("Trend", core.get("Trend"))
     bar("Momentum", core.get("Momentum"))
     bar("Stability", core.get("Stability"))
@@ -3082,7 +3082,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.6.7</div>
+    <div class="incept-brand">INCEPTION v5.6.8</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
