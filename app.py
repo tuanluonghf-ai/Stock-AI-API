@@ -81,7 +81,7 @@ def _safe_bool(x: Any) -> bool:
 
 
 # ============================================================
-# INCEPTION v5.8.8 | Strategic Investor Edition
+# INCEPTION v5.9.0 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -143,7 +143,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.8.8",
+st.set_page_config(page_title="INCEPTION v5.9.0",
                    layout="wide",
                    page_icon="🟣")
 
@@ -226,7 +226,8 @@ st.markdown("""
   /* App container */
   .incept-wrap { max-width: 1200px; margin: 0 auto; }
   .incept-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding: 6px 0 8px 0; }
-  .incept-brand { font-size: 44px; font-weight: 900; letter-spacing: 0.5px; }
+  .incept-brand { font-size: 60px; font-weight: 900; letter-spacing: 0.5px; }
+  .stMarkdown .incept-brand { font-size: 60px !important; font-weight: 900; letter-spacing: 0.5px; }
   .incept-nav { display:flex; gap:18px; align-items:center; }
   .incept-nav a { text-decoration:none; font-weight:800; color:#0F172A; font-size:14px; letter-spacing:0.6px; }
   .incept-nav a:hover { opacity: 0.75; }
@@ -2742,7 +2743,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
 
     # Support Resilience: confluence + absorption + RSI integrity
     conf = 3.5 if (pd.notna(confluence_count) and confluence_count >= 3) else (2.0 if pd.notna(confluence_count) and confluence_count >= 2 else 1.0)
-    absorption = 2.5 if (_safe_bool(pa.get("NoSupplyFlag")) or "hammer" in (candle_class or "").lower()) else 1.2
+    absorption = 2.5 if (_safe_bool(pa.get("NoSupplyFlag")) or "hammer" in _safe_text(candle_class).lower()) else 1.2
     rsi_ok = 2.5 if (pd.notna(rsi14) and rsi14 >= 50) else 1.2
     support_resilience = _clip(conf + absorption + rsi_ok, 0, 10)
 
@@ -3810,7 +3811,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.8.8</div>
+    <div class="incept-brand">INCEPTION v5.9.0</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
@@ -3899,7 +3900,7 @@ st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
     © 2025 INCEPTION Research Framework<br>
-    Phiên bản 5.8.7 | Engine GPT-4o
+    Phiên bản 5.9.0 | Engine GPT-4o
     </p>
     """,
     unsafe_allow_html=True
