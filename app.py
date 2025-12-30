@@ -23,8 +23,63 @@ def _safe_text(obj) -> str:
     return _safe_str(obj)
 
 
+# --------------------------
+# Scalar coercions (global)
+# Avoid pandas Series truth-value ambiguity across modules
+# --------------------------
+def _as_scalar(x: Any) -> Any:
+    try:
+        # pandas Series / Index
+        if isinstance(x, (pd.Series, pd.Index)):
+            if len(x) == 0:
+                return None
+            # Prefer last value (consistent with "latest bar" semantics)
+            return x.iloc[-1] if hasattr(x, "iloc") else x[-1]
+        # numpy array / list-like
+        if isinstance(x, (list, tuple, np.ndarray)):
+            return x[-1] if len(x) else None
+    except Exception:
+        pass
+    return x
+
+def _coalesce(*vals: Any) -> Any:
+    for v in vals:
+        if v is None:
+            continue
+        v2 = _as_scalar(v)
+        if v2 is None:
+            continue
+        try:
+            if isinstance(v2, float) and pd.isna(v2):
+                continue
+        except Exception:
+            pass
+        if isinstance(v2, str) and not v2.strip():
+            continue
+        return v2
+    return None
+
+def _safe_bool(x: Any) -> bool:
+    v = _as_scalar(x)
+    if v is None:
+        return False
+    if isinstance(v, (bool, np.bool_)):
+        return bool(v)
+    if isinstance(v, (int, np.integer)):
+        return bool(int(v))
+    if isinstance(v, (float, np.floating)):
+        return bool(v) if pd.notna(v) else False
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("true", "t", "yes", "y", "1", "ok"):
+            return True
+        if s in ("false", "f", "no", "n", "0"):
+            return False
+    return False
+
+
 # ============================================================
-# INCEPTION v5.8.5 | Strategic Investor Edition
+# INCEPTION v5.8.6 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -40,6 +95,7 @@ def _safe_text(obj) -> str:
 import streamlit as st
 import pandas as pd
 import numpy as np
+from pathlib import Path
 import os
 import json
 import re
@@ -85,7 +141,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.8.5",
+st.set_page_config(page_title="INCEPTION v5.8.6",
                    layout="wide",
                    page_icon="🟣")
 
@@ -298,6 +354,72 @@ st.markdown("""
 PRICE_VOL_PATH = "Price_Vol.xlsx"
 HSC_TARGET_PATH = "Tickers target price.xlsx"
 TICKER_NAME_PATH = "Ticker name.xlsx"
+
+# Data directory resolution (robust for Streamlit/VSCode working-directory differences)
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = Path(os.environ.get("INCEPTION_DATA_DIR", str(BASE_DIR))).resolve()
+
+def resolve_data_path(path: str) -> str:
+    """Resolve data file paths reliably.
+    Priority:
+      1) absolute path if exists
+      2) DATA_DIR / path
+      3) cwd / path
+      4) case-insensitive / fuzzy match in DATA_DIR for common files
+    """
+    if not path:
+        return path
+    try:
+        p = Path(path)
+    except Exception:
+        return path
+
+    # Absolute path
+    if p.is_absolute() and p.exists():
+        return str(p)
+
+    # Direct candidates
+    cand1 = (DATA_DIR / p).resolve()
+    if cand1.exists():
+        return str(cand1)
+
+    cand2 = (Path.cwd() / p).resolve()
+    if cand2.exists():
+        return str(cand2)
+
+    # Case-insensitive exact name match inside DATA_DIR
+    try:
+        target = p.name.lower()
+        for f in DATA_DIR.glob("*"):
+            if f.is_file() and f.name.lower() == target:
+                return str(f.resolve())
+    except Exception:
+        pass
+
+    # Fuzzy match for common dataset names
+    name_l = p.name.lower()
+    try:
+        if ("target" in name_l and "price" in name_l) or ("target" in name_l and name_l.endswith(".xlsx")):
+            for f in DATA_DIR.glob("*.xlsx"):
+                nl = f.name.lower()
+                if "target" in nl and "price" in nl:
+                    return str(f.resolve())
+        if ("price" in name_l and "vol" in name_l) or ("price_vol" in name_l):
+            for f in DATA_DIR.glob("*.xlsx"):
+                nl = f.name.lower()
+                if "price" in nl and "vol" in nl:
+                    return str(f.resolve())
+        if ("ticker" in name_l and "name" in name_l):
+            for f in DATA_DIR.glob("*.xlsx"):
+                nl = f.name.lower()
+                if "ticker" in nl and "name" in nl:
+                    return str(f.resolve())
+    except Exception:
+        pass
+
+    # Default expected location
+    return str(cand1)
+
 
 VALID_KEYS = {
     "VIP888": {"name": "Admin Tuấn", "quota": 999},
@@ -543,43 +665,70 @@ Probability: <...>
 # ============================================================
 # 4. LOADERS
 # ============================================================
-@st.cache_data
-def load_price_vol(path: str = PRICE_VOL_PATH) -> pd.DataFrame:
+
+def _file_mtime(path: str) -> int:
     try:
-        df = pd.read_excel(path)
+        return int(Path(path).stat().st_mtime)
+    except Exception:
+        return 0
+
+@st.cache_data
+def _read_excel_cached(resolved_path: str, mtime: int) -> pd.DataFrame:
+    # mtime is intentionally part of the cache key
+    return pd.read_excel(resolved_path)
+
+def load_price_vol(path: str = PRICE_VOL_PATH) -> pd.DataFrame:
+    resolved = resolve_data_path(path)
+    mt = _file_mtime(resolved)
+    try:
+        df = _read_excel_cached(resolved, mt)
     except Exception as e:
-        st.error(f"Lỗi khi đọc file {path}: {e}")
+        st.error(
+            f"Không đọc được dữ liệu Price_Vol.xlsx. "
+            f"Path='{path}' | Resolved='{resolved}'. Lỗi: {e}. "
+            f"Tip: đặt INCEPTION_DATA_DIR trỏ tới thư mục chứa data."
+        )
         return pd.DataFrame()
-    df.columns = [c.strip().title() for c in df.columns]
+    df.columns = [str(c).strip().title() for c in df.columns]
     rename = {"Ngay": "Date", "Ma": "Ticker", "Vol": "Volume"}
     df.rename(columns=rename, inplace=True)
+    if "Date" not in df.columns or "Ticker" not in df.columns:
+        return pd.DataFrame()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
     df = df.sort_values(["Ticker", "Date"]).dropna(subset=["Date"])
     return df
 
-@st.cache_data
 def load_ticker_names(path: str = TICKER_NAME_PATH) -> pd.DataFrame:
+    resolved = resolve_data_path(path)
+    mt = _file_mtime(resolved)
     try:
-        df = pd.read_excel(path)
-        df.columns = [c.strip() for c in df.columns]
+        df = _read_excel_cached(resolved, mt)
+        df.columns = [str(c).strip() for c in df.columns]
     except Exception:
         return pd.DataFrame(columns=["Ticker", "Name"])
     if "Ticker" not in df.columns:
         return pd.DataFrame(columns=["Ticker", "Name"])
-    name_col = "Stock Name" if "Stock Name" in df.columns else "Name"
+    name_col = "Stock Name" if "Stock Name" in df.columns else ("Name" if "Name" in df.columns else None)
+    if not name_col:
+        return pd.DataFrame(columns=["Ticker", "Name"])
     df = df.rename(columns={name_col: "Name"})
-    return df[["Ticker", "Name"]].drop_duplicates()
+    df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
+    df["Name"] = df["Name"].astype(str).str.strip()
+    return df[["Ticker", "Name"]].drop_duplicates(subset=["Ticker"], keep="last")
 
-@st.cache_data
 def load_hsc_targets(path: str = HSC_TARGET_PATH) -> pd.DataFrame:
+    resolved = resolve_data_path(path)
+    mt = _file_mtime(resolved)
     try:
-        df = pd.read_excel(path)
+        df = _read_excel_cached(resolved, mt)
         df.columns = [str(c).strip() for c in df.columns]
     except Exception:
         return pd.DataFrame(columns=["Ticker", "Target", "Recommendation"])
+
     rename_map = {}
     for c in df.columns:
-        c0 = c.strip()
+        c0 = str(c).strip()
         c1 = c0.lower()
         if c1 in ["ticker", "ma", "symbol", "code"]:
             rename_map[c] = "Ticker"
@@ -587,28 +736,23 @@ def load_hsc_targets(path: str = HSC_TARGET_PATH) -> pd.DataFrame:
             rename_map[c] = "Target"
         if c1 in ["recommendation", "khuyennghi", "khuyến nghị"]:
             rename_map[c] = "Recommendation"
-    df.rename(columns=rename_map, inplace=True)
-    if "Ticker" not in df.columns:
-        for c in df.columns:
-            if "ticker" in c.lower() or c.strip().lower() == "ma":
-                df.rename(columns={c: "Ticker"}, inplace=True)
-                break
-    if "Target" not in df.columns:
-        for c in df.columns:
-            c1 = c.lower()
-            if ("tp" in c1) or ("target" in c1) or ("muc tieu" in c1) or ("mục tiêu" in c1):
-                df.rename(columns={c: "Target"}, inplace=True)
-                break
-    if "Ticker" not in df.columns or "Target" not in df.columns:
-        return pd.DataFrame(columns=["Ticker", "Target", "Recommendation"])
-    if "Recommendation" not in df.columns:
-        df["Recommendation"] = np.nan
-    df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
-    tgt = pd.to_numeric(df["Target"], errors="coerce")
-    df["Target"] = tgt
-    df.loc[df["Target"].notna() & (df["Target"] < 500), "Target"] = df.loc[df["Target"].notna() & (df["Target"] < 500), "Target"] * 1000
-    return df[["Ticker", "Target", "Recommendation"]].drop_duplicates(subset=["Ticker"], keep="last")
+    df = df.rename(columns=rename_map)
 
+    if "Ticker" not in df.columns:
+        return pd.DataFrame(columns=["Ticker", "Target", "Recommendation"])
+    if "Target" not in df.columns:
+        # vẫn trả về để Report không crash
+        df["Target"] = np.nan
+    if "Recommendation" not in df.columns:
+        df["Recommendation"] = ""
+
+    df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
+    df["Target"] = pd.to_numeric(df["Target"], errors="coerce")
+
+    # normalize: nếu target < 500 => thường đang đơn vị nghìn
+    df.loc[df["Target"].notna() & (df["Target"] < 500), "Target"] = df.loc[df["Target"].notna() & (df["Target"] < 500), "Target"] * 1000
+
+    return df[["Ticker", "Target", "Recommendation"]].drop_duplicates(subset=["Ticker"], keep="last")
 # ============================================================
 # 5. INDICATORS
 # ============================================================
@@ -3656,7 +3800,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.8.5</div>
+    <div class="incept-brand">INCEPTION v5.8.6</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
