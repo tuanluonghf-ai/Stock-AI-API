@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.7.5 | Strategic Investor Edition
+# INCEPTION v5.7.6 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.7.5",
+st.set_page_config(page_title="INCEPTION v5.7.6",
                    layout="wide",
                    page_icon="🟣")
 
@@ -453,7 +453,7 @@ def validate_section_d(text: str, primary: Dict[str, Any]) -> bool:
     exp_risk = _safe_float(primary.get("RiskPct"))
     exp_reward = _safe_float(primary.get("RewardPct"))
     exp_rr = _safe_float(primary.get("RR"))
-    exp_prob = (primary.get("Probability") or "").strip().lower()
+    exp_prob = _safe_text(primary.get("Probability")).strip().lower()
     
     ok = True
     if pd.notna(exp_risk):
@@ -463,11 +463,7 @@ def validate_section_d(text: str, primary: Dict[str, Any]) -> bool:
     if pd.notna(exp_rr):
         ok &= _close_enough(got_rr, exp_rr, tol=0.05)
         
-    if isinstance(got_prob, dict):
-        for k in ("Label","Name","Value","Text","State","Zone"):
-            if got_prob.get(k) is not None:
-                got_prob = got_prob.get(k)
-                break
+    # got_prob already a string or None from _grab_text
     gp = (str(got_prob).strip().lower() if got_prob is not None else "")
     if exp_prob:
         ok &= (exp_prob in gp) if gp else False
@@ -2485,7 +2481,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         s1 = _bucket_score(vol_pct, bins=[1.2, 2.0, 3.0, 4.5], scores=[9.0, 8.0, 6.5, 5.0, 3.5])
     else:
         s1 = 5.5
-    structure_l = (structure or "").lower()
+    structure_l = _safe_text(structure).strip().lower()
     whipsaw = ("mixed" in structure_l) or ("side" in structure_l)
     s2 = 7.5 if not whipsaw else 4.5
     s3 = 7.0 if (str(s50).lower() != "flat") else 5.0
@@ -3144,7 +3140,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.7.5</div>
+    <div class="incept-brand">INCEPTION v5.7.6</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
