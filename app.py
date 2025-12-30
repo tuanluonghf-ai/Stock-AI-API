@@ -24,7 +24,7 @@ def _safe_text(obj) -> str:
 
 
 # ============================================================
-# INCEPTION v5.7.9 | Strategic Investor Edition
+# INCEPTION v5.8.0 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -43,6 +43,7 @@ import numpy as np
 import os
 import json
 import re
+import html
 from datetime import datetime, date
 from openai import OpenAI
 from dataclasses import dataclass, field
@@ -84,7 +85,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.7.9",
+st.set_page_config(page_title="INCEPTION v5.8.0",
                    layout="wide",
                    page_icon="🟣")
 
@@ -129,25 +130,28 @@ st.markdown("""
    GAME CHARACTER CARD
    ========================= */
 .gc-card{border:1px solid #E5E7EB;border-radius:16px;padding:14px 14px 10px;background:#ffffff;}
-.gc-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;}
+.gc-head{display:block;margin-bottom:10px;}
 .gc-title{font-weight:800;letter-spacing:.6px;font-size:12px;color:#6B7280;}
-.gc-class{font-weight:800;font-size:14px;color:#111827;}
+.gc-class{font-weight:800;font-size:16px;color:#111827;}
+.gc-h1{font-weight:900;font-size:22px;color:#0F172A;line-height:1.2;}
+.gc-blurb{margin-top:6px;font-size:15px;line-height:1.55;color:#334155;}
+
 .gc-sec{margin-top:10px;padding-top:10px;border-top:1px dashed #E5E7EB;}
-.gc-sec-t{font-weight:800;font-size:12px;color:#374151;margin-bottom:8px;}
+.gc-sec-t{font-weight:900;font-size:14px;color:#374151;margin-bottom:8px;}
 .gc-row{display:flex;gap:10px;align-items:center;margin:6px 0;}
-.gc-k{width:120px;font-size:12px;color:#374151;}
+.gc-k{width:150px;font-size:14px;color:#374151;}
 .gc-bar{flex:1;height:10px;background:#F3F4F6;border-radius:99px;overflow:hidden;}
 .gc-fill{height:10px;background:#111827;border-radius:99px;}
-.gc-v{width:64px;text-align:right;font-size:12px;color:#111827;font-weight:700;}
+.gc-v{width:74px;text-align:right;font-size:14px;color:#111827;font-weight:800;}
 .gc-flag{display:flex;gap:8px;align-items:center;margin:6px 0;padding:6px 8px;background:#F9FAFB;border-radius:10px;border:1px solid #EEF2F7;}
 .gc-sev{font-size:11px;font-weight:800;color:#111827;background:#E5E7EB;border-radius:8px;padding:2px 6px;}
 .gc-code{font-size:11px;font-weight:800;color:#374151;}
-.gc-note{font-size:12px;color:#6B7280;}
+.gc-note{font-size:13px;color:#6B7280;}
 .gc-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
 .gc-tag{font-size:11px;background:#111827;color:#fff;border-radius:999px;padding:4px 10px;}
 .gc-conv{display:grid;gap:6px;}
-.gc-conv-tier,.gc-conv-pts{font-size:12px;color:#111827;}
-.gc-conv-guide{font-size:12px;color:#6B7280;}
+.gc-conv-tier,.gc-conv-pts{font-size:13px;color:#111827;}
+.gc-conv-guide{font-size:13px;color:#6B7280;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -2668,9 +2672,67 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         }
     }
 
+def _character_blurb_fallback(ticker: str, cclass: str) -> str:
+    # Deterministic fallback (no API) — no numbers by design
+    t = (ticker or "").upper().strip()
+    cc = (cclass or "N/A").strip()
+    name = f"{t}" if t else "Cổ phiếu"
+    if cc == "Trend Tank":
+        return (f"{name} thuộc nhóm thiên về xu hướng và độ ổn định. Cổ phiếu thường đi theo nhịp rõ ràng, "
+                f"ưu tiên các chiến lược theo trend, gom khi điều chỉnh và giữ vị thế khi cấu trúc còn khỏe. "
+                f"Không phù hợp với kiểu lướt lát quá ngắn hoặc bắt đáy ngược trend. Hành vi thường gặp là "
+                f"bật lại tốt khi về vùng hỗ trợ động và duy trì nhịp tăng đều nếu dòng tiền không suy yếu.")
+    if cc == "Glass Cannon":
+        return (f"{name} thuộc nhóm biến động mạnh, tăng nhanh khi có hưng phấn và cũng dễ rung lắc sâu. "
+                f"Phù hợp với trader đánh momentum, phản xạ nhanh, kỷ luật stop-loss và chốt lời từng phần. "
+                f"Không phù hợp với nhà đầu tư thích sự êm và nắm giữ dài khi thị trường nhiễu. Hành vi thường gặp là "
+                f"bứt tốc mạnh rồi có các nhịp kéo–rũ rõ rệt, cần quản trị vị thế chặt.")
+    if cc == "Momentum Fighter":
+        return (f"{name} thuộc nhóm có thiên hướng tăng theo đà và hiệu quả risk/reward tốt khi vào đúng nhịp. "
+                f"Phù hợp với chiến lược mua theo xác nhận, ưu tiên các nhịp breakout hoặc pullback có tín hiệu tiếp diễn. "
+                f"Không phù hợp với kiểu bắt đáy sớm khi chưa có lực xác nhận. Hành vi thường gặp là tăng theo cụm phiên, "
+                f"nghỉ ngắn rồi tiếp tục nếu lực mua còn duy trì.")
+    if cc == "Range Rogue":
+        return (f"{name} thuộc nhóm dao động trong biên, thiếu xu hướng rõ ràng và dễ whipsaw. "
+                f"Muốn thắng cần kỹ năng trade trong range: mua khi tiệm cận hỗ trợ, bán khi chạm kháng cự, "
+                f"ưu tiên T+ và quản trị rủi ro nhanh. Không phù hợp với đánh breakout thiếu xác nhận hoặc nắm giữ theo trend. "
+                f"Hành vi thường gặp là các nhịp đảo chiều ngắn và false-break khiến người theo xu hướng dễ bị bẫy.")
+    # Balanced
+    return (f"{name} thuộc nhóm cân bằng, không quá lệch về một cực. Cổ phiếu có thể theo xu hướng khi điều kiện thuận lợi "
+            f"nhưng vẫn có giai đoạn đi ngang tích lũy. Phù hợp với trader linh hoạt: ưu tiên mua khi có tín hiệu xác nhận, "
+            f"kết hợp giữ vị thế và lướt một phần theo nhịp. Không phù hợp với kỳ vọng một nhịp tăng thẳng hoặc đòn bẩy quá cao khi tín hiệu chưa rõ. "
+            f"Hành vi thường gặp là tiến triển đều, cần kiên nhẫn chờ điểm vào có lợi thế.")
+
+def get_character_blurb(ticker: str, cclass: str) -> str:
+    # GPT paragraph: 100–200 words, no numbers
+    cache_key = f"_gc_blurb::{(ticker or '').upper().strip()}::{(cclass or '').strip()}"
+    if cache_key in st.session_state:
+        return st.session_state.get(cache_key) or ""
+    base = _character_blurb_fallback(ticker, cclass)
+    try:
+        prompt = f"""Bạn là chuyên gia tài chính. Hãy viết một đoạn ngắn tiếng Việt (khoảng 100–200 từ),
+văn phong chuyên nghiệp, dễ hiểu. Tuyệt đối KHÔNG nhắc bất kỳ con số nào (không số điểm, không phần trăm, không mốc giá,
+không số phiên, không ký hiệu số). Không liệt kê chỉ báo/thuật ngữ theo dạng báo cáo. Hãy mô tả:
+- Cổ phiếu {ticker.upper().strip()} thuộc nhóm (class) {cclass}.
+- Bản chất hành vi giá thường gặp của nhóm này.
+- Phù hợp với kiểu trader/trường phái nào và không phù hợp với kiểu nào.
+- Nêu một ví dụ ngắn về hành vi thường gặp (ví dụ: dao động trong biên, bật ở hỗ trợ, thất bại khi vượt cản…).
+Kết thúc bằng một câu định hướng hành động theo phong cách quản trị rủi ro.
+"""
+        txt = _call_openai(prompt, temperature=0.5)
+        txt = (txt or "").strip()
+        # Safety: remove digits if model violates rule
+        txt = re.sub(r"\d", "", txt)
+        if len(txt) < 40:
+            txt = base
+    except Exception:
+        txt = base
+    st.session_state[cache_key] = txt
+    return txt
+
 def render_character_card(character_pack: Dict[str, Any]) -> None:
     """
-    Streamlit rendering for Game Character Card.
+    Streamlit rendering for Character Card.
     Does not affect existing report A–D.
     """
     cp = character_pack or {}
@@ -2680,6 +2742,10 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     flags = cp.get("Flags") or []
     cclass = cp.get("CharacterClass") or "N/A"
     err = (cp.get("Error") or "")
+
+    ticker = _safe_text(cp.get('_Ticker') or '').strip().upper()
+    headline = f\"{ticker} - {cclass}\" if ticker else str(cclass)
+    blurb = get_character_blurb(ticker, str(cclass))
 
 
     def bar(label: str, val: float, maxv: float = 10.0):
@@ -2700,8 +2766,8 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
         f"""
         <div class="gc-card">
           <div class="gc-head">
-            <div class="gc-title">GAME CHARACTER CARD</div>
-            <div class="gc-class">{cclass}</div>
+            <div class="gc-h1">{html.escape(str(headline))}</div>
+            <div class="gc-blurb">{html.escape(str(blurb))}</div>
           </div>
         """,
         unsafe_allow_html=True
@@ -2710,7 +2776,7 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     
     # show CharacterPack error if present
     if cp.get("Error"):
-        st.warning(f"Game Character module error: {cp.get('Error')}")
+        st.warning(f"Character module error: {cp.get('Error')}")
 
     st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
     bar("Trend", core.get("Trend"))
@@ -3155,7 +3221,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.7.9</div>
+    <div class="incept-brand">INCEPTION v5.8.0</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
@@ -3169,7 +3235,7 @@ with st.sidebar:
     ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
     run_btn = st.button("Phân tích", type="primary", use_container_width=True)
 
-    output_mode = st.radio("Chế độ hiển thị:", ["Report A–D", "Game Character"], index=0)
+    output_mode = st.radio("Chế độ hiển thị:", ["Report A–D", "Character"], index=1)
 
 # ============================================================
 # 13. MAIN EXECUTION
@@ -3205,8 +3271,9 @@ if run_btn:
                 left, right = st.columns([0.68, 0.32], gap="large")
                 with left:
                     analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
-                    if 'output_mode' in locals() and output_mode == 'Game Character':
+                    if 'output_mode' in locals() and output_mode == 'Character':
                         cp = (analysis_pack or {}).get('CharacterPack') or {}
+                        cp['_Ticker'] = ticker_input
                         render_character_card(cp)
                         st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
                     render_report_pretty(report, analysis_pack)
