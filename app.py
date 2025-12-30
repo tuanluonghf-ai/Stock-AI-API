@@ -81,7 +81,7 @@ def _safe_bool(x: Any) -> bool:
 
 
 # ============================================================
-# INCEPTION v5.8.7 | Strategic Investor Edition
+# INCEPTION v5.8.8 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -143,7 +143,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.8.7",
+st.set_page_config(page_title="INCEPTION v5.8.8",
                    layout="wide",
                    page_icon="🟣")
 
@@ -226,7 +226,7 @@ st.markdown("""
   /* App container */
   .incept-wrap { max-width: 1200px; margin: 0 auto; }
   .incept-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding: 6px 0 8px 0; }
-  .incept-brand { font-size: 34px; font-weight: 900; letter-spacing: 0.5px; }
+  .incept-brand { font-size: 44px; font-weight: 900; letter-spacing: 0.5px; }
   .incept-nav { display:flex; gap:18px; align-items:center; }
   .incept-nav a { text-decoration:none; font-weight:800; color:#0F172A; font-size:14px; letter-spacing:0.6px; }
   .incept-nav a:hover { opacity: 0.75; }
@@ -2699,7 +2699,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     whipsaw = ("mixed" in structure_l) or ("side" in structure_l)
     s2 = 7.5 if not whipsaw else 4.5
     s3 = 7.0 if (str(s50).lower() != "flat") else 5.0
-    s4_pen = 1.5 if (climax or gap) else 0.0
+    s4_pen = 1.5 if (_safe_bool(climax) or _safe_bool(gap)) else 0.0
     stability = _clip(_avg(s1, s2, s3) - s4_pen, 0, 10)
 
     # Reliability: alignment + volume confirm - divergence - whipsaw
@@ -2777,7 +2777,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         add_flag("Overheated", 2, "Đà nóng nhưng histogram co lại")
     if liquidity <= 4.5:
         add_flag("LiquidityLow", 2, "Thanh khoản thấp, dễ trượt giá")
-    if climax or gap:
+    if (_safe_bool(climax) or _safe_bool(gap)):
         add_flag("VolShockRisk", 2, "Có dấu hiệu shock/gap")
 
     # --------------------------
@@ -3810,7 +3810,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.8.7</div>
+    <div class="incept-brand">INCEPTION v5.8.8</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
