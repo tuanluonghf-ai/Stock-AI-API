@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.7.6 | Strategic Investor Edition
+# INCEPTION v5.7.7 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.7.6",
+st.set_page_config(page_title="INCEPTION v5.7.7",
                    layout="wide",
                    page_icon="🟣")
 
@@ -3140,7 +3140,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.7.6</div>
+    <div class="incept-brand">INCEPTION v5.7.7</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
