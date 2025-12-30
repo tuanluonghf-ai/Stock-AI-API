@@ -24,7 +24,7 @@ def _safe_text(obj) -> str:
 
 
 # ============================================================
-# INCEPTION v5.8.1 | Strategic Investor Edition
+# INCEPTION v5.8.2 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -85,7 +85,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.8.1",
+st.set_page_config(page_title="INCEPTION v5.8.2",
                    layout="wide",
                    page_icon="🟣")
 
@@ -2629,15 +2629,403 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         7: "God-tier — ưu tiên cao nhất, quản trị rủi ro chặt"
     }
     size_guidance = size_map.get(tier, "N/A")
+    # --------------------------
+    # STOCK TRAITS (5Y OHLCV) — Composite Scores (0–10)
+    # Goal: improve class assignment without touching Report A–D logic.
+    # --------------------------
+    # Notes:
+    # - Scores are designed to be stable over time and reflect "stock character".
+    # - If OHLCV is missing/insufficient, traits fall back to neutral (5.0).
+    def _get_series(col_names):
+        # Case-insensitive lookup
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return pd.Series(dtype=float)
+        cols = {str(c).strip().lower(): c for c in df.columns}
+        for n in col_names:
+            key = str(n).strip().lower()
+            if key in cols:
+                try:
+                    return pd.to_numeric(df[cols[key]], errors="coerce")
+                except Exception:
+                    return pd.Series(dtype=float)
+        return pd.Series(dtype=float)
 
-    # Character class
-    if trend >= 7 and stability >= 7:
+    o = _get_series(["Open", "O"])
+    h = _get_series(["High", "H"])
+    l = _get_series(["Low", "L"])
+    c = _get_series(["Close", "C", "Adj Close", "AdjClose"])
+    v = _get_series(["Volume", "Vol", "V"])
+
+    # Ensure consistent length and recent window (up to ~5y daily)
+    _n = int(min(len(c), 1260)) if hasattr(c, "__len__") else 0
+    o = o.tail(_n) if _n else o
+    h = h.tail(_n) if _n else h
+    l = l.tail(_n) if _n else l
+    c = c.tail(_n) if _n else c
+    v = v.tail(_n) if _n else v
+
+    def _roll_median(s, w):
+        return s.rolling(int(w), min_periods=max(3, int(w)//3)).median()
+
+    def _roll_mean(s, w):
+        return s.rolling(int(w), min_periods=max(3, int(w)//3)).mean()
+
+    def _roll_std(s, w):
+        return s.rolling(int(w), min_periods=max(3, int(w)//3)).std(ddof=0)
+
+    def _atr14(_h, _l, _c):
+        prev_c = _c.shift(1)
+        tr = pd.concat([(_h - _l).abs(), (_h - prev_c).abs(), (_l - prev_c).abs()], axis=1).max(axis=1)
+        return _roll_mean(tr, 14), tr
+
+    def _adx14(_h, _l, _c):
+        # Wilder's ADX14 (robust, simplified smoothing)
+        up = _h.diff()
+        dn = -_l.diff()
+        dm_p = up.where((up > dn) & (up > 0), 0.0)
+        dm_m = dn.where((dn > up) & (dn > 0), 0.0)
+        atr, tr = _atr14(_h, _l, _c)
+        # Wilder smoothing (EMA with alpha=1/14)
+        alpha = 1.0 / 14.0
+        tr_s = tr.ewm(alpha=alpha, adjust=False, min_periods=14).mean()
+        dm_p_s = dm_p.ewm(alpha=alpha, adjust=False, min_periods=14).mean()
+        dm_m_s = dm_m.ewm(alpha=alpha, adjust=False, min_periods=14).mean()
+        di_p = 100.0 * (dm_p_s / tr_s).replace([np.inf, -np.inf], np.nan)
+        di_m = 100.0 * (dm_m_s / tr_s).replace([np.inf, -np.inf], np.nan)
+        dx = (100.0 * (di_p - di_m).abs() / (di_p + di_m)).replace([np.inf, -np.inf], np.nan)
+        adx = dx.ewm(alpha=alpha, adjust=False, min_periods=14).mean()
+        return adx
+
+    def _percentile_rank(hist: pd.Series, x: float) -> float:
+        # Robust percentile rank of x within hist (0..1)
+        try:
+            s = pd.to_numeric(hist, errors="coerce").dropna()
+            if len(s) < 30 or (x is None) or (not np.isfinite(float(x))):
+                return np.nan
+            x = float(x)
+            less = float((s < x).sum())
+            eq = float((s == x).sum())
+            return (less + 0.5 * eq) / float(len(s))
+        except Exception:
+            return np.nan
+
+    def _score_from_bins(x, bins, scores, default=5.0):
+        if x is None or (isinstance(x, float) and np.isnan(x)):
+            return float(default)
+        try:
+            return float(_bucket_score(float(x), bins=bins, scores=scores))
+        except Exception:
+            return float(default)
+
+    # ===== Trend Integrity (TI) =====
+    if _n >= 260 and pd.notna(c.iloc[-1]):
+        ma20_s = c.rolling(20, min_periods=20).mean()
+        ma50_s = c.rolling(50, min_periods=50).mean()
+        ma200_s = c.rolling(200, min_periods=200).mean()
+
+        # PctAboveMA200 over 1y and 2y (if available)
+        w1 = int(min(252, _n))
+        w2 = int(min(504, _n))
+        pct_above_1y = float((c.tail(w1) > ma200_s.tail(w1)).mean()) if w1 >= 50 else np.nan
+        pct_above_2y = float((c.tail(w2) > ma200_s.tail(w2)).mean()) if w2 >= 100 else np.nan
+        pct_above = np.nanmean([pct_above_1y, pct_above_2y])
+
+        # MA stack consistency (bull or bear)
+        stack_bull = (ma20_s > ma50_s) & (ma50_s > ma200_s)
+        stack_bear = (ma20_s < ma50_s) & (ma50_s < ma200_s)
+        stack_cons = float((stack_bull.tail(w1) | stack_bear.tail(w1)).mean()) if w1 >= 50 else np.nan
+
+        # Flip rate (churn) on MA200 side + MA20/MA50 cross
+        side200 = np.sign((c - ma200_s).dropna())
+        flips200 = float((side200.tail(w1).diff().fillna(0) != 0).sum()) if len(side200.tail(w1)) > 5 else np.nan
+        spread2050 = (ma20_s - ma50_s).dropna()
+        flips2050 = float((np.sign(spread2050.tail(w1)).diff().fillna(0) != 0).sum()) if len(spread2050.tail(w1)) > 5 else np.nan
+        flip_rate = np.nanmean([flips200, flips2050]) * (252.0 / max(1.0, float(w1)))
+
+        # ADX strength (median last ~6 months)
+        adx = _adx14(h, l, c)
+        adx_med = float(adx.dropna().tail(126).median()) if len(adx.dropna()) >= 30 else np.nan
+    else:
+        pct_above = stack_cons = flip_rate = adx_med = np.nan
+
+    ti_pct_score = _score_from_bins(pct_above, bins=[0.35, 0.50, 0.65, 0.80], scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    ti_stack_score = _score_from_bins(stack_cons, bins=[0.15, 0.30, 0.45, 0.60], scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    ti_flip_score = _score_from_bins(flip_rate, bins=[3, 7, 12, 18], scores=[10.0, 8.0, 6.0, 4.0, 2.0])  # lower flip is better
+    ti_adx_score = _score_from_bins(adx_med, bins=[15, 20, 25, 35], scores=[3.0, 5.0, 7.0, 9.0, 10.0])
+    trend_integrity = _clip(0.30*ti_pct_score + 0.20*ti_stack_score + 0.30*ti_flip_score + 0.20*ti_adx_score, 0, 10)
+
+    # ===== Volatility Structure (VS) — we use VolRisk (0–10) =====
+    if _n >= 60 and pd.notna(c.iloc[-1]):
+        r = np.log(c).diff()
+        rv20 = float(_roll_std(r, 20).iloc[-1] * np.sqrt(252.0) * 100.0) if len(r.dropna()) >= 25 else np.nan
+        rv60 = float(_roll_std(r, 60).iloc[-1] * np.sqrt(252.0) * 100.0) if len(r.dropna()) >= 65 else np.nan
+        rv = np.nanmean([rv20, rv60])
+
+        atr, tr = _atr14(h, l, c)
+        atr_pct = float((atr.iloc[-1] / c.iloc[-1]) * 100.0) if pd.notna(atr.iloc[-1]) and c.iloc[-1] != 0 else np.nan
+
+        rv20_series = _roll_std(r, 20) * np.sqrt(252.0) * 100.0
+        vol_of_vol = float(_roll_std(rv20_series, 252).iloc[-1]) if len(rv20_series.dropna()) >= 300 else np.nan
+
+        tr_med20 = _roll_median(tr, 20)
+        exp_rate = float((tr.tail(60) > tr_med20.tail(60)).mean()) if len(tr.dropna()) >= 80 else np.nan
+    else:
+        rv = atr_pct = vol_of_vol = exp_rate = np.nan
+
+    # Convert to "risk score" where higher = more volatile / harder to control
+    vs_atr_risk = _score_from_bins(atr_pct, bins=[1.2, 2.0, 3.0, 4.5], scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    vs_rv_risk  = _score_from_bins(rv,      bins=[18, 25, 35, 50],    scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    vs_vov_risk = _score_from_bins(vol_of_vol, bins=[4, 7, 12, 18],   scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    vs_exp_risk = _score_from_bins(exp_rate, bins=[0.35, 0.45, 0.55, 0.65], scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    vol_risk = _clip(0.30*vs_atr_risk + 0.25*vs_rv_risk + 0.25*vs_vov_risk + 0.20*vs_exp_risk, 0, 10)
+
+    # ===== Tail & Gap Risk (TGR) — higher = worse =====
+    if _n >= 260 and pd.notna(c.iloc[-1]):
+        ret = c.pct_change()
+        ret_1y = ret.tail(252)
+        mu = float(ret_1y.mean()) if len(ret_1y.dropna()) >= 50 else np.nan
+        sd = float(ret_1y.std(ddof=0)) if len(ret_1y.dropna()) >= 50 else np.nan
+        thr = (mu - 2.0*sd) if (np.isfinite(mu) and np.isfinite(sd)) else np.nan
+        left_tail_freq = float((ret_1y < thr).mean()) if np.isfinite(thr) else np.nan
+
+        # ES 5% (absolute magnitude)
+        q05 = float(ret_1y.quantile(0.05)) if len(ret_1y.dropna()) >= 50 else np.nan
+        es5 = float(ret_1y[ret_1y <= q05].mean()) if np.isfinite(q05) and (ret_1y <= q05).sum() >= 5 else np.nan
+        es5_abs = abs(es5) * 100.0 if np.isfinite(es5) else np.nan
+
+        prev_c = c.shift(1)
+        gap = (o - prev_c).abs() / prev_c
+        gap_freq = float((gap.tail(252) > 0.015).mean()) if len(gap.dropna()) >= 80 else np.nan
+
+        # Crash clusters: count sequences of >=2 consecutive days with ret <= -2%
+        crash = (ret <= -0.02).astype(int)
+        crash_1y = crash.tail(252).fillna(0).to_numpy()
+        clusters = 0
+        run = 0
+        for x in crash_1y:
+            if x == 1:
+                run += 1
+            else:
+                if run >= 2:
+                    clusters += 1
+                run = 0
+        if run >= 2:
+            clusters += 1
+        crash_clusters = float(clusters) * (252.0 / 252.0)
+    else:
+        left_tail_freq = es5_abs = gap_freq = crash_clusters = np.nan
+
+    tgr_tail = _score_from_bins(left_tail_freq, bins=[0.01, 0.025, 0.05, 0.08], scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    tgr_es   = _score_from_bins(es5_abs,       bins=[2.0, 3.5, 5.0, 7.0],     scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    tgr_gap  = _score_from_bins(gap_freq,      bins=[0.01, 0.03, 0.06, 0.10],  scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    tgr_clu  = _score_from_bins(crash_clusters,bins=[1, 2, 4, 6],             scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    tail_risk = _clip(0.35*tgr_tail + 0.30*tgr_es + 0.20*tgr_gap + 0.15*tgr_clu, 0, 10)
+
+    # ===== Mean-Reversion / Whipsaw Propensity (MRW) — higher = more range/whipsaw =====
+    def _variance_ratio(_c, k=5, w=252):
+        _c = pd.to_numeric(_c, errors="coerce")
+        r1 = _c.pct_change()
+        rk = _c.pct_change(k)
+        r1w = r1.tail(w).dropna()
+        rkw = rk.tail(w).dropna()
+        if len(r1w) < max(30, k*6) or len(rkw) < max(30, k*6):
+            return np.nan
+        v1 = float(r1w.var(ddof=0))
+        vk = float(rkw.var(ddof=0))
+        if v1 <= 0:
+            return np.nan
+        return vk / (k * v1)
+
+    def _half_life_spread(spread, w=252):
+        s = pd.to_numeric(spread, errors="coerce").dropna().tail(w)
+        if len(s) < 60:
+            return np.nan
+        x = s.shift(1).dropna()
+        y = s.loc[x.index]
+        if len(x) < 50:
+            return np.nan
+        # OLS slope b
+        b = np.polyfit(x.values, y.values, 1)[0]
+        if b <= 0 or b >= 0.999:
+            return np.nan
+        return float(-np.log(2.0) / np.log(b))
+
+    if _n >= 300 and pd.notna(c.iloc[-1]):
+        vr5 = _variance_ratio(c, k=5, w=504)
+        vr10 = _variance_ratio(c, k=10, w=504)
+        vr = np.nanmean([vr5, vr10])
+
+        r = c.pct_change()
+        ac_list = []
+        for lag in [1,2,3,4,5]:
+            ac = float(r.tail(504).autocorr(lag=lag)) if len(r.dropna()) >= 200 else np.nan
+            if np.isfinite(ac):
+                ac_list.append(ac)
+        ac_mean = float(np.nanmean(ac_list)) if len(ac_list) else np.nan
+
+        atr, tr = _atr14(h, l, c)
+        spread = (c - c.rolling(20, min_periods=20).mean()) / (atr.replace(0, np.nan))
+        hl = _half_life_spread(spread, w=504)
+
+        ma20_s = c.rolling(20, min_periods=20).mean()
+        ma50_s = c.rolling(50, min_periods=50).mean()
+        cross = ((ma20_s - ma50_s).apply(np.sign)).diff().fillna(0)
+        cross_churn = float((cross.tail(252) != 0).sum())
+    else:
+        vr = ac_mean = hl = cross_churn = np.nan
+
+    mr_vr = _score_from_bins(vr, bins=[0.85, 0.95, 1.05, 1.15], scores=[10.0, 8.0, 5.0, 3.0, 1.0])  # lower VR => more mean-reversion
+    mr_ac = _score_from_bins(ac_mean, bins=[-0.08, -0.03, 0.03, 0.08], scores=[10.0, 8.0, 5.0, 3.0, 1.0])  # negative autocorr => mean-reversion
+    mr_hl = _score_from_bins(hl, bins=[5, 10, 20, 40], scores=[10.0, 8.0, 6.0, 4.0, 2.0])  # smaller half-life => faster reversion
+    mr_ch = _score_from_bins(cross_churn, bins=[2, 5, 10, 18], scores=[2.0, 4.0, 6.0, 8.0, 10.0])  # more churn => more whipsaw
+    meanrev_prop = _clip(0.30*mr_vr + 0.20*mr_ac + 0.20*mr_hl + 0.30*mr_ch, 0, 10)
+
+    # ===== Breakout Quality (BQ) — higher = better follow-through =====
+    breakout_quality = 5.0
+    bq_conf = 0.0
+    ft_rate = fb_rate = retest_rate = np.nan
+    if _n >= 300 and pd.notna(c.iloc[-1]) and len(v.dropna()) >= 80:
+        atr, tr = _atr14(h, l, c)
+        hh55 = h.rolling(55, min_periods=55).max().shift(1)
+        level = hh55
+        # Breakout day: close > HH55 and prior close <= HH55
+        bday = (c > hh55) & (c.shift(1) <= hh55)
+        vol_med20 = v.rolling(20, min_periods=20).median().shift(1)
+        vconf = v > (vol_med20 * 1.2)
+        events = (bday & vconf).tail(252)
+        idxs = list(np.where(events.fillna(False).to_numpy())[0])
+        # Map idxs to absolute indices in tail window
+        base = int(len(c.tail(252)) - len(events))  # usually 0
+        # We'll iterate using positions within the tail(252) window for simplicity
+        c252 = c.tail(252).reset_index(drop=True)
+        h252 = h.tail(252).reset_index(drop=True)
+        l252 = l.tail(252).reset_index(drop=True)
+        lvl252 = level.tail(252).reset_index(drop=True)
+        atr252 = atr.tail(252).reset_index(drop=True)
+        evpos = np.where((bday & vconf).tail(252).fillna(False).to_numpy())[0].tolist()
+
+        if len(evpos) >= 3:
+            ft = fb = rt = 0
+            for p in evpos:
+                lvl = float(lvl252.iloc[p]) if pd.notna(lvl252.iloc[p]) else np.nan
+                if not np.isfinite(lvl):
+                    continue
+                # False break: within next 5 days, close falls back below level
+                fb_win = c252.iloc[p+1:min(p+6, len(c252))]
+                if len(fb_win) > 0 and (fb_win < lvl).any():
+                    fb += 1
+                # Follow-through: within next 10 days, (a) stays above level for most days OR (b) reaches +1 ATR from breakout close
+                ft_win = c252.iloc[p+1:min(p+11, len(c252))]
+                h_win = h252.iloc[p+1:min(p+11, len(h252))]
+                atr_p = float(atr252.iloc[p]) if pd.notna(atr252.iloc[p]) else np.nan
+                c_p = float(c252.iloc[p]) if pd.notna(c252.iloc[p]) else np.nan
+                cond_a = (len(ft_win) >= 5 and (ft_win > lvl).mean() >= 0.70)
+                cond_b = (np.isfinite(atr_p) and np.isfinite(c_p) and len(h_win) > 0 and (h_win.max() >= c_p + atr_p))
+                if cond_a or cond_b:
+                    ft += 1
+                # Retest success: touches near level then closes meaningfully above within a few days
+                lo_win = l252.iloc[p+1:min(p+11, len(l252))]
+                if len(lo_win) > 0 and (lo_win <= lvl * 1.005).any():
+                    # after first touch, require a close > lvl*1.01 within next 5 days
+                    touch_idx = int(np.where((lo_win <= lvl * 1.005).to_numpy())[0][0]) + (p+1)
+                    rec_win = c252.iloc[touch_idx:min(touch_idx+6, len(c252))]
+                    if len(rec_win) > 0 and (rec_win >= lvl * 1.01).any():
+                        rt += 1
+            n_ev = max(1, len(evpos))
+            ft_rate = ft / n_ev
+            fb_rate = fb / n_ev
+            retest_rate = rt / n_ev
+            breakout_quality = _clip((0.50*ft_rate + 0.30*retest_rate + 0.20*(1.0 - fb_rate)) * 10.0, 0, 10)
+            bq_conf = 1.0
+        else:
+            # Not enough events — neutral score, low confidence
+            breakout_quality = 5.0
+            bq_conf = 0.3
+
+    # ===== Liquidity & Tradability (LT) — higher = more tradable =====
+    liq_tradability = 5.0
+    dv20 = amihud20 = vol_cv20 = np.nan
+    if _n >= 120 and pd.notna(c.iloc[-1]) and len(v.dropna()) >= 60:
+        dollar_vol = (c * v).replace([np.inf, -np.inf], np.nan)
+        dv20_s = dollar_vol.rolling(20, min_periods=20).median()
+        dv20 = float(dv20_s.iloc[-1]) if pd.notna(dv20_s.iloc[-1]) else np.nan
+        dv_pct = _percentile_rank(dv20_s.dropna(), dv20)
+        dv_score = _clip((dv_pct * 10.0) if np.isfinite(dv_pct) else 5.0, 0, 10)
+
+        ret = c.pct_change()
+        amihud = (ret.abs() / dollar_vol).replace([np.inf, -np.inf], np.nan)
+        amihud_s = amihud.rolling(20, min_periods=20).mean()
+        amihud20 = float(amihud_s.iloc[-1]) if pd.notna(amihud_s.iloc[-1]) else np.nan
+        ami_pct = _percentile_rank(amihud_s.dropna(), amihud20)
+        ami_score = _clip(((1.0 - ami_pct) * 10.0) if np.isfinite(ami_pct) else 5.0, 0, 10)
+
+        vol_cv = (v.rolling(20, min_periods=20).std(ddof=0) / v.rolling(20, min_periods=20).mean()).replace([np.inf, -np.inf], np.nan)
+        vol_cv20 = float(vol_cv.iloc[-1]) if pd.notna(vol_cv.iloc[-1]) else np.nan
+        cv_pct = _percentile_rank(vol_cv.dropna(), vol_cv20)
+        cv_score = _clip(((1.0 - cv_pct) * 10.0) if np.isfinite(cv_pct) else 5.0, 0, 10)
+
+        liq_tradability = _clip(0.50*dv_score + 0.30*ami_score + 0.20*cv_score, 0, 10)
+
+    stock_traits = {
+        "TrendIntegrity": float(trend_integrity),
+        "VolRisk": float(vol_risk),
+        "TailGapRisk": float(tail_risk),
+        "MeanReversionWhipsaw": float(meanrev_prop),
+        "BreakoutQuality": float(breakout_quality),
+        "LiquidityTradability": float(liq_tradability),
+        "Confidence": {
+            "BreakoutQuality": float(bq_conf)
+        },
+        "Raw": {
+            "PctAboveMA200": float(pct_above) if np.isfinite(pct_above) else np.nan,
+            "MAStackConsistency": float(stack_cons) if np.isfinite(stack_cons) else np.nan,
+            "TrendFlipRatePerYear": float(flip_rate) if np.isfinite(flip_rate) else np.nan,
+            "ADXMedian": float(adx_med) if np.isfinite(adx_med) else np.nan,
+            "ATRpct": float(atr_pct) if np.isfinite(atr_pct) else np.nan,
+            "RealizedVol": float(rv) if np.isfinite(rv) else np.nan,
+            "VolOfVol": float(vol_of_vol) if np.isfinite(vol_of_vol) else np.nan,
+            "RangeExpansionRate": float(exp_rate) if np.isfinite(exp_rate) else np.nan,
+            "LeftTailFreq": float(left_tail_freq) if np.isfinite(left_tail_freq) else np.nan,
+            "ES5AbsPct": float(es5_abs) if np.isfinite(es5_abs) else np.nan,
+            "GapFreq": float(gap_freq) if np.isfinite(gap_freq) else np.nan,
+            "CrashClusters": float(crash_clusters) if np.isfinite(crash_clusters) else np.nan,
+            "VarianceRatio": float(vr) if np.isfinite(vr) else np.nan,
+            "AutocorrMean": float(ac_mean) if np.isfinite(ac_mean) else np.nan,
+            "HalfLife": float(hl) if np.isfinite(hl) else np.nan,
+            "CrossChurn": float(cross_churn) if np.isfinite(cross_churn) else np.nan,
+            "FollowThroughRate": float(ft_rate) if np.isfinite(ft_rate) else np.nan,
+            "FalseBreakRate": float(fb_rate) if np.isfinite(fb_rate) else np.nan,
+            "RetestSuccessRate": float(retest_rate) if np.isfinite(retest_rate) else np.nan,
+            "DollarVolMedian20": float(dv20) if np.isfinite(dv20) else np.nan,
+            "Amihud20": float(amihud20) if np.isfinite(amihud20) else np.nan,
+            "VolumeCV20": float(vol_cv20) if np.isfinite(vol_cv20) else np.nan
+        }
+    }
+
+    # Adjust existing stats using traits (bounded, non-invasive)
+    trend_adj = _clip(trend + ((trend_integrity - 5.0) / 5.0) * 1.2, 0, 10)
+    momentum_adj = _clip(momentum + ((breakout_quality - 5.0) / 5.0) * 0.8 - ((meanrev_prop - 5.0) / 5.0) * 0.5, 0, 10)
+    stability_adj = _clip(stability - ((vol_risk - 5.0) / 5.0) * 1.2 - ((tail_risk - 5.0) / 5.0) * 1.0 - ((meanrev_prop - 5.0) / 5.0) * 0.6, 0, 10)
+    reliability_adj = _clip(reliability + ((trend_integrity - 5.0) / 5.0) * 1.0 + ((breakout_quality - 5.0) / 5.0) * 0.8 + ((liq_tradability - 5.0) / 5.0) * 0.6
+                           - ((tail_risk - 5.0) / 5.0) * 1.0 - ((meanrev_prop - 5.0) / 5.0) * 0.7, 0, 10)
+
+    adjusted_stats = {
+        "TrendAdj": float(trend_adj),
+        "MomentumAdj": float(momentum_adj),
+        "StabilityAdj": float(stability_adj),
+        "ReliabilityAdj": float(reliability_adj)
+    }
+
+
+    # Character class (traits-aware, non-invasive; reports A–D unaffected)
+    # Rules are applied in order (top-down).
+    if (trend_adj >= 7 and stability_adj >= 7 and trend_integrity >= 7 and tail_risk <= 4):
         cclass = "Trend Tank"
-    elif momentum >= 7 and stability <= 5:
+    elif ((momentum_adj >= 7 and stability_adj <= 5) or (tail_risk >= 7) or (vol_risk >= 7)):
         cclass = "Glass Cannon"
-    elif trend >= 6 and momentum >= 6 and rr_eff >= 7:
+    elif (trend_adj >= 6 and momentum_adj >= 6 and rr_eff >= 7 and breakout_quality >= 6 and meanrev_prop <= 6):
         cclass = "Momentum Fighter"
-    elif whipsaw or (trend <= 4 and reliability <= 5):
+    elif (whipsaw or meanrev_prop >= 7 or (trend_adj <= 4 and reliability_adj <= 5)):
         cclass = "Range Rogue"
     else:
         cclass = "Balanced"
@@ -2658,6 +3046,8 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     return {
         "CharacterClass": cclass,
         "CoreStats": core_stats,
+        "AdjustedStats": adjusted_stats,
+        "StockTraits": stock_traits,
         "CombatStats": combat_stats,
         "Flags": flags,
         "Conviction": {"Points": points, "Tier": tier, "SizeGuidance": size_guidance},
@@ -3221,7 +3611,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.8.1</div>
+    <div class="incept-brand">INCEPTION v5.8.2</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
