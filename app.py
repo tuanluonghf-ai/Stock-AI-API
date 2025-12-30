@@ -24,7 +24,7 @@ def _safe_text(obj) -> str:
 
 
 # ============================================================
-# INCEPTION v5.8.2 | Strategic Investor Edition
+# INCEPTION v5.8.4 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -85,7 +85,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.8.2",
+st.set_page_config(page_title="INCEPTION v5.8.4",
                    layout="wide",
                    page_icon="🟣")
 
@@ -133,25 +133,25 @@ st.markdown("""
 .gc-head{display:block;margin-bottom:10px;}
 .gc-title{font-weight:800;letter-spacing:.6px;font-size:12px;color:#6B7280;}
 .gc-class{font-weight:800;font-size:16px;color:#111827;}
-.gc-h1{font-weight:900;font-size:28px;color:#0F172A;line-height:1.2;}
-.gc-blurb{margin-top:8px;font-size:16px;line-height:1.6;color:#334155;}
+.gc-h1{font-weight:900;font-size:32px;color:#0F172A;line-height:1.2;}
+.gc-blurb{margin-top:8px;font-size:18px;line-height:1.6;color:#334155;}
 
 .gc-sec{margin-top:10px;padding-top:10px;border-top:1px dashed #E5E7EB;}
-.gc-sec-t{font-weight:900;font-size:16px;color:#374151;margin-bottom:10px;}
+.gc-sec-t{font-weight:900;font-size:18px;color:#374151;margin-bottom:10px;}
 .gc-row{display:flex;gap:10px;align-items:center;margin:6px 0;}
-.gc-k{width:170px;font-size:16px;color:#374151;}
-.gc-bar{flex:1;height:12px;background:#F3F4F6;border-radius:99px;overflow:hidden;}
-.gc-fill{height:12px;background:linear-gradient(90deg,#2563EB 0%,#7C3AED 100%);border-radius:99px;}
-.gc-v{width:86px;text-align:right;font-size:16px;color:#111827;font-weight:800;}
+.gc-k{width:190px;font-size:18px;color:#374151;}
+.gc-bar{flex:1;height:14px;background:#F3F4F6;border-radius:99px;overflow:hidden;}
+.gc-fill{height:14px;background:linear-gradient(90deg,#2563EB 0%,#7C3AED 100%);border-radius:99px;}
+.gc-v{width:96px;text-align:right;font-size:18px;color:#111827;font-weight:800;}
 .gc-flag{display:flex;gap:8px;align-items:center;margin:6px 0;padding:6px 8px;background:#F9FAFB;border-radius:10px;border:1px solid #EEF2F7;}
-.gc-sev{font-size:11px;font-weight:800;color:#111827;background:#E5E7EB;border-radius:8px;padding:2px 6px;}
-.gc-code{font-size:11px;font-weight:800;color:#374151;}
-.gc-note{font-size:13px;color:#6B7280;}
+.gc-sev{font-size:13px;font-weight:800;color:#111827;background:#E5E7EB;border-radius:8px;padding:2px 6px;}
+.gc-code{font-size:13px;font-weight:800;color:#374151;}
+.gc-note{font-size:15px;color:#6B7280;}
 .gc-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
-.gc-tag{font-size:11px;background:#111827;color:#fff;border-radius:999px;padding:4px 10px;}
+.gc-tag{font-size:13px;background:#111827;color:#fff;border-radius:999px;padding:4px 10px;}
 .gc-conv{display:grid;gap:6px;}
-.gc-conv-tier,.gc-conv-pts{font-size:13px;color:#111827;}
-.gc-conv-guide{font-size:13px;color:#6B7280;}
+.gc-conv-tier,.gc-conv-pts{font-size:20px;color:#111827;font-weight:600;}
+.gc-conv-guide{font-size:18px;color:#6B7280;line-height:1.35;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -793,6 +793,54 @@ def compute_ma_features(df: pd.DataFrame) -> Dict[str, Any]:
     ma20 = _safe_float(last.get("MA20"))
     ma50 = _safe_float(last.get("MA50"))
     ma200 = _safe_float(last.get("MA200"))
+
+    # --------------------------
+    # Helper coercions (avoid Series truth-value ambiguity)
+    # --------------------------
+    def _as_scalar(x: Any) -> Any:
+        try:
+            if isinstance(x, pd.Series):
+                s = x.dropna()
+                if not s.empty:
+                    return s.iloc[-1]
+                return x.iloc[-1] if len(x) else None
+            if isinstance(x, (list, tuple, np.ndarray)):
+                return x[-1] if len(x) else None
+        except Exception:
+            return None
+        return x
+
+    def _coalesce(*vals: Any) -> Any:
+        for v in vals:
+            if v is None:
+                continue
+            v2 = _as_scalar(v)
+            if v2 is None:
+                continue
+            if isinstance(v2, float) and pd.isna(v2):
+                continue
+            if isinstance(v2, str) and not v2.strip():
+                continue
+            return v2
+        return None
+
+    def _safe_bool(x: Any) -> bool:
+        v = _as_scalar(x)
+        if v is None:
+            return False
+        if isinstance(v, (bool, np.bool_)):
+            return bool(v)
+        if isinstance(v, (int, np.integer)):
+            return bool(int(v))
+        if isinstance(v, (float, np.floating)):
+            return bool(v) if pd.notna(v) else False
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in ("true", "t", "yes", "y", "1", "ok"):
+                return True
+            if s in ("false", "f", "no", "n", "0", ""):
+                return False
+        return False
     
     def slope_value(series: pd.Series, n: int = 10) -> float:
         s = series.dropna()
@@ -2315,46 +2363,42 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     Produces CharacterPack without breaking any existing keys.
     Uses ONLY already-computed features inside AnalysisPack + df series.
     """
-    ap = analysis_pack or {}
-    # Defensive normalization (some modes store 'N/A' as strings)
-    if not isinstance(ap, dict):
-        ap = {}
-    last = ap.get("Last") or {}
-    if not isinstance(last, dict):
-        last = {}
-    protech = (ap.get("ProTech") or {})
-    if not isinstance(protech, dict):
-        protech = {}
-    ma = (protech.get("MA") or {})
-    rsi = (protech.get("RSI") or {})
-    macd = (protech.get("MACD") or {})
-    vol = (protech.get("Volume") or {})
-    pa = (protech.get("PriceAction") or {})
-    lvl = (protech.get("LevelContext") or {})
-    for _k, _v in [('MA', ma), ('RSI', rsi), ('MACD', macd), ('Volume', vol), ('PriceAction', pa), ('LevelContext', lvl)]:
-        if not isinstance(_v, dict):
-            if _k == 'MA': ma = {}
-            elif _k == 'RSI': rsi = {}
-            elif _k == 'MACD': macd = {}
-            elif _k == 'Volume': vol = {}
-            elif _k == 'PriceAction': pa = {}
-            elif _k == 'LevelContext': lvl = {}
-    fib_ctx = (ap.get("FibonacciContext") or {})
-    if not isinstance(fib_ctx, dict):
-        fib_ctx = {}
+    # Defensive normalization: avoid truthiness checks on pandas objects (Series/DataFrame)
+    ap = analysis_pack if isinstance(analysis_pack, dict) else {}
+
+    last = ap.get("Last", {})
+    last = last if isinstance(last, dict) else {}
+
+    protech = ap.get("ProTech", {})
+    protech = protech if isinstance(protech, dict) else {}
+
+    ma = protech.get("MA", {})
+    ma = ma if isinstance(ma, dict) else {}
+    rsi = protech.get("RSI", {})
+    rsi = rsi if isinstance(rsi, dict) else {}
+    macd = protech.get("MACD", {})
+    macd = macd if isinstance(macd, dict) else {}
+    vol = protech.get("Volume", {})
+    vol = vol if isinstance(vol, dict) else {}
+    pa = protech.get("PriceAction", {})
+    pa = pa if isinstance(pa, dict) else {}
+    lvl = protech.get("LevelContext", {})
+    lvl = lvl if isinstance(lvl, dict) else {}
+
+    fib_ctx = ap.get("FibonacciContext", {})
+    fib_ctx = fib_ctx if isinstance(fib_ctx, dict) else {}
     # prefer nested AnalysisPack["Fibonacci"]["Context"] if available
     if not fib_ctx:
-        try:
-            fib_ctx = (ap.get("Fibonacci") or {}).get("Context") or {}
-        except Exception:
-            fib_ctx = {}
+        fib = ap.get("Fibonacci", {})
+        if isinstance(fib, dict):
+            ctx = fib.get("Context", {})
+            if isinstance(ctx, dict):
+                fib_ctx = ctx
 
-    primary = (ap.get("PrimarySetup") or {})
-    rrsim = (ap.get("RRSim") or {})
-    if not isinstance(primary, dict):
-        primary = {}
-    if not isinstance(rrsim, dict):
-        rrsim = {}
+    primary = ap.get("PrimarySetup", {})
+    primary = primary if isinstance(primary, dict) else {}
+    rrsim = ap.get("RRSim", {})
+    rrsim = rrsim if isinstance(rrsim, dict) else {}
 
     close = _safe_float(last.get("Close"))
     ma20 = _safe_float(last.get("MA20"))
@@ -2372,16 +2416,13 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
             s = str(obj).strip()
             return s if s else None
         return None
-
-    s20 = _safe_label(ma.get("SlopeMA20")) or ma.get("SlopeMA20Label")
-    s50 = _safe_label(ma.get("SlopeMA50")) or ma.get("SlopeMA50Label")
-    s200 = _safe_label(ma.get("SlopeMA200")) or ma.get("SlopeMA200Label")
-    structure = ma.get("Structure") or ma.get("StructureSnapshot") or ma.get("StructureSnapshotV2") or ma.get("StructureSnapshot")
+    s20 = _coalesce(_safe_label(ma.get("SlopeMA20")), ma.get("SlopeMA20Label"))
+    s50 = _coalesce(_safe_label(ma.get("SlopeMA50")), ma.get("SlopeMA50Label"))
+    s200 = _coalesce(_safe_label(ma.get("SlopeMA200")), ma.get("SlopeMA200Label"))
+    structure = _coalesce(ma.get("Structure"), ma.get("StructureSnapshot"), ma.get("StructureSnapshotV2"))
 
     rsi14 = _safe_float(rsi.get("RSI"))
-
-
-    rsi_state = _safe_text(rsi.get("State") or rsi.get("Zone")).strip()
+    rsi_state = _safe_text(_coalesce(rsi.get("State"), rsi.get("Zone"))).strip()
     rsi_div = _safe_text(rsi.get("Divergence")).strip().lower()
 
     macd_state = _safe_text(macd.get("State")).strip().lower()
@@ -2393,9 +2434,8 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     vol_regime = _safe_text(vol.get("Regime")).strip().lower()
 
     candle_class = _safe_text(pa.get("CandleClass") or pa.get("Candle")).strip()
-    climax = bool(pa.get("ClimaxFlag") or pa.get("ClimacticFlag") or False)
-    gap = bool(pa.get("GapFlag") or pa.get("Gap") or False)
-
+    climax = _safe_bool(_coalesce(pa.get("ClimaxFlag"), pa.get("ClimacticFlag")))
+    gap = _safe_bool(_coalesce(pa.get("GapFlag"), pa.get("Gap")))
     atr = _atr_last(df, 14)
     vol_proxy = _safe_float(ap.get("VolProxy")) if pd.notna(_safe_float(ap.get("VolProxy"))) else _dynamic_vol_proxy(df, 20)
 
@@ -2416,29 +2456,31 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     upside_n = upside / denom if pd.notna(denom) and denom > 0 else np.nan
     downside_n = downside / denom if pd.notna(denom) and denom > 0 else np.nan
     rr = (upside / downside) if (pd.notna(upside) and pd.notna(downside) and downside > 0) else _safe_float(primary.get("RR"))
-
     fib_conflict = False
     try:
-        fib_conflict = bool((fib_ctx or {}).get("FiboConflictFlag") or False)
+        fc = fib_ctx if isinstance(fib_ctx, dict) else {}
+        fib_conflict = _safe_bool(fc.get("FiboConflictFlag"))
     except Exception:
         fib_conflict = False
 
     confluence_count = np.nan
     try:
-        confluence_count = _safe_float((fib_ctx or {}).get("ConfluenceCount"))
+        fc = fib_ctx if isinstance(fib_ctx, dict) else {}
+        confluence_count = _safe_float(fc.get("ConfluenceCount"))
     except Exception:
         confluence_count = np.nan
 
     if pd.isna(confluence_count):
         # robust fallback: infer from any iterable hits inside Confluence*WithMA
         try:
-            fc = (fib_ctx or {})
-            conf_short = fc.get("ConfluenceShortWithMA") or {}
-            conf_long = fc.get("ConfluenceLongWithMA") or {}
+            fc = fib_ctx if isinstance(fib_ctx, dict) else {}
+            conf_short = fc.get("ConfluenceShortWithMA")
+            conf_long = fc.get("ConfluenceLongWithMA")
 
             def _count_hits(obj):
                 # obj can be dict/list/str/number
-                if obj is None: return 0
+                if obj is None:
+                    return 0
                 if isinstance(obj, dict):
                     return sum(_count_hits(v) for v in obj.values())
                 if isinstance(obj, (list, tuple, set)):
@@ -2453,7 +2495,6 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         except Exception:
             confluence_count = np.nan
 
-
     # --------------------------
     # CORE STATS (0–10)
     # --------------------------
@@ -2461,18 +2502,18 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     t1 = 2.5 if (pd.notna(close) and pd.notna(ma200) and close >= ma200) else 0.5
     t2 = 2.5 if (pd.notna(ma20) and pd.notna(ma50) and ma20 >= ma50) else 0.5
     t3 = 2.5 if (str(s50).lower() == "positive" and str(s200).lower() != "negative") else (1.25 if str(s50).lower() == "positive" else 0.5)
-    cross_obj = ma.get("Cross") or {}
+    cross_obj = ma.get("Cross", {})
     cross_event = ""
     if isinstance(cross_obj, dict):
-        cross_ma = cross_obj.get("MA50VsMA200") or {}
+        cross_ma = cross_obj.get("MA50VsMA200")
         if isinstance(cross_ma, dict):
-            cross_event = str(cross_ma.get("Event") or "")
+            cross_event = str(_as_scalar(cross_ma.get("Event")) if cross_ma.get("Event") is not None else "")
         else:
-            cross_event = str(cross_ma or "")
+            cross_event = str(_as_scalar(cross_ma) if cross_ma is not None else "")
         if not cross_event:
-            cross_event = str(cross_obj.get("Event") or cross_obj.get("Name") or "")
+            cross_event = str(_coalesce(cross_obj.get("Event"), cross_obj.get("Name"), ""))
     else:
-        cross_event = str(cross_obj or "")
+        cross_event = str(_as_scalar(cross_obj) if cross_obj is not None else "")
     cross_l = cross_event.strip().lower()
     # CrossUp = golden cross, CrossDown = death cross
     t4 = 2.5 if ("crossup" in cross_l or "golden" in cross_l) else (0.5 if ("crossdown" in cross_l or "death" in cross_l) else 1.25)
@@ -3137,6 +3178,10 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     headline = f"{ticker} - {cclass}" if ticker else str(cclass)
     blurb = get_character_blurb(ticker, str(cclass))
 
+    # Show runtime error (if CharacterPack fallback was used)
+    if err:
+        st.error(f"Character module error: {err}")
+
 
     def bar(label: str, val: float, maxv: float = 10.0):
         v = 0.0 if pd.isna(val) else float(val)
@@ -3611,7 +3656,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.8.2</div>
+    <div class="incept-brand">INCEPTION v5.8.4</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
@@ -3653,8 +3698,17 @@ if run_btn:
                     result["AnalysisPack"] = ap
                 except Exception as _e:
                     ap = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
-                    ap["CharacterPackError"] = f"{type(_e).__name__}: {_e}"
-                    ap["CharacterPack"] = {"Error": ap["CharacterPackError"]}
+                    err_msg = f"{type(_e).__name__}: {_e}"
+                    ap["CharacterPackError"] = err_msg
+                    # Fallback: attempt CharacterPack generation with empty df to avoid OHLCV-related failures
+                    try:
+                        cp_fb = compute_character_pack(pd.DataFrame(), ap)
+                        if isinstance(cp_fb, dict):
+                            cp_fb["Error"] = err_msg
+                            cp_fb["_FallbackUsed"] = "EmptyDF"
+                        ap["CharacterPack"] = cp_fb if isinstance(cp_fb, dict) else {"Error": err_msg}
+                    except Exception:
+                        ap["CharacterPack"] = {"Error": err_msg}
                     result["AnalysisPack"] = ap
                 report = generate_insight_report(result)
                 st.markdown("<hr>", unsafe_allow_html=True)
