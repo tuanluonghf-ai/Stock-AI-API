@@ -1,5 +1,5 @@
 # ============================================================
-# INCEPTION v5.7.0 | Strategic Investor Edition
+# INCEPTION v5.7.5 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +59,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.7.0",
+st.set_page_config(page_title="INCEPTION v5.7.5",
                    layout="wide",
                    page_icon="🟣")
 
@@ -463,7 +463,12 @@ def validate_section_d(text: str, primary: Dict[str, Any]) -> bool:
     if pd.notna(exp_rr):
         ok &= _close_enough(got_rr, exp_rr, tol=0.05)
         
-    gp = got_prob.strip().lower()
+    if isinstance(got_prob, dict):
+        for k in ("Label","Name","Value","Text","State","Zone"):
+            if got_prob.get(k) is not None:
+                got_prob = got_prob.get(k)
+                break
+    gp = (str(got_prob).strip().lower() if got_prob is not None else "")
     if exp_prob:
         ok &= (exp_prob in gp) if gp else False
         
@@ -2349,18 +2354,30 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     structure = ma.get("Structure") or ma.get("StructureSnapshot") or ma.get("StructureSnapshotV2") or ma.get("StructureSnapshot")
 
     rsi14 = _safe_float(rsi.get("RSI"))
-    rsi_state = (rsi.get("State") or rsi.get("Zone") or "").strip()
-    rsi_div = (rsi.get("Divergence") or "").strip().lower()
 
-    macd_state = (macd.get("State") or "").strip().lower()
-    macd_zero = (macd.get("ZeroLine") or "").strip().lower()
-    hist_state = (macd.get("HistState") or "").strip().lower()
-    macd_div = (macd.get("Divergence") or "").strip().lower()
+    def _safe_text(obj: Any) -> str:
+        if obj is None:
+            return ""
+        if isinstance(obj, dict):
+            for k in ("Label", "Name", "State", "Zone", "Value", "Text", "Event"):
+                v = obj.get(k)
+                if v is not None:
+                    return str(v)
+            return ""
+        return str(obj)
+
+    rsi_state = _safe_text(rsi.get("State") or rsi.get("Zone")).strip()
+    rsi_div = _safe_text(rsi.get("Divergence")).strip().lower()
+
+    macd_state = _safe_text(macd.get("State")).strip().lower()
+    macd_zero = _safe_text(macd.get("ZeroLine")).strip().lower()
+    hist_state = _safe_text(macd.get("HistState")).strip().lower()
+    macd_div = _safe_text(macd.get("Divergence")).strip().lower()
 
     vol_ratio = _safe_float(vol.get("Ratio"))
-    vol_regime = (vol.get("Regime") or "").strip().lower()
+    vol_regime = _safe_text(vol.get("Regime")).strip().lower()
 
-    candle_class = (pa.get("CandleClass") or pa.get("Candle") or "").strip()
+    candle_class = _safe_text(pa.get("CandleClass") or pa.get("Candle")).strip()
     climax = bool(pa.get("ClimaxFlag") or pa.get("ClimacticFlag") or False)
     gap = bool(pa.get("GapFlag") or pa.get("Gap") or False)
 
@@ -3127,7 +3144,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.7.0</div>
+    <div class="incept-brand">INCEPTION v5.7.5</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
