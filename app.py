@@ -1,3 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 
 
 # ============================================================
@@ -79,7 +81,7 @@ def _safe_bool(x: Any) -> bool:
 
 
 # ============================================================
-# INCEPTION v5.8.6 | Strategic Investor Edition
+# INCEPTION v5.8.7 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -141,7 +143,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.8.6",
+st.set_page_config(page_title="INCEPTION v5.8.7",
                    layout="wide",
                    page_icon="🟣")
 
@@ -152,7 +154,15 @@ st.markdown("""
         color: #0F172A;
         font-family: 'Segoe UI', sans-serif;
     }
-    .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .main, .block-container {
+    
+    /* Increase default text size across the app (Report + modules) */
+    .stMarkdown p, .stMarkdown li, .stMarkdown span, .stMarkdown div {
+        font-size: 17px !important;
+        line-height: 1.55 !important;
+    }
+    .stMarkdown h2 { font-size: 26px !important; }
+    .stMarkdown h3 { font-size: 22px !important; }
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .main, .block-container {
         background: #FFFFFF !important;
         color: #0F172A !important;
     }
@@ -188,26 +198,26 @@ st.markdown("""
 .gc-card{border:1px solid #E5E7EB;border-radius:16px;padding:14px 14px 10px;background:#ffffff;}
 .gc-head{display:block;margin-bottom:10px;}
 .gc-title{font-weight:800;letter-spacing:.6px;font-size:12px;color:#6B7280;}
-.gc-class{font-weight:800;font-size:16px;color:#111827;}
+.gc-class{font-weight:800;font-size:18px;color:#111827;}
 .gc-h1{font-weight:900;font-size:32px;color:#0F172A;line-height:1.2;}
 .gc-blurb{margin-top:8px;font-size:18px;line-height:1.6;color:#334155;}
 
 .gc-sec{margin-top:10px;padding-top:10px;border-top:1px dashed #E5E7EB;}
-.gc-sec-t{font-weight:900;font-size:18px;color:#374151;margin-bottom:10px;}
+.gc-sec-t{font-weight:900;font-size:20px;color:#374151;margin-bottom:10px;}
 .gc-row{display:flex;gap:10px;align-items:center;margin:6px 0;}
-.gc-k{width:190px;font-size:18px;color:#374151;}
-.gc-bar{flex:1;height:14px;background:#F3F4F6;border-radius:99px;overflow:hidden;}
-.gc-fill{height:14px;background:linear-gradient(90deg,#2563EB 0%,#7C3AED 100%);border-radius:99px;}
-.gc-v{width:96px;text-align:right;font-size:18px;color:#111827;font-weight:800;}
+.gc-k{width:190px;font-size:20px;color:#374151;}
+.gc-bar{flex:1;height:16px;background:#F3F4F6;border-radius:99px;overflow:hidden;}
+.gc-fill{height:16px;background:linear-gradient(90deg,#2563EB 0%,#7C3AED 100%);border-radius:99px;}
+.gc-v{width:96px;text-align:right;font-size:20px;color:#111827;font-weight:800;}
 .gc-flag{display:flex;gap:8px;align-items:center;margin:6px 0;padding:6px 8px;background:#F9FAFB;border-radius:10px;border:1px solid #EEF2F7;}
-.gc-sev{font-size:13px;font-weight:800;color:#111827;background:#E5E7EB;border-radius:8px;padding:2px 6px;}
-.gc-code{font-size:13px;font-weight:800;color:#374151;}
-.gc-note{font-size:15px;color:#6B7280;}
+.gc-sev{font-size:14px;font-weight:800;color:#111827;background:#E5E7EB;border-radius:8px;padding:2px 6px;}
+.gc-code{font-size:14px;font-weight:800;color:#374151;}
+.gc-note{font-size:17px;color:#6B7280;}
 .gc-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
-.gc-tag{font-size:13px;background:#111827;color:#fff;border-radius:999px;padding:4px 10px;}
+.gc-tag{font-size:15px;background:#111827;color:#fff;border-radius:999px;padding:4px 10px;}
 .gc-conv{display:grid;gap:6px;}
-.gc-conv-tier,.gc-conv-pts{font-size:20px;color:#111827;font-weight:600;}
-.gc-conv-guide{font-size:18px;color:#6B7280;line-height:1.35;}
+.gc-conv-tier,.gc-conv-pts{font-size:24px;color:#111827;font-weight:600;}
+.gc-conv-guide{font-size:20px;color:#6B7280;line-height:1.35;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -2577,15 +2587,15 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     vol_ratio = _safe_float(vol.get("Ratio"))
     vol_regime = _safe_text(vol.get("Regime")).strip().lower()
 
-    candle_class = _safe_text(pa.get("CandleClass") or pa.get("Candle")).strip()
+    candle_class = _safe_text(_coalesce(pa.get("CandleClass"), pa.get("Candle"), "")).strip()
     climax = _safe_bool(_coalesce(pa.get("ClimaxFlag"), pa.get("ClimacticFlag")))
     gap = _safe_bool(_coalesce(pa.get("GapFlag"), pa.get("Gap")))
     atr = _atr_last(df, 14)
     vol_proxy = _safe_float(ap.get("VolProxy")) if pd.notna(_safe_float(ap.get("VolProxy"))) else _dynamic_vol_proxy(df, 20)
 
     # Levels / distances (prefer LevelContext / FibonacciContext packs)
-    nearest_sup = (lvl.get("NearestSupport") or {}).get("Value") if isinstance(lvl.get("NearestSupport"), dict) else lvl.get("NearestSupport")
-    nearest_res = (lvl.get("NearestResistance") or {}).get("Value") if isinstance(lvl.get("NearestResistance"), dict) else lvl.get("NearestResistance")
+    ns = lvl.get("NearestSupport"); nearest_sup = (ns.get("Value") if isinstance(ns, dict) else _as_scalar(ns))
+    nr = lvl.get("NearestResistance"); nearest_res = (nr.get("Value") if isinstance(nr, dict) else _as_scalar(nr))
     nearest_sup = _safe_float(nearest_sup)
     nearest_res = _safe_float(nearest_res)
 
@@ -2732,7 +2742,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
 
     # Support Resilience: confluence + absorption + RSI integrity
     conf = 3.5 if (pd.notna(confluence_count) and confluence_count >= 3) else (2.0 if pd.notna(confluence_count) and confluence_count >= 2 else 1.0)
-    absorption = 2.5 if (bool(pa.get("NoSupplyFlag") or False) or "hammer" in (candle_class or "").lower()) else 1.2
+    absorption = 2.5 if (_safe_bool(pa.get("NoSupplyFlag")) or "hammer" in (candle_class or "").lower()) else 1.2
     rsi_ok = 2.5 if (pd.notna(rsi14) and rsi14 >= 50) else 1.2
     support_resilience = _clip(conf + absorption + rsi_ok, 0, 10)
 
@@ -2979,8 +2989,8 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         es5_abs = abs(es5) * 100.0 if np.isfinite(es5) else np.nan
 
         prev_c = c.shift(1)
-        gap = (o - prev_c).abs() / prev_c
-        gap_freq = float((gap.tail(252) > 0.015).mean()) if len(gap.dropna()) >= 80 else np.nan
+        gap_pct = (o - prev_c).abs() / prev_c
+        gap_freq = float((gap_pct.tail(252) > 0.015).mean()) if len(gap_pct.dropna()) >= 80 else np.nan
 
         # Crash clusters: count sequences of >=2 consecutive days with ret <= -2%
         crash = (ret <= -0.02).astype(int)
@@ -3800,7 +3810,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.8.6</div>
+    <div class="incept-brand">INCEPTION v5.8.7</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
@@ -3889,7 +3899,7 @@ st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
     © 2025 INCEPTION Research Framework<br>
-    Phiên bản 5.8.5 | Engine GPT-4o
+    Phiên bản 5.8.7 | Engine GPT-4o
     </p>
     """,
     unsafe_allow_html=True
