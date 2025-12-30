@@ -1,5 +1,30 @@
+
+
 # ============================================================
-# INCEPTION v5.7.7 | Strategic Investor Edition
+# SAFE TEXT HELPERS (GLOBAL)
+# ============================================================
+def _safe_str(obj) -> str:
+    """Coerce any object (str/dict/None/number) into safe text for .strip()/.lower() usage."""
+    try:
+        if obj is None:
+            return ""
+        if isinstance(obj, dict):
+            for k in ("Label","Name","Value","Text","State","Zone","Event"):
+                v = obj.get(k)
+                if v is not None:
+                    return str(v)
+            return ""
+        return str(obj)
+    except Exception:
+        return ""
+
+def _safe_text(obj) -> str:
+    # Backward-compatible alias used in validators / prompt builders
+    return _safe_str(obj)
+
+
+# ============================================================
+# INCEPTION v5.7.9 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -59,7 +84,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.7.7",
+st.set_page_config(page_title="INCEPTION v5.7.9",
                    layout="wide",
                    page_icon="🟣")
 
@@ -2351,16 +2376,6 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
 
     rsi14 = _safe_float(rsi.get("RSI"))
 
-    def _safe_text(obj: Any) -> str:
-        if obj is None:
-            return ""
-        if isinstance(obj, dict):
-            for k in ("Label", "Name", "State", "Zone", "Value", "Text", "Event"):
-                v = obj.get(k)
-                if v is not None:
-                    return str(v)
-            return ""
-        return str(obj)
 
     rsi_state = _safe_text(rsi.get("State") or rsi.get("Zone")).strip()
     rsi_div = _safe_text(rsi.get("Divergence")).strip().lower()
@@ -3140,7 +3155,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.7.7</div>
+    <div class="incept-brand">INCEPTION v5.7.9</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
