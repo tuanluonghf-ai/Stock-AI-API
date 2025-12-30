@@ -24,7 +24,7 @@ def _safe_text(obj) -> str:
 
 
 # ============================================================
-# INCEPTION v5.8.4 | Strategic Investor Edition
+# INCEPTION v5.8.5 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -85,7 +85,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.8.4",
+st.set_page_config(page_title="INCEPTION v5.8.5",
                    layout="wide",
                    page_icon="🟣")
 
@@ -3656,7 +3656,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.8.4</div>
+    <div class="incept-brand">INCEPTION v5.8.5</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
@@ -3682,41 +3682,44 @@ if run_btn:
         with st.spinner(f"Đang xử lý phân tích {ticker_input}..."):
             try:
                 result = analyze_ticker(ticker_input)
-
-                # Game Character (non-breaking attach)
+                # ------------------------------
+                # MODULE EXECUTION (ISOLATED OUTPUTS)
+                # Principle: never mutate/overwrite AnalysisPack keys after analyze_ticker().
+                # Each module writes to result["Modules"][<Name>] only, so modules cannot break each other.
+                # ------------------------------
+                if isinstance(result, dict):
+                    result.setdefault("Modules", {})
+                # Character module
                 try:
-                    ap = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
-                    # ensure Character module can read required packs
-                    ap["Last"] = result.get("Last", {}) if isinstance(result, dict) else {}
-                    ap["RRSim"] = result.get("RRSim", {}) if isinstance(result, dict) else {}
-                    ap["DualFibo"] = result.get("DualFibo", {}) if isinstance(result, dict) else {}
-                    df_used = result.get("_DF", None)
+                    ap_base = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
+                    df_used = result.get("_DF", None) if isinstance(result, dict) else None
                     if isinstance(df_used, pd.DataFrame) and not df_used.empty:
-                        ap["CharacterPack"] = compute_character_pack(df_used, ap)
+                        cp = compute_character_pack(df_used, ap_base)
                     else:
-                        ap["CharacterPack"] = compute_character_pack(pd.DataFrame(), ap)
-                    result["AnalysisPack"] = ap
+                        cp = compute_character_pack(pd.DataFrame(), ap_base)
+                    if isinstance(result, dict):
+                        result["Modules"]["Character"] = cp
                 except Exception as _e:
-                    ap = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
                     err_msg = f"{type(_e).__name__}: {_e}"
-                    ap["CharacterPackError"] = err_msg
-                    # Fallback: attempt CharacterPack generation with empty df to avoid OHLCV-related failures
+                    cp_fb = {"Error": err_msg, "_FallbackUsed": "EmptyDF"}
                     try:
-                        cp_fb = compute_character_pack(pd.DataFrame(), ap)
-                        if isinstance(cp_fb, dict):
-                            cp_fb["Error"] = err_msg
-                            cp_fb["_FallbackUsed"] = "EmptyDF"
-                        ap["CharacterPack"] = cp_fb if isinstance(cp_fb, dict) else {"Error": err_msg}
+                        ap_base = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
+                        cp_try = compute_character_pack(pd.DataFrame(), ap_base)
+                        if isinstance(cp_try, dict):
+                            cp_try["Error"] = err_msg
+                            cp_try["_FallbackUsed"] = "EmptyDF"
+                            cp_fb = cp_try
                     except Exception:
-                        ap["CharacterPack"] = {"Error": err_msg}
-                    result["AnalysisPack"] = ap
+                        pass
+                    if isinstance(result, dict):
+                        result["Modules"]["Character"] = cp_fb
                 report = generate_insight_report(result)
                 st.markdown("<hr>", unsafe_allow_html=True)
                 left, right = st.columns([0.68, 0.32], gap="large")
                 with left:
                     analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
                     if 'output_mode' in locals() and output_mode == 'Character':
-                        cp = (analysis_pack or {}).get('CharacterPack') or {}
+                        cp = ((result.get('Modules', {}) if isinstance(result, dict) else {}) or {}).get('Character') or {}
                         cp['_Ticker'] = ticker_input
                         render_character_card(cp)
                         st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
@@ -3742,7 +3745,7 @@ st.markdown(
     """
     <p style='text-align:center; color:#6B7280; font-size:13px;'>
     © 2025 INCEPTION Research Framework<br>
-    Phiên bản 5.6.6 | Engine GPT-4o
+    Phiên bản 5.8.5 | Engine GPT-4o
     </p>
     """,
     unsafe_allow_html=True
