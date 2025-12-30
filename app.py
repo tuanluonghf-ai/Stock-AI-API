@@ -24,7 +24,7 @@ def _safe_text(obj) -> str:
 
 
 # ============================================================
-# INCEPTION v5.8.0 | Strategic Investor Edition
+# INCEPTION v5.8.1 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -85,7 +85,7 @@ def safe_json_dumps(x) -> str:
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
 # ============================================================
-st.set_page_config(page_title="INCEPTION v5.8.0",
+st.set_page_config(page_title="INCEPTION v5.8.1",
                    layout="wide",
                    page_icon="🟣")
 
@@ -133,16 +133,16 @@ st.markdown("""
 .gc-head{display:block;margin-bottom:10px;}
 .gc-title{font-weight:800;letter-spacing:.6px;font-size:12px;color:#6B7280;}
 .gc-class{font-weight:800;font-size:16px;color:#111827;}
-.gc-h1{font-weight:900;font-size:22px;color:#0F172A;line-height:1.2;}
-.gc-blurb{margin-top:6px;font-size:15px;line-height:1.55;color:#334155;}
+.gc-h1{font-weight:900;font-size:28px;color:#0F172A;line-height:1.2;}
+.gc-blurb{margin-top:8px;font-size:16px;line-height:1.6;color:#334155;}
 
 .gc-sec{margin-top:10px;padding-top:10px;border-top:1px dashed #E5E7EB;}
-.gc-sec-t{font-weight:900;font-size:14px;color:#374151;margin-bottom:8px;}
+.gc-sec-t{font-weight:900;font-size:16px;color:#374151;margin-bottom:10px;}
 .gc-row{display:flex;gap:10px;align-items:center;margin:6px 0;}
-.gc-k{width:150px;font-size:14px;color:#374151;}
-.gc-bar{flex:1;height:10px;background:#F3F4F6;border-radius:99px;overflow:hidden;}
-.gc-fill{height:10px;background:#111827;border-radius:99px;}
-.gc-v{width:74px;text-align:right;font-size:14px;color:#111827;font-weight:800;}
+.gc-k{width:170px;font-size:16px;color:#374151;}
+.gc-bar{flex:1;height:12px;background:#F3F4F6;border-radius:99px;overflow:hidden;}
+.gc-fill{height:12px;background:linear-gradient(90deg,#2563EB 0%,#7C3AED 100%);border-radius:99px;}
+.gc-v{width:86px;text-align:right;font-size:16px;color:#111827;font-weight:800;}
 .gc-flag{display:flex;gap:8px;align-items:center;margin:6px 0;padding:6px 8px;background:#F9FAFB;border-radius:10px;border:1px solid #EEF2F7;}
 .gc-sev{font-size:11px;font-weight:800;color:#111827;background:#E5E7EB;border-radius:8px;padding:2px 6px;}
 .gc-code{font-size:11px;font-weight:800;color:#374151;}
@@ -2744,7 +2744,7 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     err = (cp.get("Error") or "")
 
     ticker = _safe_text(cp.get('_Ticker') or '').strip().upper()
-    headline = f\"{ticker} - {cclass}\" if ticker else str(cclass)
+    headline = f"{ticker} - {cclass}" if ticker else str(cclass)
     blurb = get_character_blurb(ticker, str(cclass))
 
 
@@ -3221,7 +3221,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 st.markdown("""
 <div class="incept-wrap">
   <div class="incept-header">
-    <div class="incept-brand">INCEPTION v5.8.0</div>
+    <div class="incept-brand">INCEPTION v5.8.1</div>
     <div class="incept-nav">
       <a href="javascript:void(0)">CỔ PHIẾU</a>
       <a href="javascript:void(0)">DANH MỤC</a>
