@@ -2429,21 +2429,21 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     t1 = 2.5 if (pd.notna(close) and pd.notna(ma200) and close >= ma200) else 0.5
     t2 = 2.5 if (pd.notna(ma20) and pd.notna(ma50) and ma20 >= ma50) else 0.5
     t3 = 2.5 if (str(s50).lower() == "positive" and str(s200).lower() != "negative") else (1.25 if str(s50).lower() == "positive" else 0.5)
-cross_obj = ma.get("Cross") or {}
-cross_event = ""
-if isinstance(cross_obj, dict):
-    cross_ma = cross_obj.get("MA50VsMA200") or {}
-    if isinstance(cross_ma, dict):
-        cross_event = str(cross_ma.get("Event") or "")
+    cross_obj = ma.get("Cross") or {}
+    cross_event = ""
+    if isinstance(cross_obj, dict):
+        cross_ma = cross_obj.get("MA50VsMA200") or {}
+        if isinstance(cross_ma, dict):
+            cross_event = str(cross_ma.get("Event") or "")
+        else:
+            cross_event = str(cross_ma or "")
+        if not cross_event:
+            cross_event = str(cross_obj.get("Event") or cross_obj.get("Name") or "")
     else:
-        cross_event = str(cross_ma or "")
-    if not cross_event:
-        cross_event = str(cross_obj.get("Event") or cross_obj.get("Name") or "")
-else:
-    cross_event = str(cross_obj or "")
-cross_l = cross_event.strip().lower()
-# CrossUp = golden cross, CrossDown = death cross
-t4 = 2.5 if ("crossup" in cross_l or "golden" in cross_l) else (0.5 if ("crossdown" in cross_l or "death" in cross_l) else 1.25)
+        cross_event = str(cross_obj or "")
+    cross_l = cross_event.strip().lower()
+    # CrossUp = golden cross, CrossDown = death cross
+    t4 = 2.5 if ("crossup" in cross_l or "golden" in cross_l) else (0.5 if ("crossdown" in cross_l or "death" in cross_l) else 1.25)
     trend = _clip(_avg(t1, t2, t3, t4) * 4.0, 0, 10)  # NOTE: sum of 4 sub-scores (max 10)
 
     # Momentum: RSI + MACD + Hist + candle
