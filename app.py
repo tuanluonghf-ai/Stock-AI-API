@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
+import math
 
 
 
@@ -98,7 +99,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "6.0"
+APP_VERSION = "6.1"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -147,7 +148,7 @@ _require_path(REPO_ROOT / "inception" / "modules" / "base.py",
 from inception.infra.datahub import DataHub, DataError as HubDataError
 from inception.modules.base import run_modules
 # ============================================================
-# LOCAL MODULE REGISTRY OVERRIDE (v5.9.6)
+# LOCAL MODULE REGISTRY OVERRIDE (v6.1)
 # - Ensures Phase 4 can run as a single-file app without relying
 #   on external `inception.modules.*` versions that may be stale.
 # - Prevents pandas Series/DataFrame from leaking into UI boolean contexts.
@@ -240,6 +241,88 @@ def _json_default(obj):
 
 def safe_json_dumps(x) -> str:
     return json.dumps(x, ensure_ascii=False, default=_json_default)
+
+
+# ============================================================
+# PHASE 5 HARDENING — PACK SANITIZE & VALIDATE (v6.1)
+# - Prevent NaN/Inf leakage to UI/PDF/GPT prompts
+# - Prevent pandas objects from entering boolean/render context
+# ============================================================
+
+def _is_finite_number(x: Any) -> bool:
+    try:
+        if isinstance(x, (bool, np.bool_)):
+            return True
+        if isinstance(x, (int, np.integer)):
+            return True
+        if isinstance(x, (float, np.floating)):
+            return math.isfinite(float(x))
+    except Exception:
+        return False
+    return False
+
+def sanitize_pack(obj: Any) -> Any:
+    """Recursively convert obj to JSON-safe / render-safe python primitives.
+    - pandas Series/Index -> scalar (latest)
+    - pandas DataFrame -> list[dict] (records) (only if needed)
+    - numpy scalar -> python scalar
+    - NaN/Inf -> None
+    """
+    try:
+        if obj is pd.NaT:
+            return None
+    except Exception:
+        pass
+
+    # pandas containers
+    if isinstance(obj, pd.Series):
+        return sanitize_pack(_as_scalar(obj))
+    if isinstance(obj, pd.Index):
+        return [sanitize_pack(x) for x in obj.tolist()]
+    if isinstance(obj, pd.DataFrame):
+        # Avoid embedding big dataframes by default; keep minimal representation.
+        try:
+            return [sanitize_pack(r) for r in obj.to_dict(orient="records")]
+        except Exception:
+            return None
+
+    # dict / list / tuple
+    if isinstance(obj, dict):
+        return {str(k): sanitize_pack(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [sanitize_pack(v) for v in obj]
+
+    # numpy scalars
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        fx = float(obj)
+        return fx if math.isfinite(fx) else None
+    if isinstance(obj, (np.ndarray,)):
+        return [sanitize_pack(v) for v in obj.tolist()]
+
+    # python scalars
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+
+    return obj
+
+def validate_pack_no_pandas(obj: Any, path: str = "root") -> None:
+    """Fail-fast if pandas objects leak into the output payload."""
+    if isinstance(obj, (pd.Series, pd.DataFrame, pd.Index)):
+        raise RuntimeError(f"Phase5 validation failed: pandas object leaked at {path}: {type(obj).__name__}")
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            validate_pack_no_pandas(v, f"{path}.{k}")
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            validate_pack_no_pandas(v, f"{path}[{i}]")
+
+def safe_json_dumps_strict(x: Any) -> str:
+    """Strict JSON dump: sanitize first, then disallow NaN."""
+    sx = sanitize_pack(x)
+    validate_pack_no_pandas(sx)
+    return json.dumps(sx, ensure_ascii=False, default=_json_default, allow_nan=False)
 
 # ============================================================
 # 1. STREAMLIT CONFIGURATION
@@ -2368,7 +2451,7 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     # Primary Picker
     def pick_primary_setup_v2(rrsim: Dict[str, Any]) -> Dict[str, Any]:
         setups = rrsim.get("Setups", []) or []
-        if not setups: return {"Name": "N/A", "RiskPct": np.nan, "RewardPct": np.nan, "RR": np.nan, "Probability": "N/A"}
+        if not setups: return {"Name": "N/A", "RiskPct": None, "RewardPct": None, "RR": None, "Probability": "N/A"}
         def status_rank(s):
             stt = (s.get("Status") or "Watch").strip().lower()
             if stt == "active": return 0
@@ -2398,6 +2481,8 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
         }
     
     primary = pick_primary_setup_v2(rrsim)
+    # Phase 5: prevent NaN leakage in PrimarySetup
+    primary = sanitize_pack(primary)
     analysis_pack["PrimarySetup"] = primary
     
     last_dict = {k: _as_scalar(v) for k, v in (last.to_dict() if hasattr(last, "to_dict") else dict(last)).items()}
@@ -3433,7 +3518,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
         f"Upside: {_fmt_pct(fund.get('UpsidePct'))}"
         if fund else "Không có dữ liệu cơ bản"
     )
-    pack_json = safe_json_dumps(analysis_pack)
+    pack_json = safe_json_dumps_strict(analysis_pack)
     primary = (analysis_pack.get("PrimarySetup") or {})
     must_risk = primary.get("RiskPct")
     must_reward = primary.get("RewardPct")
@@ -3683,10 +3768,24 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     prob = ps.get("Probability", "N/A")
 
     def _fmt_pct_local(x):
-        return "N/A" if x is None else f"{float(x):.2f}%"
+        try:
+            if x is None or pd.isna(x) or not math.isfinite(float(x)):
+                return "N/A"
+            return f"{float(x):.2f}%"
+        except Exception:
+            return "N/A"
 
     def _fmt_rr_local(x):
-        return "N/A" if x is None else f"{float(x):.2f}"
+        try:
+            if x is None or pd.isna(x) or not math.isfinite(float(x)):
+                return "N/A"
+            return f"{float(x):.2f}"
+        except Exception:
+            return "N/A"
+        try:
+            return f"{float(x):.2f}"
+        except Exception:
+            return "N/A"
 
     st.markdown(
         f"""
@@ -3789,10 +3888,24 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     prob = ps.get("Probability", "N/A")
 
     def _fmt_pct_local(x):
-        return "N/A" if x is None else f"{float(x):.2f}%"
+        try:
+            if x is None or pd.isna(x) or not math.isfinite(float(x)):
+                return "N/A"
+            return f"{float(x):.2f}%"
+        except Exception:
+            return "N/A"
 
     def _fmt_rr_local(x):
-        return "N/A" if x is None else f"{float(x):.2f}"
+        try:
+            if x is None or pd.isna(x) or not math.isfinite(float(x)):
+                return "N/A"
+            return f"{float(x):.2f}"
+        except Exception:
+            return "N/A"
+        try:
+            return f"{float(x):.2f}"
+        except Exception:
+            return "N/A"
 
     st.markdown(
         f"""
@@ -4148,10 +4261,10 @@ def main():
     # ============================================================
     st.divider()
     st.markdown(
-        """
+        f"""
         <p style='text-align:center; color:#6B7280; font-size:13px;'>
         © 2025 INCEPTION Research Framework<br>
-        Phiên bản 5.9.6 | Engine GPT-4o
+        Phiên bản {APP_VERSION} | Engine GPT-4o
         </p>
         """,
         unsafe_allow_html=True
