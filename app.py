@@ -81,7 +81,7 @@ def _safe_bool(x: Any) -> bool:
 
 
 # ============================================================
-# INCEPTION v5.9.9 | Strategic Investor Edition
+# INCEPTION v6.0 | Strategic Investor Edition
 # app.py — Streamlit + GPT-4o
 # Author: INCEPTION AI Research Framework
 # Purpose: Technical–Fundamental Integrated Research Assistant
@@ -98,7 +98,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "5.9.9"
+APP_VERSION = "6.0"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -120,6 +120,28 @@ from datetime import datetime, date
 from openai import OpenAI
 from dataclasses import dataclass, field
 from typing import Dict, Any, Tuple, List, Optional
+
+
+# ------------------------------------------------------------
+# Import hardening (Phase 5 prerequisite)
+# Ensure repo root is on sys.path (Render/Streamlit safe)
+# + Fail-fast required path checks to avoid silent import drift
+# ------------------------------------------------------------
+import sys
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+def _require_path(p: Path, hint: str):
+    if not p.exists():
+        raise RuntimeError(f"Missing required path: {p}. {hint}")
+
+_require_path(REPO_ROOT / "inception" / "__init__.py",
+              "Ensure package inception/ exists at repo root and has __init__.py")
+_require_path(REPO_ROOT / "inception" / "infra" / "datahub.py",
+              "Expected inception/infra/datahub.py")
+_require_path(REPO_ROOT / "inception" / "modules" / "base.py",
+              "Expected inception/modules/base.py")
 
 # Phase 3: modular execution (registry) + DataHub (infra)
 from inception.infra.datahub import DataHub, DataError as HubDataError
