@@ -6,6 +6,19 @@ import math
 # ============================================================
 # SAFE TEXT HELPERS (GLOBAL)
 # ============================================================
+
+def _val_or_na(v: Any) -> str:
+    """Return 'N/A' for None/NaN/empty, else str(v). Safe for renderers."""
+    try:
+        if v is None:
+            return "N/A"
+        if isinstance(v, float) and pd.isna(v):
+            return "N/A"
+        s = str(v).strip()
+        return s if s else "N/A"
+    except Exception:
+        return "N/A"
+
 def _safe_str(obj) -> str:
     """Coerce any object (str/dict/None/number) into safe text for .strip()/.lower() usage."""
     try:
@@ -99,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "6.1"
+APP_VERSION = "6.5"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -2399,6 +2412,11 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
         "Scenario12": scenario12,
         "Conviction": conviction,
         "ConvictionPack": conviction_pack, # Step 4B/5B
+        "Market": {
+            "VNINDEX": market_ctx.get("VNINDEX", {}),
+            "VN30": market_ctx.get("VN30", {}),
+            "RelativeStrengthVsVNINDEX": rel,
+        },
         "Fibonacci": {
             "ShortWindow": dual_fib.get("short_window"),
             "LongWindow": dual_fib.get("long_window"),
@@ -3500,14 +3518,18 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
 
 
 # ============================================================
-# 10.9 APPENDIX E — OUTPUT ORDER ANTI-ANCHORING BIAS (v6.2)
+# 10.9 APPENDIX E — OUTPUT ORDER ANTI-ANCHORING BIAS (v6.4)
 # ============================================================
+
 
 def render_character_traits(character_pack: Dict[str, Any]) -> None:
     """
     Render only the 'Traits' part of Character Card (for Appendix E / anti-anchoring).
-    Includes: header + blurb + CORE STATS + COMBAT STATS.
+    Includes: class + blurb + CORE STATS + COMBAT STATS.
     Excludes: Conviction / Weaknesses / Playstyle Tags.
+
+    IMPORTANT: This function must NOT change scoring scale or underlying metrics.
+    It should display the same 0–10 scale as the baseline Character Card in v6.1.
     """
     cp = character_pack or {}
     core = cp.get("CoreStats") or {}
@@ -3517,53 +3539,56 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
     headline = f"{ticker} - {cclass}" if ticker else str(cclass)
     blurb = get_character_blurb(ticker, str(cclass))
 
-    def bar(label: str, value: Any) -> None:
+    # Baseline CORE STATS order (v6.1): Trend, Momentum, Stability, Reliability, Liquidity
+    core_order = [
+        ("Trend", core.get("Trend")),
+        ("Momentum", core.get("Momentum")),
+        ("Stability", core.get("Stability")),
+        ("Reliability", core.get("Reliability")),
+        ("Liquidity", core.get("Liquidity")),
+    ]
+
+    # Baseline COMBAT STATS order (v6.1)
+    combat_order = [
+        ("Upside Power", combat.get("UpsidePower")),
+        ("Downside Risk", combat.get("DownsideRisk")),
+        ("RR Efficiency", combat.get("RREfficiency")),
+        ("Breakout Force", combat.get("BreakoutForce")),
+        ("Support Resilience", combat.get("SupportResilience")),
+    ]
+
+    def bar_0_10(label: str, value: Any) -> None:
         v = _safe_float(value, default=np.nan)
-        # clamp 0..100 if numeric; else show N/A
         if pd.isna(v):
             pct = 0
             disp = "N/A"
         else:
-            pct = int(max(0, min(100, round(v))))
-            disp = f"{pct}/100"
+            # clamp to 0..10 (baseline), display /10, and map to % for bar fill
+            v10 = float(max(0.0, min(10.0, v)))
+            pct = int(round((v10 / 10.0) * 100))
+            disp = f"{v10:.1f}/10"
         st.markdown(
             f"""
             <div class="gc-bar-row">
               <div class="gc-bar-label">{html.escape(str(label))}</div>
               <div class="gc-bar"><div class="gc-fill" style="width:{pct}%"></div></div>
-              <div class="gc-bar-val">{disp}</div>
+              <div class="gc-bar-val">{html.escape(disp)}</div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-    st.markdown('<div class="game-character">', unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="gc-head">
-          <div class="gc-title">{html.escape(str(headline))}</div>
-          <div class="gc-blurb">{html.escape(str(blurb))}</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown(f"### {html.escape(headline)}")
+    st.markdown(f"<div class='gc-blurb'>{html.escape(blurb)}</div>", unsafe_allow_html=True)
 
-    # CORE STATS
     st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
-    bar("Trend", core.get("Trend"))
-    bar("Momentum", core.get("Momentum"))
-    bar("Structure", core.get("Structure"))
-    bar("Volatility", core.get("Volatility"))
-    bar("Liquidity", core.get("Liquidity"))
+    for label, value in core_order:
+        bar_0_10(label, value)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # COMBAT STATS
     st.markdown('<div class="gc-sec"><div class="gc-sec-t">COMBAT STATS</div>', unsafe_allow_html=True)
-    bar("Upside Power", combat.get("UpsidePower"))
-    bar("Downside Risk", combat.get("DownsideRisk"))
-    bar("RR Efficiency", combat.get("RREfficiency"))
-    bar("Breakout Force", combat.get("BreakoutForce"))
-    bar("Support Resilience", combat.get("SupportResilience"))
+    for label, value in combat_order:
+        bar_0_10(label, value)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -3627,7 +3652,7 @@ def _trade_plan_gate(analysis_pack: Dict[str, Any], character_pack: Dict[str, An
     score = _safe_float(ap.get("Conviction"), default=np.nan)
     tier = (cp.get("Conviction") or {}).get("Tier", None)
 
-    # Default thresholds (v6.2 Appendix E)
+    # Default thresholds (v6.4 Appendix E)
     active = (pd.notna(score) and score >= 6.5) or (isinstance(tier, (int, float)) and tier >= 4)
     watch = (pd.notna(score) and 5.5 <= score < 6.5) or (isinstance(tier, (int, float)) and int(tier) == 3)
 
@@ -3641,14 +3666,41 @@ def _trade_plan_gate(analysis_pack: Dict[str, Any], character_pack: Dict[str, An
     return status, {"ConvictionScore": score, "Tier": tier}
 
 
+
 def render_market_state(analysis_pack: Dict[str, Any]) -> None:
     """
     Appendix E section (2): Market State / Current Regime.
+    Must never crash if market context is missing.
     """
     ap = analysis_pack or {}
     m = ap.get("Market") or {}
     vn = m.get("VNINDEX") or {}
     vn30 = m.get("VN30") or {}
+
+    def _fmt_change(x: Any) -> str:
+        v = _safe_float(x, default=np.nan)
+        if pd.isna(v):
+            return "N/A"
+        return f"{v:+.2f}%"
+
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">MARKET STATE (CURRENT REGIME)</div>', unsafe_allow_html=True)
+
+    # If no market pack, show a clean fallback (no error, no stacktrace)
+    if not m:
+        st.info("Market State: N/A (market context not available).")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    st.markdown(
+        f"""
+        <div class="ms-row"><b>VNINDEX</b>: {_val_or_na(vn.get("Regime"))} | Change: {_fmt_change(vn.get("ChangePct"))}</div>
+        <div class="ms-row"><b>VN30</b>: {_val_or_na(vn30.get("Regime"))} | Change: {_fmt_change(vn30.get("ChangePct"))}</div>
+        <div class="ms-row"><b>Relative Strength vs VNINDEX</b>: {_val_or_na(m.get("RelativeStrengthVsVNINDEX"))}</div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
     def _fmt_change(x: Any) -> str:
         v = _safe_float(x, default=np.nan)
