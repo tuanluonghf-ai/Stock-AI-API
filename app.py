@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "6.5"
+APP_VERSION = "6.6"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -3424,6 +3424,19 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     headline = f"{ticker} - {cclass}" if ticker else str(cclass)
     blurb = get_character_blurb(ticker, str(cclass))
 
+    # Prepare class label + blurb paragraphs for STOCK DNA section
+    class_label = f"CLASS: {cclass}"
+    blurb_paragraphs: List[str] = []
+    if str(cclass).strip().lower() == "glass cannon":
+        # Custom 3-paragraph structure for Glass Cannon class (layout only)
+        blurb_paragraphs = [
+            "Cổ phiếu thuộc nhóm Glass Cannon thường được biết đến với khả năng tăng trưởng mạnh mẽ nhưng cũng đi kèm với mức độ rủi ro cao. Những cổ phiếu này thường có biến động giá nhanh chóng và có thể dễ dàng bị ảnh hưởng bởi các yếu tố thị trường hoặc thông tin đột biến.",
+            "Nhóm cổ phiếu Glass Cannon thường dao động mạnh trong một biên độ hẹp trước khi có những cú bật lên hoặc giảm mạnh tại các ngưỡng hỗ trợ và kháng cự quan trọng. Điều này đòi hỏi nhà đầu tư phải có khả năng phân tích kỹ thuật tốt và phản ứng nhanh với các tín hiệu thị trường.",
+            "Đây là loại cổ phiếu thường thu hút những nhà đầu tư ưa mạo hiểm, những người theo trường phái giao dịch ngắn hạn và có khả năng chấp nhận rủi ro cao.",
+        ]
+    elif blurb:
+        blurb_paragraphs = [str(blurb)]
+
     # Show runtime error (if CharacterPack fallback was used)
     if err:
         st.error(f"Character module error: {err}")
@@ -3539,6 +3552,19 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
     headline = f"{ticker} - {cclass}" if ticker else str(cclass)
     blurb = get_character_blurb(ticker, str(cclass))
 
+    # Prepare class label + blurb paragraphs for STOCK DNA section
+    class_label = f"CLASS: {cclass}"
+    blurb_paragraphs: List[str] = []
+    if str(cclass).strip().lower() == "glass cannon":
+        # Custom 3-paragraph structure for Glass Cannon class (layout only)
+        blurb_paragraphs = [
+            "Cổ phiếu thuộc nhóm Glass Cannon thường được biết đến với khả năng tăng trưởng mạnh mẽ nhưng cũng đi kèm với mức độ rủi ro cao. Những cổ phiếu này thường có biến động giá nhanh chóng và có thể dễ dàng bị ảnh hưởng bởi các yếu tố thị trường hoặc thông tin đột biến.",
+            "Nhóm cổ phiếu Glass Cannon thường dao động mạnh trong một biên độ hẹp trước khi có những cú bật lên hoặc giảm mạnh tại các ngưỡng hỗ trợ và kháng cự quan trọng. Điều này đòi hỏi nhà đầu tư phải có khả năng phân tích kỹ thuật tốt và phản ứng nhanh với các tín hiệu thị trường.",
+            "Đây là loại cổ phiếu thường thu hút những nhà đầu tư ưa mạo hiểm, những người theo trường phái giao dịch ngắn hạn và có khả năng chấp nhận rủi ro cao.",
+        ]
+    elif blurb:
+        blurb_paragraphs = [str(blurb)]
+
     # Baseline CORE STATS order (v6.1): Trend, Momentum, Stability, Reliability, Liquidity
     core_order = [
         ("Trend", core.get("Trend")),
@@ -3578,8 +3604,11 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
             unsafe_allow_html=True
         )
 
-    st.markdown(f"### {html.escape(headline)}")
-    st.markdown(f"<div class='gc-blurb'>{html.escape(blurb)}</div>", unsafe_allow_html=True)
+    # Section 1 in Appendix E already prints the STOCK DNA heading.
+    # Here we only show the class label + descriptive blurb.
+    st.markdown(f"**{html.escape(class_label)}**")
+    for para in blurb_paragraphs:
+        st.markdown(str(para))
 
     st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
     for label, value in core_order:
@@ -3720,16 +3749,61 @@ def render_market_state(analysis_pack: Dict[str, Any]) -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: str) -> None:
+
+def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: str, trade_text: str = "") -> None:
     """
     Appendix E section (3): Trade Plan & R:R (Conditional).
     Uses AnalysisPack.TradePlans (Python-computed). No GPT math.
+    Layout-only: reorders how the engine output is displayed.
     """
     ap = analysis_pack or {}
     plans = list(ap.get("TradePlans") or [])
 
-    st.markdown('<div class="gc-sec"><div class="gc-sec-t">TRADE PLAN & R:R (CONDITIONAL)</div>', unsafe_allow_html=True)
+    # Outer visual container (title already printed by render_appendix_e)
+    st.markdown('<div class="gc-sec">', unsafe_allow_html=True)
 
+    # Helper: render Risk/Reward snapshot for the primary plan
+    def _render_rr_snapshot() -> None:
+        primary = (ap.get("PrimarySetup") or {}) if isinstance(ap, dict) else {}
+        if not primary:
+            return
+
+        name = _val_or_na(primary.get("Name"))
+        risk = primary.get("RiskPct")
+        reward = primary.get("RewardPct")
+        rr = primary.get("RR")
+        prob = primary.get("Probability")
+
+        def _fmt_pct_local(x: Any) -> str:
+            try:
+                if x is None or pd.isna(x) or not math.isfinite(float(x)):
+                    return "N/A"
+                return f"{float(x):.2f}"
+            except Exception:
+                return "N/A"
+
+        def _fmt_rr_local(x: Any) -> str:
+            try:
+                if x is None or pd.isna(x) or not math.isfinite(float(x)):
+                    return "N/A"
+                return f"{float(x):.2f}"
+            except Exception:
+                return "N/A"
+
+        st.markdown(f"#### 3.4. Risk / Reward Snapshot (Primary Plan: {name})")
+        st.markdown(
+            f"""
+            <div class="incept-metrics">
+              <div class="incept-metric"><div class="k">Risk%</div><div class="v">{_fmt_pct_local(risk)}</div></div>
+              <div class="incept-metric"><div class="k">Reward%</div><div class="v">{_fmt_pct_local(reward)}</div></div>
+              <div class="incept-metric"><div class="k">RR</div><div class="v">{_fmt_rr_local(rr)}</div></div>
+              <div class="incept-metric"><div class="k">Probability</div><div class="v">{_val_or_na(prob)}</div></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # If gate is locked, show defensive posture + still expose snapshot
     if gate_status == "LOCK":
         st.info("Trade Plan locked (anti-FOMO). Maintain capital preservation posture and wait for confirmation.")
         st.markdown(
@@ -3745,22 +3819,27 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
               </ul>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
         st.markdown("</div>", unsafe_allow_html=True)
+        _render_rr_snapshot()
         return
 
     if not plans:
         st.warning("No Trade Plan available from engine.")
         st.markdown("</div>", unsafe_allow_html=True)
+        _render_rr_snapshot()
         return
 
-    # Sort: prefer ACTIVE/Watch, then higher RR, then probability label
+    # Sort: prefer higher probability label, then higher RR
     def _prob_rank(p: Any) -> int:
         s = str(p or "").lower()
-        if "high" in s: return 3
-        if "med" in s: return 2
-        if "low" in s: return 1
+        if "high" in s:
+            return 3
+        if "med" in s:
+            return 2
+        if "low" in s:
+            return 1
         return 0
 
     plans_sorted = sorted(
@@ -3768,10 +3847,17 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         key=lambda x: (
             -_prob_rank(x.get("Probability")),
             -_safe_float(x.get("RR"), default=-1e9),
-        )
+        ),
     )
 
-    head_note = "ACTIVE: Execution allowed (conditional). Use dynamic stop." if gate_status == "ACTIVE" else "WATCH: Plan is informational. Do NOT force entries."
+    # 3.1 Setup Overview
+    st.markdown("#### 3.1. Setup Overview")
+
+    head_note = (
+        "ACTIVE: Execution allowed (conditional). Use dynamic sizing and respect stop levels."
+        if gate_status == "ACTIVE"
+        else "WATCH: Plan is informational. Do NOT force entries."
+    )
     st.markdown(f"<div class='tp-note'>{html.escape(head_note)}</div>", unsafe_allow_html=True)
 
     show_n = 2 if gate_status == "ACTIVE" else 1
@@ -3784,7 +3870,11 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         prob = _val_or_na(p.get("Probability"))
         status = _val_or_na(p.get("Status"))
 
-        rr_label = "Attractive" if (pd.notna(rr) and rr >= 2.0) else ("Acceptable" if (pd.notna(rr) and rr >= 1.3) else "Thin")
+        rr_label = (
+            "Attractive"
+            if (pd.notna(rr) and rr >= 2.0)
+            else ("Acceptable" if (pd.notna(rr) and rr >= 1.3) else "Thin")
+        )
 
         st.markdown(
             f"""
@@ -3798,48 +3888,182 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
               </div>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
+    # 3.2 Narrative explanation from legacy C-section (if available)
+    if trade_text:
+        st.markdown(
+            f"""
+            <div class="tp-expl">
+              {trade_text}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Close visual container and then show the numeric snapshot
     st.markdown("</div>", unsafe_allow_html=True)
-
-
+    _render_rr_snapshot()
 def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: Dict[str, Any]) -> None:
     """
-    Appendix E — Anti-Anchoring Output Order:
+    Appendix E — Anti-Anchoring Output Order (layout only):
       1) Stock DNA (Traits)
-      2) Market State (Current Regime)
+      2) CURRENT STATUS (Scenario + Technical + Fundamental)
       3) Trade Plan & R:R (Conditional)
       4) Decision Layer (Conviction/Weakness/Tags)
-    Also optionally shows legacy Appendices A–D inside an expander.
+    This renderer must not change any underlying calculations.
     """
     modules = (result or {}).get("Modules") or {}
     cp = modules.get("character") or {}
+    ap = analysis_pack or {}
+
+    # Trade-plan gate (for execution / anti-FOMO posture)
     gate_status, _meta = _trade_plan_gate(analysis_pack, cp)
 
-    # 1) Stock DNA (Traits)
-    st.markdown("## APPENDIX E — ANTI-ANCHORING OUTPUT")
-    st.markdown("### 1) Stock DNA (Core Stats – Traits)")
+    # ---------- HEADER: <Ticker> — <Last Close> <+/-%> ----------
+    ticker = _safe_text(ap.get("Ticker") or (result or {}).get("Ticker") or "").strip().upper()
+    last_pack = ap.get("Last") or {}
+    close_val = _safe_float(last_pack.get("Close"), default=np.nan)
+
+    mkt = ap.get("Market") or {}
+    stock_chg = _safe_float(mkt.get("StockChangePct"), default=np.nan)
+
+    def _fmt_close(x: Any) -> str:
+        try:
+            v = float(x)
+            if not math.isfinite(v):
+                return "N/A"
+            return f"{v:.2f}"
+        except Exception:
+            return "N/A"
+
+    def _fmt_change_pct(x: Any) -> str:
+        v = _safe_float(x, default=np.nan)
+        if pd.isna(v):
+            return ""
+        return f"{v:+.2f}%"
+
+    price_str = _fmt_close(close_val)
+    chg_str = _fmt_change_pct(stock_chg)
+
+    if ticker or price_str != "N/A":
+        header = ticker or ""
+        if price_str != "N/A":
+            header = f"{header} — {price_str}" if header else price_str
+        if chg_str:
+            header = f"{header} ({chg_str})"
+        st.markdown(f"## {header}")
+
+    # Pre-split legacy report once for reuse
+    sections = _split_sections(report_text or "")
+    a_section = sections.get("A", "") or ""
+    b_section = sections.get("B", "") or ""
+    c_section = sections.get("C", "") or ""
+    d_section = sections.get("D", "") or ""
+
+    # ============================================================
+    # 1) STOCK DNA (CORE STATS – TRAITS)
+    # ============================================================
+    st.markdown("### 1. STOCK DNA (CORE STATS – TRAITS)")
     render_character_traits(cp)
 
-    # 2) Market State
-    st.markdown("### 2) Market State (Current Regime)")
-    render_market_state(analysis_pack)
+    # ============================================================
+    # 2) CURRENT STATUS
+    # ============================================================
+    st.markdown("### 2. CURRENT STATUS")
 
-    # 3) Trade Plan & R:R (Conditional)
-    st.markdown("### 3) Trade Plan & R:R (CONDITIONAL)")
-    render_trade_plan_conditional(analysis_pack, gate_status)
+    # 2.1 Relative Strength vs VNINDEX
+    rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
+    st.markdown(f"**Relative Strength vs VNINDEX:** {_val_or_na(rel)}")
 
-    # 4) Decision Layer
-    st.markdown("### 4) Decision Layer (Conviction, Weaknesses, Playstyle Tags)")
+    # 2.2 Scenario & Scores
+    scenario_pack = ap.get("Scenario12") or {}
+    master_pack = ap.get("MasterScore") or {}
+    conviction_score = ap.get("Conviction")
+
+    st.markdown("**Scenario & Scores**")
+    st.markdown(
+        f"- Scenario: {_val_or_na(scenario_pack.get('Name'))}\n"
+        f"- Điểm tổng hợp: {_val_or_na(master_pack.get('Total'))} | Điểm tin cậy: {_val_or_na(conviction_score)}"
+    )
+
+    # 2.3 TECHNICAL ANALYSIS (reuse A-section body)
+    st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
+    a_items = _extract_a_items(a_section)
+    a_raw = (a_section or "").replace("\r\n", "\n")
+    a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
+    if a_items:
+        for i, body in enumerate(a_items, start=1):
+            if not body.strip():
+                continue
+            st.markdown(
+                f"""
+                <div class="incept-card">
+                  <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
+                  <div>{body}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    else:
+        if a_body:
+            st.markdown(a_body, unsafe_allow_html=False)
+        else:
+            st.info("N/A")
+
+    # 2.4 FUNDAMENTAL ANALYSIS (reuse B-section body)
+    st.markdown('<div class="sec-title">FUNDAMENTAL ANALYSIS</div>', unsafe_allow_html=True)
+    b_raw = (b_section or "").replace("\r\n", "\n").strip()
+    if b_raw:
+        b_body = re.sub(r"(?m)^B\..*\n?", "", b_raw).strip()
+        if b_body:
+            st.markdown(
+                f"""
+                <div class="incept-callout">
+                  {b_body}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("N/A")
+    else:
+        st.info("N/A")
+
+    # ============================================================
+    # 3) TRADE PLAN & R:R (CONDITIONAL)
+    # ============================================================
+    st.markdown("### 3. TRADE PLAN & R:R (CONDITIONAL)")
+    # Pass legacy C-section body to the trade-plan renderer so explanation
+    # lives next to the numeric setup cards.
+    c_body_clean = ""
+    if c_section:
+        c_raw = c_section.replace("\r\n", "\n")
+        c_body_clean = re.sub(r"(?m)^C\..*\n?", "", c_raw).strip()
+    render_trade_plan_conditional(analysis_pack, gate_status, c_body_clean)
+
+    # ============================================================
+    # 4) DECISION LAYER (CONVICTION, WEAKNESSES, PLAYSTYLE TAGS)
+    # ============================================================
+    st.markdown("### 4. DECISION LAYER (CONVICTION, WEAKNESSES, PLAYSTYLE TAGS)")
+
+    # 4.1 Execution Mode + Preferred Plan (switch-level summary)
+    primary_setup = (ap.get("PrimarySetup") or {}) if isinstance(ap, dict) else {}
+    primary_name = _val_or_na(primary_setup.get("Name"))
+
+    if gate_status == "LOCK":
+        exec_mode_text = "WATCH ONLY – chưa kích hoạt lệnh mới (ưu tiên quan sát / bảo toàn vốn)."
+    elif gate_status == "ACTIVE":
+        exec_mode_text = "ACTIVE – được phép triển khai kế hoạch giao dịch theo điều kiện đã nêu."
+    else:
+        exec_mode_text = "WATCH ONLY – setup mang tính tham khảo, chờ thêm tín hiệu xác nhận."
+
+    st.markdown(f"**Execution Mode:** {exec_mode_text}")
+    st.markdown(f"**Preferred Plan:** {primary_name}")
+
+    # 4.2 Detailed conviction + weaknesses + playstyle tags
     render_character_decision(cp)
-
-    # Legacy A–D (optional)
-    with st.expander("Appendices A–D (Legacy Report) — for reference", expanded=False):
-        render_report_pretty(report_text, analysis_pack)
-
-
-
 
 # ============================================================
 # 11. GPT-4o STRATEGIC INSIGHT GENERATION
