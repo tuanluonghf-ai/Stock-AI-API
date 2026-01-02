@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "6.7"
+APP_VERSION = "6.8"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -3601,7 +3601,11 @@ CLASS_TEMPLATES: Dict[str, List[str]] = {
 
 # Mapping for bilingual playstyle tags (EN → EN + VI).
 PLAYSTYLE_TAG_TRANSLATIONS: Dict[str, str] = {
+    "Pullback-buy zone (confluence)": "Pullback-buy zone (confluence) - Vùng mua pullback có nhiều yếu tố hội tụ",
+    "Breakout attempt (needs follow-through)": "Breakout attempt (needs follow-through) - Nỗ lực breakout, cần phiên xác nhận tiếp theo",
     "Wait for volume confirmation": "Wait for volume confirmation - Chờ xác nhận khối lượng thanh khoản",
+    "Tight risk control near resistance": "Tight risk control near resistance - Siết chặt quản trị rủi ro gần vùng kháng cự",
+    "Use LongStructure_ShortTactical rule": "Use LongStructure_ShortTactical rule - Áp dụng quy tắc cấu trúc dài hạn, tác chiến ngắn hạn",
 }
 
 
@@ -4836,7 +4840,8 @@ def main():
         ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
         run_btn = st.button("Phân tích", type="primary", use_container_width=True)
 
-        output_mode = st.radio("Chế độ hiển thị:", ["Report A–D", "Character"], index=1)
+        # Mặc định sử dụng layout Appendix E (Character-style); bỏ lựa chọn chế độ hiển thị
+        output_mode = "Character"
 
     # ============================================================
     # 13. MAIN EXECUTION
