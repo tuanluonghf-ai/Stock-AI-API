@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "6.6"
+APP_VERSION = "6.7"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -689,22 +689,53 @@ def load_ticker_names(path: str = TICKER_NAME_PATH) -> pd.DataFrame:
         return pd.DataFrame(columns=["Ticker","Name"])
 
 def load_hsc_targets(path: str = HSC_TARGET_PATH) -> pd.DataFrame:
-    """Load brokerage targets via DataHub (infra)."""
+    """
+    Load bảng target của CTCK (ví dụ Tickers Target Price.xlsx) và chuẩn hóa
+    về 3 cột: Ticker, Target, Recommendation.
+
+    Lưu ý:
+    - Một số file dùng header 'TP (VND)' hoặc tương tự thay vì 'Target',
+      nên cần rename về 'Target' để pipeline Fundamental đọc được.
+    """
     try:
         hub = DataHub.from_env(default_dir=DATA_DIR)
         df = hub.load_hsc_targets(path)
     except HubDataError:
+        # Fallback: trả về DataFrame rỗng với đúng schema tối thiểu
         return pd.DataFrame(columns=["Ticker", "Target", "Recommendation"])
 
-    # Legacy normalization
+    # Chuẩn hóa tên cột Target: ưu tiên cột 'Target', nếu không có thì map từ các tên quen dùng
+    if "Target" not in df.columns:
+        rename_map = {
+            "TP (VND)": "Target",
+            "TP": "Target",
+            "Target price": "Target",
+            "Target Price": "Target",
+            "Target Price (VND)": "Target",
+            "Giá mục tiêu": "Target",
+        }
+        for old, new in rename_map.items():
+            if old in df.columns:
+                df = df.rename(columns={old: new})
+                break  # chỉ cần map một cột phù hợp
+
+    # Chuẩn hóa giá trị Target (nếu đã có cột Target)
     if "Target" in df.columns:
         df["Target"] = pd.to_numeric(df["Target"], errors="coerce")
-        df.loc[df["Target"].notna() & (df["Target"] < 500), "Target"] = df.loc[df["Target"].notna() & (df["Target"] < 500), "Target"] * 1000
+        # Nếu Target < 500 thì coi như đơn vị là nghìn, nhân lại cho 1,000
+        df.loc[df["Target"].notna() & (df["Target"] < 500), "Target"] = df["Target"] * 1000
+
+    # Bảo đảm có cột Recommendation
     if "Recommendation" not in df.columns:
         df["Recommendation"] = ""
 
+    # Giữ lại các cột cần dùng
     cols = [c for c in ["Ticker", "Target", "Recommendation"] if c in df.columns]
-    return df[cols].drop_duplicates(subset=["Ticker"], keep="last") if cols else pd.DataFrame(columns=["Ticker", "Target", "Recommendation"])
+    if not cols:
+        return pd.DataFrame(columns=["Ticker", "Target", "Recommendation"])
+
+    # Mỗi ticker chỉ giữ dòng cuối (mới nhất)
+    return df[cols].drop_duplicates(subset=["Ticker"], keep="last")
 
 def sma(series, window): return series.rolling(window=window).mean()
 def ema(series, span): return series.ewm(span=span, adjust=False).mean()
@@ -3535,6 +3566,45 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
 # ============================================================
 
 
+
+# ============================================================
+# CLASS TEXT TEMPLATES (STOCK DNA)
+# ============================================================
+# Fixed 3-paragraph templates per class to keep text stable.
+CLASS_TEMPLATES: Dict[str, List[str]] = {
+    "Trend Tank": [
+        "Cổ phiếu nhóm này thường có xu hướng khá rõ và bền, biến động hằng ngày ở mức vừa phải và ít bị cuốn theo nhiễu ngắn hạn. Giá của cổ phiếu nhóm này thường bám tốt các đường trung bình động trung – dài hạn, nhịp điều chỉnh đa số dừng lại ở vùng hỗ trợ rồi quay lại theo xu hướng chính thay vì gãy hẳn cấu trúc.",
+        "Nhà đầu tư phù hợp với nhóm này thường có tư duy trung – dài hạn, ưu tiên sự bền vững của xu hướng hơn là các cú ăn nhanh. Các chiến lược thuận xu hướng như mua từng phần tại các nhịp pullback về hỗ trợ động, giữ vị thế cho đến khi cấu trúc xu hướng bị vi phạm rõ ràng và chỉ gia tăng khi trend được xác nhận lại thường dễ chiến thắng. Ngược lại, các chiến lược giao dịch ngược xu hướng, cố gắng bắt đỉnh/bắt đáy liên tục hoặc trading quá dày trong khi xu hướng lớn vẫn còn hiệu lực thường dễ cho kết quả kém.",
+        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát vị trí giá so với MA trung – dài hạn, chuỗi đỉnh – đáy liên tiếp và khối lượng tại các nhịp điều chỉnh về vùng hỗ trợ. Việc quan sát phản ứng của giá trước tin xấu, các phiên đóng cửa tuần quanh vùng hỗ trợ chính và tín hiệu mất dần độ dốc của MA giúp nhận diện sớm thời điểm xu hướng yếu đi để chủ động giảm tỷ trọng hoặc thoát vị thế.",
+    ],
+    "Glass Cannon": [
+        "Cổ phiếu nhóm này thường mang lại tiềm năng tăng giá rất mạnh trong thời gian ngắn nhưng đi kèm rủi ro lớn và biến động cao. Giá của cổ phiếu nhóm này thường dao động nhanh, dễ xuất hiện các cú tăng – giảm biên độ lớn, gap và nến thân dài khi dòng tiền thay đổi hoặc xuất hiện tin tức. Nhóm này thường dao động quyết liệt tại các vùng hỗ trợ/kháng cự, khi vượt hoặc gãy vùng then chốt thì biên độ dao động sau đó thường mở rộng mạnh.",
+        "Nhà đầu tư phù hợp với nhóm này thường là người ưa mạo hiểm, chấp nhận tail risk và có kỷ luật quản trị vốn nghiêm ngặt. Các chiến lược thuận xu hướng với điểm vào được chuẩn bị sẵn tại vùng pullback rõ ràng, stoploss cụ thể, size hợp lý và sẵn sàng thoát nhanh khi điều kiện setup không còn giữ được thường dễ chiến thắng. Ngược lại, các chiến lược mua đuổi trong giai đoạn hưng phấn, bình quân giá xuống khi trend đã gãy, hoặc giữ vị thế quá lâu chỉ dựa trên kỳ vọng mà bỏ qua tín hiệu kỹ thuật thường dễ dẫn tới thua lỗ lớn.",
+        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát phản ứng giá quanh các vùng hỗ trợ/kháng cự, biên độ dao động từng phiên, khối lượng đi kèm các cú bứt phá hoặc gãy mạnh và tần suất xuất hiện gap. Việc theo dõi các pha tăng nóng không được hỗ trợ bởi khối lượng, nến đảo chiều tại vùng giá cao và tín hiệu 'cạn lực' sau tin tốt giúp quyết định thời điểm chốt lời, giảm size hoặc cắt lỗ kịp thời.",
+    ],
+    "Momentum Fighter": [
+        "Cổ phiếu nhóm này thường có động lượng giá rõ rệt, khi đã chạy theo một hướng thì giá thường di chuyển dứt khoát trong một khoảng thời gian. Giá của cổ phiếu nhóm này thường phản ứng mạnh với các vùng breakout/breakdown, khi vượt đỉnh hoặc thủng đáy quan trọng thì nhịp đi tiếp thường nhanh và khó đuổi kịp. Nhóm này thường dao động theo kiểu bám đà: khi momentum còn tốt, các nhịp điều chỉnh thường nông; khi đà suy yếu, các nhịp điều chỉnh sâu và thiếu follow-through sẽ xuất hiện nhiều hơn.",
+        "Nhà đầu tư phù hợp với nhóm này thường theo phong cách chủ động, theo dõi thị trường sát sao và chấp nhận ra vào nhịp nhàng theo động lượng. Các chiến lược mua theo sức mạnh như tham gia khi giá vượt vùng breakout với khối lượng ủng hộ, dời stop theo trend và chốt lời từng phần khi tín hiệu momentum yếu dần thường dễ chiến thắng. Ngược lại, các chiến lược cố bắt đỉnh khi đà tăng còn mạnh, bán khống ngược xu hướng hoặc bắt đáy trong pha giảm tốc độ cao thường dễ thất bại vì đi ngược lại hướng dịch chuyển chính của dòng tiền.",
+        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát các tín hiệu thay đổi động lượng như biên độ nến thu hẹp sau breakout, histogram yếu dần, MACD phẳng lại hoặc bắt đầu giao cắt, và khối lượng không còn đồng pha với biến động giá. Việc quan sát phản ứng giá tại vùng breakout cũ khi bị test lại, số lần thất bại khi cố vượt một ngưỡng giá và nến đảo chiều tại vùng giá cao giúp xác định sớm thời điểm nên giảm vị thế hoặc thoát hẳn trước khi momentum gãy hẳn.",
+    ],
+    "Range Rogue": [
+        "Cổ phiếu nhóm này thường dao động trong một vùng giá tương đối cố định thay vì hình thành xu hướng rõ ràng và kéo dài. Giá của cổ phiếu nhóm này thường quay lại nhiều lần giữa các vùng hỗ trợ/kháng cự quen thuộc, dễ xuất hiện phá vỡ giả, quét stop hoặc các cú đâm xuyên biên độ rồi quay đầu trở lại. Nhóm này thường dao động với mức nhiễu cao, nếu không xác định đúng vùng biên hoạt động chính thì rất dễ bị cuốn vào các chuyển động ngắn hạn thiếu ý nghĩa.",
+        "Nhà đầu tư phù hợp với nhóm này thường ưa phong cách giao dịch theo biên độ, kiên nhẫn chờ mua gần vùng hỗ trợ rõ và chốt lời gần vùng kháng cự, chấp nhận biên lợi nhuận vừa phải nhưng lặp lại nhiều lần. Các chiến lược buy low – sell high trong hộp giá, dùng stoploss khi giá đóng cửa ra khỏi vùng biên và hạn chế đòn bẩy thường dễ chiến thắng. Ngược lại, các chiến lược đuổi theo breakout/breakdown mà không có xác nhận thêm, kỳ vọng xu hướng kéo dài trong khi cấu trúc vẫn sideway hoặc liên tục vào/ra giữa vùng giữa hộp giá thường dễ thất bại.",
+        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát việc xác định và cập nhật vùng hỗ trợ/kháng cự biên trên – biên dưới, dạng nến và khối lượng mỗi lần giá chạm biên. Việc theo dõi số lần phá vỡ giả, khối lượng đi kèm các cú phá biên, và cách giá cư xử ở vùng giữa hộp giá giúp phân biệt khi nào nên tiếp tục trade trong biên, khi nào nên đứng ngoài hoặc chuẩn bị cho kịch bản chuyển sang một xu hướng mới.",
+    ],
+    "Balanced": [
+        "Cổ phiếu nhóm này thường thể hiện sự cân bằng giữa tăng trưởng và rủi ro, mức biến động trung bình và hành vi giá tương đối sạch so với các nhóm quá phòng thủ hoặc quá biến động. Giá của cổ phiếu nhóm này thường tôn trọng khá tốt các vùng hỗ trợ/kháng cự và các đường trung bình động chính, nhịp điều chỉnh hiếm khi quá sâu nhưng cũng không quá nông, tạo nên cấu trúc giá tương đối dễ theo dõi.",
+        "Nhà đầu tư phù hợp với nhóm này thường tìm kiếm sự cân đối giữa khả năng sinh lời và độ ổn định, chấp nhận biến động vừa phải để đổi lấy xác suất duy trì xu hướng tốt hơn so với nhóm biến động cao. Các chiến lược kết hợp như mua tại các nhịp điều chỉnh về vùng hỗ trợ đáng tin cậy, nắm giữ theo xu hướng trung hạn và điều chỉnh vị thế theo thay đổi về định giá hoặc chất lượng dòng tiền thường dễ chiến thắng. Ngược lại, các chiến lược sử dụng đòn bẩy như với cổ phiếu cực kỳ biến động hoặc quá thụ động mua rồi bỏ quên trong khi bối cảnh cơ bản thay đổi thường không phù hợp với nhóm này.",
+        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát diễn biến xu hướng trung hạn (độ dốc MA, chuỗi đỉnh – đáy), các mốc định giá so với lịch sử và dòng tiền so với phần còn lại của ngành. Việc theo dõi khối lượng tại các vùng hỗ trợ/kháng cự, phản ứng giá trước tin cơ bản quan trọng và sự dịch chuyển dòng tiền giữa các nhóm cổ phiếu trong cùng ngành giúp xác định thời điểm nên gia tăng, giữ nguyên hay thu hẹp vị thế.",
+    ],
+}
+
+# Mapping for bilingual playstyle tags (EN → EN + VI).
+PLAYSTYLE_TAG_TRANSLATIONS: Dict[str, str] = {
+    "Wait for volume confirmation": "Wait for volume confirmation - Chờ xác nhận khối lượng thanh khoản",
+}
+
+
 def render_character_traits(character_pack: Dict[str, Any]) -> None:
     """
     Render only the 'Traits' part of Character Card (for Appendix E / anti-anchoring).
@@ -3548,22 +3618,20 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
     core = cp.get("CoreStats") or {}
     combat = cp.get("CombatStats") or {}
     cclass = cp.get("CharacterClass") or "N/A"
-    ticker = _safe_text(cp.get('_Ticker') or '').strip().upper()
+    ticker = _safe_text(cp.get("_Ticker") or "").strip().upper()
     headline = f"{ticker} - {cclass}" if ticker else str(cclass)
     blurb = get_character_blurb(ticker, str(cclass))
 
     # Prepare class label + blurb paragraphs for STOCK DNA section
     class_label = f"CLASS: {cclass}"
     blurb_paragraphs: List[str] = []
-    if str(cclass).strip().lower() == "glass cannon":
-        # Custom 3-paragraph structure for Glass Cannon class (layout only)
-        blurb_paragraphs = [
-            "Cổ phiếu thuộc nhóm Glass Cannon thường được biết đến với khả năng tăng trưởng mạnh mẽ nhưng cũng đi kèm với mức độ rủi ro cao. Những cổ phiếu này thường có biến động giá nhanh chóng và có thể dễ dàng bị ảnh hưởng bởi các yếu tố thị trường hoặc thông tin đột biến.",
-            "Nhóm cổ phiếu Glass Cannon thường dao động mạnh trong một biên độ hẹp trước khi có những cú bật lên hoặc giảm mạnh tại các ngưỡng hỗ trợ và kháng cự quan trọng. Điều này đòi hỏi nhà đầu tư phải có khả năng phân tích kỹ thuật tốt và phản ứng nhanh với các tín hiệu thị trường.",
-            "Đây là loại cổ phiếu thường thu hút những nhà đầu tư ưa mạo hiểm, những người theo trường phái giao dịch ngắn hạn và có khả năng chấp nhận rủi ro cao.",
-        ]
+
+    class_key = str(cclass).strip()
+    if class_key in CLASS_TEMPLATES:
+        blurb_paragraphs = CLASS_TEMPLATES[class_key]
     elif blurb:
         blurb_paragraphs = [str(blurb)]
+
 
     # Baseline CORE STATS order (v6.1): Trend, Momentum, Stability, Reliability, Liquidity
     core_order = [
@@ -3663,8 +3731,13 @@ def render_character_decision(character_pack: Dict[str, Any]) -> None:
 
     if tags:
         st.markdown('<div class="gc-sec"><div class="gc-sec-t">PLAYSTYLE TAGS</div>', unsafe_allow_html=True)
+        rendered_tags: List[str] = []
+        for t in tags[:8]:
+            raw = str(t)
+            human = PLAYSTYLE_TAG_TRANSLATIONS.get(raw, raw)
+            rendered_tags.append(f"<span class='gc-tag'>{html.escape(str(human))}</span>")
         st.markdown(
-            "<div class='gc-tags'>" + "".join([f"<span class='gc-tag'>{html.escape(str(t))}</span>" for t in tags[:8]]) + "</div>",
+            "<div class='gc-tags'>" + "".join(rendered_tags) + "</div>",
             unsafe_allow_html=True
         )
         st.markdown("</div>", unsafe_allow_html=True)
@@ -3876,11 +3949,16 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
             else ("Acceptable" if (pd.notna(rr) and rr >= 1.3) else "Thin")
         )
 
+        if pd.notna(rr):
+            rr_disp = f"{float(rr):.1f}"
+        else:
+            rr_disp = "N/A"
+
         st.markdown(
             f"""
             <div class="tp-card">
               <div class="tp-title"><b>{html.escape(str(name))}</b> <span class="tp-status">[{html.escape(str(status))}]</span></div>
-              <div class="tp-meta">Probability: <b>{html.escape(str(prob))}</b> | R:R: <b>{_val_or_na(rr)}</b> ({rr_label})</div>
+              <div class="tp-meta">Probability: <b>{html.escape(str(prob))}</b> | R:R: <b>{html.escape(str(rr_disp))}</b> ({rr_label})</div>
               <div class="tp-levels">
                 <span>Entry: <b>{_val_or_na(entry)}</b></span>
                 <span>Stop: <b>{_val_or_na(stop)}</b></span>
