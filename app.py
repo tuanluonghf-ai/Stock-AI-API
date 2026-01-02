@@ -3500,6 +3500,296 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
 
 
 # ============================================================
+# 10.9 APPENDIX E — OUTPUT ORDER ANTI-ANCHORING BIAS (v6.2)
+# ============================================================
+
+def render_character_traits(character_pack: Dict[str, Any]) -> None:
+    """
+    Render only the 'Traits' part of Character Card (for Appendix E / anti-anchoring).
+    Includes: header + blurb + CORE STATS + COMBAT STATS.
+    Excludes: Conviction / Weaknesses / Playstyle Tags.
+    """
+    cp = character_pack or {}
+    core = cp.get("CoreStats") or {}
+    combat = cp.get("CombatStats") or {}
+    cclass = cp.get("CharacterClass") or "N/A"
+    ticker = _safe_text(cp.get('_Ticker') or '').strip().upper()
+    headline = f"{ticker} - {cclass}" if ticker else str(cclass)
+    blurb = get_character_blurb(ticker, str(cclass))
+
+    def bar(label: str, value: Any) -> None:
+        v = _safe_float(value, default=np.nan)
+        # clamp 0..100 if numeric; else show N/A
+        if pd.isna(v):
+            pct = 0
+            disp = "N/A"
+        else:
+            pct = int(max(0, min(100, round(v))))
+            disp = f"{pct}/100"
+        st.markdown(
+            f"""
+            <div class="gc-bar-row">
+              <div class="gc-bar-label">{html.escape(str(label))}</div>
+              <div class="gc-bar"><div class="gc-fill" style="width:{pct}%"></div></div>
+              <div class="gc-bar-val">{disp}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.markdown('<div class="game-character">', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="gc-head">
+          <div class="gc-title">{html.escape(str(headline))}</div>
+          <div class="gc-blurb">{html.escape(str(blurb))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # CORE STATS
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
+    bar("Trend", core.get("Trend"))
+    bar("Momentum", core.get("Momentum"))
+    bar("Structure", core.get("Structure"))
+    bar("Volatility", core.get("Volatility"))
+    bar("Liquidity", core.get("Liquidity"))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # COMBAT STATS
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">COMBAT STATS</div>', unsafe_allow_html=True)
+    bar("Upside Power", combat.get("UpsidePower"))
+    bar("Downside Risk", combat.get("DownsideRisk"))
+    bar("RR Efficiency", combat.get("RREfficiency"))
+    bar("Breakout Force", combat.get("BreakoutForce"))
+    bar("Support Resilience", combat.get("SupportResilience"))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_character_decision(character_pack: Dict[str, Any]) -> None:
+    """
+    Render only the 'Decision' part of Character Card (for Appendix E / anti-anchoring).
+    Includes: Conviction + Weaknesses + Playstyle Tags.
+    """
+    cp = character_pack or {}
+    conv = cp.get("Conviction") or {}
+    flags = cp.get("Flags") or []
+    tags = cp.get("ActionTags") or []
+
+    tier = conv.get("Tier", "N/A")
+    pts = conv.get("Points", np.nan)
+    guide = conv.get("SizeGuidance", "")
+
+    st.markdown(
+        f"""
+        <div class="gc-sec">
+          <div class="gc-sec-t">CONVICTION</div>
+          <div class="gc-conv">
+            <div class="gc-conv-tier">Tier: <b>{tier}</b> / 7</div>
+            <div class="gc-conv-pts">Points: <b>{_val_or_na(pts)}</b></div>
+            <div class="gc-conv-guide">{html.escape(str(guide))}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    if flags:
+        st.markdown('<div class="gc-sec"><div class="gc-sec-t">WEAKNESSES</div>', unsafe_allow_html=True)
+        for f in flags[:8]:
+            sev = int(f.get("severity", 1))
+            note = f.get("note", "")
+            code_ = f.get("code", "")
+            st.markdown(
+                f"""<div class="gc-flag"><span class="gc-sev">S{sev}</span><span class="gc-code">{html.escape(str(code_))}</span><span class="gc-note">{html.escape(str(note))}</span></div>""",
+                unsafe_allow_html=True
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    if tags:
+        st.markdown('<div class="gc-sec"><div class="gc-sec-t">PLAYSTYLE TAGS</div>', unsafe_allow_html=True)
+        st.markdown(
+            "<div class='gc-tags'>" + "".join([f"<span class='gc-tag'>{html.escape(str(t))}</span>" for t in tags[:8]]) + "</div>",
+            unsafe_allow_html=True
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _trade_plan_gate(analysis_pack: Dict[str, Any], character_pack: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Anti-anchoring gate for Trade Plan rendering.
+    Returns (status, meta) where status ∈ {"ACTIVE","WATCH","LOCK"}.
+    Meta includes score/tier for UI copy.
+    """
+    ap = analysis_pack or {}
+    cp = character_pack or {}
+    score = _safe_float(ap.get("Conviction"), default=np.nan)
+    tier = (cp.get("Conviction") or {}).get("Tier", None)
+
+    # Default thresholds (v6.2 Appendix E)
+    active = (pd.notna(score) and score >= 6.5) or (isinstance(tier, (int, float)) and tier >= 4)
+    watch = (pd.notna(score) and 5.5 <= score < 6.5) or (isinstance(tier, (int, float)) and int(tier) == 3)
+
+    if active:
+        status = "ACTIVE"
+    elif watch:
+        status = "WATCH"
+    else:
+        status = "LOCK"
+
+    return status, {"ConvictionScore": score, "Tier": tier}
+
+
+def render_market_state(analysis_pack: Dict[str, Any]) -> None:
+    """
+    Appendix E section (2): Market State / Current Regime.
+    """
+    ap = analysis_pack or {}
+    m = ap.get("Market") or {}
+    vn = m.get("VNINDEX") or {}
+    vn30 = m.get("VN30") or {}
+
+    def _fmt_change(x: Any) -> str:
+        v = _safe_float(x, default=np.nan)
+        if pd.isna(v):
+            return "N/A"
+        return f"{v:+.2f}%"
+
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">MARKET STATE (CURRENT REGIME)</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="ms-row"><b>VNINDEX</b>: {_val_or_na(vn.get("Regime"))} | Change: {_fmt_change(vn.get("ChangePct"))}</div>
+        <div class="ms-row"><b>VN30</b>: {_val_or_na(vn30.get("Regime"))} | Change: {_fmt_change(vn30.get("ChangePct"))}</div>
+        <div class="ms-row"><b>Relative Strength vs VNINDEX</b>: {_val_or_na(m.get("RelativeStrengthVsVNINDEX"))}</div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: str) -> None:
+    """
+    Appendix E section (3): Trade Plan & R:R (Conditional).
+    Uses AnalysisPack.TradePlans (Python-computed). No GPT math.
+    """
+    ap = analysis_pack or {}
+    plans = list(ap.get("TradePlans") or [])
+
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">TRADE PLAN & R:R (CONDITIONAL)</div>', unsafe_allow_html=True)
+
+    if gate_status == "LOCK":
+        st.info("Trade Plan locked (anti-FOMO). Maintain capital preservation posture and wait for confirmation.")
+        st.markdown(
+            """
+            <div class="tp-lock">
+              <div><b>Posture:</b> WAIT / DEFENSIVE</div>
+              <div style="margin-top:6px;"><b>Activation checklist:</b></div>
+              <ul>
+                <li>Conviction rises to activation threshold</li>
+                <li>Price reclaims key MA zone / structure stabilizes</li>
+                <li>Volume confirms (no exhaustion) and momentum improves</li>
+                <li>Weekly structure remains intact (no structural breakdown)</li>
+              </ul>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    if not plans:
+        st.warning("No Trade Plan available from engine.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    # Sort: prefer ACTIVE/Watch, then higher RR, then probability label
+    def _prob_rank(p: Any) -> int:
+        s = str(p or "").lower()
+        if "high" in s: return 3
+        if "med" in s: return 2
+        if "low" in s: return 1
+        return 0
+
+    plans_sorted = sorted(
+        plans,
+        key=lambda x: (
+            -_prob_rank(x.get("Probability")),
+            -_safe_float(x.get("RR"), default=-1e9),
+        )
+    )
+
+    head_note = "ACTIVE: Execution allowed (conditional). Use dynamic stop." if gate_status == "ACTIVE" else "WATCH: Plan is informational. Do NOT force entries."
+    st.markdown(f"<div class='tp-note'>{html.escape(head_note)}</div>", unsafe_allow_html=True)
+
+    show_n = 2 if gate_status == "ACTIVE" else 1
+    for p in plans_sorted[:show_n]:
+        name = _val_or_na(p.get("Name"))
+        entry = _safe_float(p.get("Entry"), default=np.nan)
+        stop = _safe_float(p.get("Stop"), default=np.nan)
+        tp = _safe_float(p.get("TP"), default=np.nan)
+        rr = _safe_float(p.get("RR"), default=np.nan)
+        prob = _val_or_na(p.get("Probability"))
+        status = _val_or_na(p.get("Status"))
+
+        rr_label = "Attractive" if (pd.notna(rr) and rr >= 2.0) else ("Acceptable" if (pd.notna(rr) and rr >= 1.3) else "Thin")
+
+        st.markdown(
+            f"""
+            <div class="tp-card">
+              <div class="tp-title"><b>{html.escape(str(name))}</b> <span class="tp-status">[{html.escape(str(status))}]</span></div>
+              <div class="tp-meta">Probability: <b>{html.escape(str(prob))}</b> | R:R: <b>{_val_or_na(rr)}</b> ({rr_label})</div>
+              <div class="tp-levels">
+                <span>Entry: <b>{_val_or_na(entry)}</b></span>
+                <span>Stop: <b>{_val_or_na(stop)}</b></span>
+                <span>TP: <b>{_val_or_na(tp)}</b></span>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: Dict[str, Any]) -> None:
+    """
+    Appendix E — Anti-Anchoring Output Order:
+      1) Stock DNA (Traits)
+      2) Market State (Current Regime)
+      3) Trade Plan & R:R (Conditional)
+      4) Decision Layer (Conviction/Weakness/Tags)
+    Also optionally shows legacy Appendices A–D inside an expander.
+    """
+    modules = (result or {}).get("Modules") or {}
+    cp = modules.get("character") or {}
+    gate_status, _meta = _trade_plan_gate(analysis_pack, cp)
+
+    # 1) Stock DNA (Traits)
+    st.markdown("## APPENDIX E — ANTI-ANCHORING OUTPUT")
+    st.markdown("### 1) Stock DNA (Core Stats – Traits)")
+    render_character_traits(cp)
+
+    # 2) Market State
+    st.markdown("### 2) Market State (Current Regime)")
+    render_market_state(analysis_pack)
+
+    # 3) Trade Plan & R:R (Conditional)
+    st.markdown("### 3) Trade Plan & R:R (CONDITIONAL)")
+    render_trade_plan_conditional(analysis_pack, gate_status)
+
+    # 4) Decision Layer
+    st.markdown("### 4) Decision Layer (Conviction, Weaknesses, Playstyle Tags)")
+    render_character_decision(cp)
+
+    # Legacy A–D (optional)
+    with st.expander("Appendices A–D (Legacy Report) — for reference", expanded=False):
+        render_report_pretty(report_text, analysis_pack)
+
+
+
+
+# ============================================================
 # 11. GPT-4o STRATEGIC INSIGHT GENERATION
 # ============================================================
 def generate_insight_report(data: Dict[str, Any]) -> str:
@@ -4238,11 +4528,11 @@ def main():
                     with left:
                         analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
                         if 'output_mode' in locals() and output_mode == 'Character':
-                            cp = ((result.get('Modules', {}) if isinstance(result, dict) else {}) or {}).get('character') or {}
-                            cp['_Ticker'] = ticker_input
-                            render_character_card(cp)
-                            st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
-                        render_report_pretty(report, analysis_pack)
+                            # Appendix E (Anti-Anchoring Output Order)
+                            render_appendix_e(result, report, analysis_pack)
+                        else:
+                            # Legacy report A–D
+                            render_report_pretty(report, analysis_pack)
                     with right:
                         st.markdown(
                             """
