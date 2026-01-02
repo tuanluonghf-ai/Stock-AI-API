@@ -3574,13 +3574,13 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
 CLASS_TEMPLATES: Dict[str, List[str]] = {
     "Trend Tank": [
         "Cổ phiếu nhóm này thường có xu hướng khá rõ và bền, biến động hằng ngày ở mức vừa phải và ít bị cuốn theo nhiễu ngắn hạn. Giá của cổ phiếu nhóm này thường bám tốt các đường trung bình động trung – dài hạn, nhịp điều chỉnh đa số dừng lại ở vùng hỗ trợ rồi quay lại theo xu hướng chính thay vì gãy hẳn cấu trúc.",
-        "Nhà đầu tư phù hợp với nhóm này thường có tư duy trung – dài hạn, ưu tiên sự bền vững của xu hướng hơn là các cú ăn nhanh. Các chiến lược thuận xu hướng như mua từng phần tại các nhịp pullback về hỗ trợ động, giữ vị thế cho đến khi cấu trúc xu hướng bị vi phạm rõ ràng và chỉ gia tăng khi trend được xác nhận lại thường dễ chiến thắng. Ngược lại, các chiến lược giao dịch ngược xu hướng, cố gắng bắt đỉnh/bắt đáy liên tục hoặc trading quá dày trong khi xu hướng lớn vẫn còn hiệu lực thường dễ cho kết quả kém.",
+        "Nhà đầu tư phù hợp với nhóm này thường có tư duy trung – dài hạn, ưu tiên sự bền vững của xu hướng hơn là các cú "ăn nhanh". Các chiến lược thuận xu hướng như mua từng phần tại các nhịp pullback về hỗ trợ động, giữ vị thế cho đến khi cấu trúc xu hướng bị vi phạm rõ ràng và chỉ gia tăng khi trend được xác nhận lại thường dễ chiến thắng. Ngược lại, các chiến lược giao dịch ngược xu hướng, cố gắng bắt đỉnh/bắt đáy liên tục hoặc trading quá dày trong khi xu hướng lớn vẫn còn hiệu lực thường dễ cho kết quả kém.",
         "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát vị trí giá so với MA trung – dài hạn, chuỗi đỉnh – đáy liên tiếp và khối lượng tại các nhịp điều chỉnh về vùng hỗ trợ. Việc quan sát phản ứng của giá trước tin xấu, các phiên đóng cửa tuần quanh vùng hỗ trợ chính và tín hiệu mất dần độ dốc của MA giúp nhận diện sớm thời điểm xu hướng yếu đi để chủ động giảm tỷ trọng hoặc thoát vị thế.",
     ],
     "Glass Cannon": [
         "Cổ phiếu nhóm này thường mang lại tiềm năng tăng giá rất mạnh trong thời gian ngắn nhưng đi kèm rủi ro lớn và biến động cao. Giá của cổ phiếu nhóm này thường dao động nhanh, dễ xuất hiện các cú tăng – giảm biên độ lớn, gap và nến thân dài khi dòng tiền thay đổi hoặc xuất hiện tin tức. Nhóm này thường dao động quyết liệt tại các vùng hỗ trợ/kháng cự, khi vượt hoặc gãy vùng then chốt thì biên độ dao động sau đó thường mở rộng mạnh.",
         "Nhà đầu tư phù hợp với nhóm này thường là người ưa mạo hiểm, chấp nhận tail risk và có kỷ luật quản trị vốn nghiêm ngặt. Các chiến lược thuận xu hướng với điểm vào được chuẩn bị sẵn tại vùng pullback rõ ràng, stoploss cụ thể, size hợp lý và sẵn sàng thoát nhanh khi điều kiện setup không còn giữ được thường dễ chiến thắng. Ngược lại, các chiến lược mua đuổi trong giai đoạn hưng phấn, bình quân giá xuống khi trend đã gãy, hoặc giữ vị thế quá lâu chỉ dựa trên kỳ vọng mà bỏ qua tín hiệu kỹ thuật thường dễ dẫn tới thua lỗ lớn.",
-        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát phản ứng giá quanh các vùng hỗ trợ/kháng cự, biên độ dao động từng phiên, khối lượng đi kèm các cú bứt phá hoặc gãy mạnh và tần suất xuất hiện gap. Việc theo dõi các pha tăng nóng không được hỗ trợ bởi khối lượng, nến đảo chiều tại vùng giá cao và tín hiệu 'cạn lực' sau tin tốt giúp quyết định thời điểm chốt lời, giảm size hoặc cắt lỗ kịp thời.",
+        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát phản ứng giá quanh các vùng hỗ trợ/kháng cự, biên độ dao động từng phiên, khối lượng đi kèm các cú bứt phá hoặc gãy mạnh và tần suất xuất hiện gap. Việc theo dõi các pha tăng nóng không được hỗ trợ bởi khối lượng, nến đảo chiều tại vùng giá cao và tín hiệu "cạn lực" sau tin tốt giúp quyết định thời điểm chốt lời, giảm size hoặc cắt lỗ kịp thời.",
     ],
     "Momentum Fighter": [
         "Cổ phiếu nhóm này thường có động lượng giá rõ rệt, khi đã chạy theo một hướng thì giá thường di chuyển dứt khoát trong một khoảng thời gian. Giá của cổ phiếu nhóm này thường phản ứng mạnh với các vùng breakout/breakdown, khi vượt đỉnh hoặc thủng đáy quan trọng thì nhịp đi tiếp thường nhanh và khó đuổi kịp. Nhóm này thường dao động theo kiểu bám đà: khi momentum còn tốt, các nhịp điều chỉnh thường nông; khi đà suy yếu, các nhịp điều chỉnh sâu và thiếu follow-through sẽ xuất hiện nhiều hơn.",
@@ -3601,11 +3601,7 @@ CLASS_TEMPLATES: Dict[str, List[str]] = {
 
 # Mapping for bilingual playstyle tags (EN → EN + VI).
 PLAYSTYLE_TAG_TRANSLATIONS: Dict[str, str] = {
-    "Pullback-buy zone (confluence)": "Pullback-buy zone (confluence) - Vùng mua pullback có nhiều yếu tố hội tụ",
-    "Breakout attempt (needs follow-through)": "Breakout attempt (needs follow-through) - Nỗ lực breakout, cần phiên xác nhận tiếp theo",
     "Wait for volume confirmation": "Wait for volume confirmation - Chờ xác nhận khối lượng thanh khoản",
-    "Tight risk control near resistance": "Tight risk control near resistance - Siết chặt quản trị rủi ro gần vùng kháng cự",
-    "Use LongStructure_ShortTactical rule": "Use LongStructure_ShortTactical rule - Áp dụng quy tắc cấu trúc dài hạn, tác chiến ngắn hạn",
 }
 
 
@@ -4840,8 +4836,7 @@ def main():
         ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
         run_btn = st.button("Phân tích", type="primary", use_container_width=True)
 
-        # Mặc định sử dụng layout Appendix E (Character-style); bỏ lựa chọn chế độ hiển thị
-        output_mode = "Character"
+        output_mode = st.radio("Chế độ hiển thị:", ["Report A–D", "Character"], index=1)
 
     # ============================================================
     # 13. MAIN EXECUTION
