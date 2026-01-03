@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "7.0"
+APP_VERSION = "7.1"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -4002,9 +4002,45 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
     _render_rr_snapshot()
 
 def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: Dict[str, Any], gate_status: str, exec_mode_text: str, preferred_plan: str) -> None:
-    """Renderer-only: central Decision Layer switch (no scoring / rule changes)."""
+    """Renderer-only: central Decision Layer switch (no scoring / rule changes).
+
+    v7.1 renderer improvements:
+      - Humanize PROTECH labels (replace underscores, add spacing)
+      - Convert long BiasCode into short pills (avoid unreadable mega-string)
+      - No red accents (orange/neutral only)
+    """
     cp = character_pack or {}
     ap = analysis_pack or {}
+
+    def _humanize(s: Any) -> str:
+        s0 = _safe_text(s).strip()
+        if not s0:
+            return ""
+        # Replace common separators
+        s0 = s0.replace("__", " | ")
+        s0 = s0.replace("_", " ")
+        s0 = re.sub(r"\s+", " ", s0).strip()
+        return s0
+
+    def _bias_code_to_pills(code: str) -> List[str]:
+        code = _safe_text(code).strip()
+        if not code or code.upper() == "N/A":
+            return []
+        parts = re.split(r"__+", code)
+        out: List[str] = []
+        for p in parts:
+            p = _humanize(p)
+            if not p:
+                continue
+            # Compact common verbose fragments (display-only)
+            p = p.replace("Hist=", "Hist: ").replace("Zero=", "Zero: ").replace("Cross=", "Cross: ").replace("Align=", "Align: ")
+            p = p.replace("MACD Above Signal", "MACD > Signal")
+            p = p.replace("Expanding Positive", "Expanding +")
+            p = p.replace("CrossUp", "Cross Up")
+            p = re.sub(r"\s+", " ", p).strip()
+            out.append(p)
+        # Keep it readable: show top N pills only
+        return out[:8]
 
     conv = cp.get("Conviction") or {}
     tier = conv.get("Tier", "N/A")
@@ -4013,8 +4049,11 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
 
     # Final Bias comes from ProTech.Bias (fact-only layer)
     bias = ((ap.get("ProTech") or {}).get("Bias") or {}) if isinstance(ap, dict) else {}
-    alignment = _safe_text(bias.get("Alignment") or "N/A").strip()
-    bias_code = _safe_text(bias.get("BiasCode") or "N/A").strip()
+    alignment_raw = _safe_text(bias.get("Alignment") or "N/A").strip()
+    bias_code_raw = _safe_text(bias.get("BiasCode") or "").strip()
+
+    alignment = _humanize(alignment_raw) or "N/A"
+    bias_pills = _bias_code_to_pills(bias_code_raw)
 
     # Level mapping for background (layout only)
     lvl = "low"
@@ -4043,12 +4082,17 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
 
     # Hero cards: Final Bias + Conviction + Size Guidance
     pts_disp = f"{pts:.1f}" if pd.notna(pts) else "N/A"
+
+    pills_html = "".join([f"<span class='dl-pill dl-pill-mini'>{html.escape(p)}</span>" for p in bias_pills])
+    pills_block = f"<div class='dl-bias-tags'>{pills_html}</div>" if pills_html else ""
+
     st.markdown(
         f"""
         <div class="dl-hero">
           <div class="dl-card {lvl}">
             <div class="dl-k">FINAL BIAS (PROTECH)</div>
-            <div class="dl-v">{html.escape(alignment)} <span style="font-size:14px;font-weight:900;color:#64748B;">({html.escape(bias_code)})</span></div>
+            <div class="dl-v">{html.escape(alignment)}</div>
+            {pills_block}
             <div class="dl-sub"><b>Execution Mode:</b> {html.escape(exec_mode_text)}<br><b>Preferred Plan:</b> {html.escape(preferred_plan)}</div>
           </div>
           <div class="dl-card {lvl}">
@@ -4934,6 +4978,8 @@ def main():
       .dl-note{color:#334155;font-size:13px;line-height:1.45;}
       .dl-tags{margin-top:4px;}
       .dl-pill{display:inline-block;margin:6px 8px 0 0;padding:6px 10px;border-radius:999px;background:#F1F5F9;border:1px solid #E2E8F0;color:#0F172A;font-size:12px;font-weight:850;}
+      .dl-bias-tags{margin-top:8px;line-height:1.2;}
+      .dl-pill-mini{font-size:11px;padding:5px 9px;margin:6px 6px 0 0;}
 
       /* Right placeholder panel */
       .right-panel {
