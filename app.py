@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "6.8"
+APP_VERSION = "7.0"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -3562,7 +3562,7 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
 
 
 # ============================================================
-# 10.9 APPENDIX E — OUTPUT ORDER ANTI-ANCHORING BIAS (v6.4)
+# 10.9 DECISION LAYER REPORT — OUTPUT ORDER ANTI-ANCHORING BIAS (v6.4)
 # ============================================================
 
 
@@ -3928,14 +3928,27 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
     )
 
     # 3.1 Setup Overview
-    st.markdown("#### 3.1. Setup Overview")
-
-    head_note = (
-        "ACTIVE: Execution allowed (conditional). Use dynamic sizing and respect stop levels."
+    # NOTE: Layout-only changes (no logic changes).
+    status_vi = "ĐANG KÍCH HOẠT" if gate_status == "ACTIVE" else "CHỈ THEO DÕI"
+    desc_vi = (
+        "Được phép thực thi (có điều kiện). Áp dụng size động và tuân thủ tuyệt đối vùng dừng lỗ."
         if gate_status == "ACTIVE"
-        else "WATCH: Plan is informational. Do NOT force entries."
+        else "Kế hoạch chỉ mang tính tham khảo. Không FOMO, không ép lệnh."
     )
-    st.markdown(f"<div class='tp-note'>{html.escape(head_note)}</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        f"""
+        <div class="tp-sec-h">
+          <div class="tp-sec-title">
+            <span>3.1. Setup Overview</span>
+            <span class="tp-badge {'active' if gate_status == 'ACTIVE' else 'watch'}">{status_vi}</span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(f"<div class='tp-note'><b>{status_vi}:</b> {html.escape(desc_vi)}</div>", unsafe_allow_html=True)
 
     show_n = 2 if gate_status == "ACTIVE" else 1
     for p in plans_sorted[:show_n]:
@@ -3987,9 +4000,98 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
     # Close visual container and then show the numeric snapshot
     st.markdown("</div>", unsafe_allow_html=True)
     _render_rr_snapshot()
+
+def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: Dict[str, Any], gate_status: str, exec_mode_text: str, preferred_plan: str) -> None:
+    """Renderer-only: central Decision Layer switch (no scoring / rule changes)."""
+    cp = character_pack or {}
+    ap = analysis_pack or {}
+
+    conv = cp.get("Conviction") or {}
+    tier = conv.get("Tier", "N/A")
+    pts = _safe_float(conv.get("Points"), default=np.nan)
+    guide = _safe_text(conv.get("SizeGuidance") or "").strip()
+
+    # Final Bias comes from ProTech.Bias (fact-only layer)
+    bias = ((ap.get("ProTech") or {}).get("Bias") or {}) if isinstance(ap, dict) else {}
+    alignment = _safe_text(bias.get("Alignment") or "N/A").strip()
+    bias_code = _safe_text(bias.get("BiasCode") or "N/A").strip()
+
+    # Level mapping for background (layout only)
+    lvl = "low"
+    if pd.notna(pts):
+        if pts >= 5.0:
+            lvl = "high"
+        elif pts >= 3.0:
+            lvl = "med"
+
+    flags = cp.get("Flags") or []
+    tags = cp.get("ActionTags") or []
+
+    # Translate tags (EN → EN/VI) where possible
+    tags_vi: List[str] = []
+    for t in tags:
+        t0 = str(t)
+        tags_vi.append(PLAYSTYLE_TAG_TRANSLATIONS.get(t0, t0))
+
+    # Header (more prominent than sections 1–3)
+    st.markdown(
+        """<div class="dl-header">4. DECISION LAYER — CÔNG TẮC TRUNG TÂM (QUYẾT ĐỊNH CUỐI)</div>""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="dl-wrap">', unsafe_allow_html=True)
+
+    # Hero cards: Final Bias + Conviction + Size Guidance
+    pts_disp = f"{pts:.1f}" if pd.notna(pts) else "N/A"
+    st.markdown(
+        f"""
+        <div class="dl-hero">
+          <div class="dl-card {lvl}">
+            <div class="dl-k">FINAL BIAS (PROTECH)</div>
+            <div class="dl-v">{html.escape(alignment)} <span style="font-size:14px;font-weight:900;color:#64748B;">({html.escape(bias_code)})</span></div>
+            <div class="dl-sub"><b>Execution Mode:</b> {html.escape(exec_mode_text)}<br><b>Preferred Plan:</b> {html.escape(preferred_plan)}</div>
+          </div>
+          <div class="dl-card {lvl}">
+            <div class="dl-k">CONVICTION SCORE</div>
+            <div class="dl-v">Tier {html.escape(str(tier))}/7  •  {html.escape(pts_disp)} pts</div>
+            <div class="dl-sub">{html.escape(guide) if guide else ' '}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Weaknesses / Flags (short list)
+    if isinstance(flags, list) and flags:
+        st.markdown('<div class="dl-sec"><div class="dl-sec-t">WEAKNESSES / FLAGS (RỦI RO CHÍNH)</div>', unsafe_allow_html=True)
+        for f in flags[:6]:
+            if not isinstance(f, dict):
+                continue
+            try:
+                sev = int(f.get("severity", 1))
+            except Exception:
+                sev = 1
+            note = _safe_text(f.get("note", ""))
+            code = _safe_text(f.get("code", ""))
+            st.markdown(
+                f"""<div class="dl-flag"><span class="dl-sev">S{sev}</span><span class="dl-code">{html.escape(code)}</span><span class="dl-note">{html.escape(note)}</span></div>""",
+                unsafe_allow_html=True,
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Playstyle tags (bilingual pills)
+    if tags_vi:
+        st.markdown('<div class="dl-sec"><div class="dl-sec-t">PLAYSTYLE TAGS (EN/VI)</div>', unsafe_allow_html=True)
+        pills = "".join([f"<span class='dl-pill'>{html.escape(str(t))}</span>" for t in tags_vi[:10]])
+        st.markdown(f"<div class='dl-tags'>{pills}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    return
+
 def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: Dict[str, Any]) -> None:
     """
-    Appendix E — Anti-Anchoring Output Order (layout only):
+    Decision Layer Report — Anti-Anchoring Output Order (layout only):
       1) Stock DNA (Traits)
       2) CURRENT STATUS (Scenario + Technical + Fundamental)
       3) Trade Plan & R:R (Conditional)
@@ -4124,13 +4226,10 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
         c_raw = c_section.replace("\r\n", "\n")
         c_body_clean = re.sub(r"(?m)^C\..*\n?", "", c_raw).strip()
     render_trade_plan_conditional(analysis_pack, gate_status, c_body_clean)
-
     # ============================================================
     # 4) DECISION LAYER (CONVICTION, WEAKNESSES, PLAYSTYLE TAGS)
     # ============================================================
-    st.markdown("### 4. DECISION LAYER (CONVICTION, WEAKNESSES, PLAYSTYLE TAGS)")
-
-    # 4.1 Execution Mode + Preferred Plan (switch-level summary)
+    # Central switch — layout only (no scoring / rule changes)
     primary_setup = (ap.get("PrimarySetup") or {}) if isinstance(ap, dict) else {}
     primary_name = _val_or_na(primary_setup.get("Name"))
 
@@ -4141,11 +4240,9 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
     else:
         exec_mode_text = "WATCH ONLY – setup mang tính tham khảo, chờ thêm tín hiệu xác nhận."
 
-    st.markdown(f"**Execution Mode:** {exec_mode_text}")
-    st.markdown(f"**Preferred Plan:** {primary_name}")
+    render_decision_layer_switch(cp, ap, gate_status, exec_mode_text, primary_name)
 
-    # 4.2 Detailed conviction + weaknesses + playstyle tags
-    render_character_decision(cp)
+
 
 # ============================================================
 # 11. GPT-4o STRATEGIC INSIGHT GENERATION
@@ -4799,6 +4896,45 @@ def main():
       .incept-metric .k { font-size: 12px; color: #CBD5E1; margin-bottom: 6px; font-weight: 700; }
       .incept-metric .v { font-size: 20px; font-weight: 900; line-height: 1.2; }
 
+
+      /* =========================
+         TRADE PLAN (SETUP OVERVIEW)
+         ========================= */
+      .tp-sec-h{background:#FFEDD5;border:1px solid #FDBA74;border-radius:14px;padding:12px 14px;margin:10px 0 8px;}
+      .tp-sec-title{display:flex;align-items:center;justify-content:space-between;gap:10px;font-weight:900;font-size:18px;color:#9A3412;}
+      .tp-badge{display:inline-block;padding:6px 10px;border-radius:999px;font-weight:900;font-size:12px;letter-spacing:.6px;}
+      .tp-badge.active{background:#FB923C;color:#111827;}
+      .tp-badge.watch{background:#FFF7ED;color:#9A3412;border:1px solid #FDBA74;}
+      .tp-note{background:#FFF7ED;border-left:6px solid #FB923C;padding:10px 12px;border-radius:12px;color:#7C2D12;font-weight:700;margin:8px 0 10px;}
+      .tp-card{border:1px solid #E5E7EB;border-radius:16px;padding:12px 12px;background:#ffffff;margin:10px 0;}
+      .tp-title{font-size:16px;color:#0F172A;}
+      .tp-status{font-weight:900;color:#64748B;font-size:12px;margin-left:6px;}
+      .tp-meta{color:#475569;font-size:13px;margin-top:6px;}
+      .tp-levels{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;color:#0F172A;font-size:14px;}
+      .tp-levels span{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:12px;padding:6px 10px;}
+
+      /* =========================
+         DECISION LAYER (CENTRAL SWITCH)
+         ========================= */
+      .dl-wrap{border:2px solid #CBD5E1;border-radius:18px;padding:14px;background:#ffffff;margin-top:10px;}
+      .dl-header{font-weight:950;font-size:26px;color:#0F172A;line-height:1.2;background:#FFEDD5;border:1px solid #FDBA74;border-radius:16px;padding:12px 14px;margin-bottom:12px;}
+      .dl-hero{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+      .dl-card{flex:1;min-width:260px;border-radius:16px;padding:14px;border:1px solid #E5E7EB;}
+      .dl-card.low{background:#F8FAFC;}
+      .dl-card.med{background:#FFF7ED;border-color:#FDBA74;}
+      .dl-card.high{background:#ECFDF5;border-color:#A7F3D0;}
+      .dl-k{font-size:12px;font-weight:900;letter-spacing:.8px;color:#64748B;}
+      .dl-v{font-size:22px;font-weight:950;color:#0F172A;margin-top:2px;}
+      .dl-sub{color:#334155;font-size:14px;margin-top:6px;line-height:1.5;}
+      .dl-sec{margin-top:10px;padding-top:10px;border-top:1px dashed #E5E7EB;}
+      .dl-sec-t{font-weight:900;font-size:16px;color:#374151;margin-bottom:8px;}
+      .dl-flag{display:flex;gap:10px;align-items:flex-start;background:#ffffff;border:1px solid #E2E8F0;border-radius:12px;padding:10px 10px;margin:8px 0;}
+      .dl-sev{background:#FB923C;color:#111827;font-weight:950;border-radius:10px;padding:4px 8px;font-size:12px;min-width:34px;text-align:center;}
+      .dl-code{font-weight:900;color:#0F172A;font-size:12px;min-width:120px;}
+      .dl-note{color:#334155;font-size:13px;line-height:1.45;}
+      .dl-tags{margin-top:4px;}
+      .dl-pill{display:inline-block;margin:6px 8px 0 0;padding:6px 10px;border-radius:999px;background:#F1F5F9;border:1px solid #E2E8F0;color:#0F172A;font-size:12px;font-weight:850;}
+
       /* Right placeholder panel */
       .right-panel {
         border: 1px dashed #CBD5E1;
@@ -4887,7 +5023,7 @@ def main():
                     with left:
                         analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
                         if 'output_mode' in locals() and output_mode == 'Character':
-                            # Appendix E (Anti-Anchoring Output Order)
+                            # Decision Layer Report (Anti-Anchoring Output Order)
                             render_appendix_e(result, report, analysis_pack)
                         else:
                             # Legacy report A–D
