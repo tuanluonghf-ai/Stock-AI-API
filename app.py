@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "7.1"
+APP_VERSION = "7.4"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -3655,22 +3655,25 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
         ("Support Resilience", combat.get("SupportResilience")),
     ]
 
+    
     def bar_0_10(label: str, value: Any) -> None:
+        """One-line bar (label + bar + value on the same row), scale 0–10."""
         v = _safe_float(value, default=np.nan)
         if pd.isna(v):
-            pct = 0
-            disp = "N/A"
+            pct = 0.0
+            v_disp = "N/A"
         else:
-            # clamp to 0..10 (baseline), display /10, and map to % for bar fill
-            v10 = float(max(0.0, min(10.0, v)))
-            pct = int(round((v10 / 10.0) * 100))
-            disp = f"{v10:.1f}/10"
+            v10 = float(max(0.0, min(10.0, float(v))))
+            pct = _clip(v10 / 10.0 * 100.0, 0.0, 100.0)
+            v_disp = f"{v10:.1f}/10"
+
+        # Use the same row layout as "Điểm tổng hợp / Điểm tin cậy" (Current Status)
         st.markdown(
             f"""
-            <div class="gc-bar-row">
-              <div class="gc-bar-label">{html.escape(str(label))}</div>
-              <div class="gc-bar"><div class="gc-fill" style="width:{pct}%"></div></div>
-              <div class="gc-bar-val">{html.escape(disp)}</div>
+            <div class="gc-row">
+              <div class="gc-k">{html.escape(str(label))}</div>
+              <div class="gc-bar"><div class="gc-fill" style="width:{pct:.0f}%"></div></div>
+              <div class="gc-v">{html.escape(str(v_disp))}</div>
             </div>
             """,
             unsafe_allow_html=True
@@ -3927,6 +3930,46 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         ),
     )
 
+    def _to_html_lines(txt: str) -> str:
+        """Escape + preserve line breaks for HTML blocks."""
+        txt = (txt or "").strip()
+        if not txt:
+            return ""
+        return "<br>".join(html.escape(txt).splitlines())
+
+    def _split_trade_text_by_plan(txt: str, plan_names: List[str]) -> Dict[str, str]:
+        """Best-effort split legacy C-section narrative into per-plan notes.
+
+        Expected Vietnamese/EN anchors:
+          - "Kế hoạch giao dịch <PlanName> ..."
+          - "Trade plan <PlanName> ..."
+        If no anchors are found, return empty dict and caller will attach the whole text to the first plan.
+        """
+        txt = (txt or "").strip()
+        names = [n for n in (plan_names or []) if n and str(n).strip() and str(n).strip().upper() != "N/A"]
+        if (not txt) or (not names):
+            return {}
+
+        # Build a single regex that matches any plan name following the anchor phrase.
+        alts = "|".join(sorted((re.escape(str(n)) for n in set(names)), key=len, reverse=True))
+        pat = re.compile(r"(?i)(kế\s*hoạch\s*giao\s*dịch|trade\s*plan)\s+(" + alts + r")\b")
+
+        matches = list(pat.finditer(txt))
+        if not matches:
+            return {}
+
+        out: Dict[str, str] = {}
+        for i, m in enumerate(matches):
+            plan = m.group(2)
+            start = m.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(txt)
+            seg = txt[start:end].strip()
+            if not seg:
+                continue
+            # Keep the segment as-is (it often reads well in Vietnamese), but preserve breaks safely.
+            out[str(plan)] = _to_html_lines(seg)
+        return out
+
     # 3.1 Setup Overview
     # NOTE: Layout-only changes (no logic changes).
     status_vi = "ĐANG KÍCH HOẠT" if gate_status == "ACTIVE" else "CHỈ THEO DÕI"
@@ -3950,8 +3993,18 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
 
     st.markdown(f"<div class='tp-note'><b>{status_vi}:</b> {html.escape(desc_vi)}</div>", unsafe_allow_html=True)
 
-    show_n = 2 if gate_status == "ACTIVE" else 1
-    for p in plans_sorted[:show_n]:
+    # WATCH: still show 2 plans, but the 2nd plan is a dimmed "tham khảo" reference.
+    show_n = 2 if gate_status in ("ACTIVE", "WATCH") else 1
+    plans_to_show = plans_sorted[: min(show_n, len(plans_sorted))]
+    plan_names = [str(_val_or_na(p.get("Name"))) for p in plans_to_show]
+    expl_map = _split_trade_text_by_plan(trade_text, plan_names)
+
+    # If we couldn't split, attach the entire narrative to the first plan only.
+    fallback_expl = ""
+    if trade_text and not expl_map:
+        fallback_expl = _to_html_lines(trade_text)
+
+    for idx, p in enumerate(plans_to_show):
         name = _val_or_na(p.get("Name"))
         entry = _safe_float(p.get("Entry"), default=np.nan)
         stop = _safe_float(p.get("Stop"), default=np.nan)
@@ -3959,6 +4012,10 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         rr = _safe_float(p.get("RR"), default=np.nan)
         prob = _val_or_na(p.get("Probability"))
         status = _val_or_na(p.get("Status"))
+
+        is_ref = (gate_status == "WATCH" and idx == 1)
+        card_cls = "tp-card dim" if is_ref else "tp-card"
+        ref_badge = '<span class="tp-ref">tham khảo</span>' if is_ref else ""
 
         rr_label = (
             "Attractive"
@@ -3973,8 +4030,8 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
 
         st.markdown(
             f"""
-            <div class="tp-card">
-              <div class="tp-title"><b>{html.escape(str(name))}</b> <span class="tp-status">[{html.escape(str(status))}]</span></div>
+            <div class="{card_cls}">
+              <div class="tp-title"><b>{html.escape(str(name))}</b> <span class="tp-status">[{html.escape(str(status))}]</span> {ref_badge}</div>
               <div class="tp-meta">Probability: <b>{html.escape(str(prob))}</b> | R:R: <b>{html.escape(str(rr_disp))}</b> ({rr_label})</div>
               <div class="tp-levels">
                 <span>Entry: <b>{_val_or_na(entry)}</b></span>
@@ -3986,16 +4043,18 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
             unsafe_allow_html=True,
         )
 
-    # 3.2 Narrative explanation from legacy C-section (if available)
-    if trade_text:
-        st.markdown(
-            f"""
-            <div class="tp-expl">
-              {trade_text}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        # Optional per-plan narrative (placed immediately under its plan card)
+        key = str(name)
+        expl_html = expl_map.get(key, "")
+        if (not expl_html) and (fallback_expl) and idx == 0:
+            expl_html = fallback_expl
+        if expl_html:
+            st.markdown(
+                f"""
+                <div class="tp-expl">{expl_html}</div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     # Close visual container and then show the numeric snapshot
     st.markdown("</div>", unsafe_allow_html=True)
@@ -4211,10 +4270,30 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
     conviction_score = ap.get("Conviction")
 
     st.markdown("**Scenario & Scores**")
-    st.markdown(
-        f"- Scenario: {_val_or_na(scenario_pack.get('Name'))}\n"
-        f"- Điểm tổng hợp: {_val_or_na(master_pack.get('Total'))} | Điểm tin cậy: {_val_or_na(conviction_score)}"
-    )
+    st.markdown(f"- Scenario: {_val_or_na(scenario_pack.get('Name'))}")
+
+    def _bar_row_cs(label: str, val: Any, maxv: float = 10.0) -> None:
+        v = _safe_float(val, default=np.nan)
+        if pd.isna(v):
+            pct = 0.0
+            v_disp = "N/A"
+        else:
+            v = float(v)
+            pct = _clip(v / maxv * 100.0, 0.0, 100.0)
+            v_disp = f"{v:.1f}/{maxv:.0f}"
+        st.markdown(
+            f"""
+            <div class="gc-row">
+              <div class="gc-k">{html.escape(str(label))}</div>
+              <div class="gc-bar"><div class="gc-fill" style="width:{pct:.0f}%"></div></div>
+              <div class="gc-v">{html.escape(str(v_disp))}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    _bar_row_cs("Điểm tổng hợp", master_pack.get("Total"), 10.0)
+    _bar_row_cs("Điểm tin cậy", conviction_score, 10.0)
 
     # 2.3 TECHNICAL ANALYSIS (reuse A-section body)
     st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
@@ -4956,6 +5035,9 @@ def main():
       .tp-meta{color:#475569;font-size:13px;margin-top:6px;}
       .tp-levels{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;color:#0F172A;font-size:14px;}
       .tp-levels span{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:12px;padding:6px 10px;}
+      .tp-card.dim{opacity:.55;}
+      .tp-ref{display:inline-block;margin-left:8px;padding:3px 8px;border-radius:999px;background:#F1F5F9;border:1px dashed #CBD5E1;color:#475569;font-size:11px;font-weight:950;letter-spacing:.6px;text-transform:uppercase;}
+      .tp-expl{background:#ffffff;border:1px solid #E2E8F0;border-left:5px solid #FDBA74;border-radius:14px;padding:10px 12px;margin:-2px 0 10px;color:#334155;font-size:14px;line-height:1.55;}
 
       /* =========================
          DECISION LAYER (CENTRAL SWITCH)
