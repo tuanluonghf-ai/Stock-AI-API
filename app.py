@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "7.6"
+APP_VERSION = "7.7"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -3983,7 +3983,7 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         f"""
         <div class="tp-sec-h">
           <div class="tp-sec-title">
-            <span>3.1. Setup Overview</span>
+            <span>Các yếu tố kỹ thuật kích hoạt TRADE PLAN</span>
             <span class="tp-badge {'active' if gate_status == 'ACTIVE' else 'watch'}">{status_vi}</span>
           </div>
         </div>
@@ -4846,13 +4846,13 @@ def main():
     .major-sec{
         background:#0B0B0B;
         border:2px solid #000000;
-        border-radius:16px;
-        padding:12px 16px;
-        margin:14px 0 10px;
+        border-radius:18px;
+        padding:18px 20px;
+        margin:34px 0 18px;
         color:#FFFFFF;
-        font-weight:900;
-        font-size:22px;
-        letter-spacing:0.4px;
+        font-weight:950;
+        font-size:34px;
+        letter-spacing:0.6px;
     }
     
 </style>
@@ -5112,9 +5112,126 @@ def main():
 
       /* Major section headers: +1.5x size */
       .major-sec{
-        font-size: 33px !important; /* was ~22px */
-        padding: 18px 20px !important;
+        font-size: 38px !important;
+        padding: 20px 22px !important;
+        margin: 42px 0 22px !important;  /* extra spacing between MAIN sessions */
       }
+
+      /* Force strong text to stay readable on dark background */
+      strong, b{ color: var(--incept-text) !important; }
+
+      /* Generic light cards -> dark cards */
+      .incept-card,
+      .incept-callout,
+      .right-panel,
+      .gc-card,
+      .dl-wrap,
+      .tp-card,
+      .tp-expl{
+        background: #081A33 !important;
+        border-color: rgba(255,255,255,0.16) !important;
+        color: var(--incept-text) !important;
+      }
+      .incept-callout{ border-color: rgba(255,255,255,0.20) !important; }
+
+      /* =========================
+         STOCK DNA (gc-*) overrides
+         ========================= */
+      .gc-title{ color: rgba(255,255,255,0.70) !important; }
+      .gc-class,.gc-h1,.gc-sec-t,.gc-k,.gc-v,.gc-conv-tier,.gc-conv-pts{ color: var(--incept-text) !important; }
+      .gc-blurb{ color: rgba(255,255,255,0.82) !important; }
+      .gc-row{ color: var(--incept-text) !important; }
+      .gc-bar{ background: rgba(255,255,255,0.10) !important; }
+      .gc-fill{ background: linear-gradient(90deg,#2563EB 0%,#7C3AED 100%) !important; }
+      .gc-flag{ background: rgba(255,255,255,0.06) !important; border-color: rgba(255,255,255,0.14) !important; }
+      .gc-sev{ background: rgba(255,255,255,0.18) !important; color: var(--incept-text) !important; }
+      .gc-code{ color: var(--incept-text) !important; }
+      .gc-note{ color: rgba(255,255,255,0.72) !important; }
+
+      /* Current Status text that used to render dark */
+      .stMarkdown p, .stMarkdown span, .stMarkdown div{ color: var(--incept-text) !important; }
+
+      /* =========================
+         TRADE PLAN + R:R (tp-*) theme: indigo/dark blue
+         Replace orange/white blocks with blue/purple tones
+         ========================= */
+      .tp-sec-h{ background:#0F2A44 !important; border:1px solid rgba(255,255,255,0.18) !important; }
+      .tp-sec-title{ color: var(--incept-text) !important; }
+      .tp-badge.active{ background:#4F46E5 !important; color:#FFFFFF !important; border:1px solid rgba(255,255,255,0.18) !important; }
+      .tp-badge.watch{ background:#0B1F3A !important; color:#FFFFFF !important; border:1px solid rgba(255,255,255,0.18) !important; }
+      .tp-note{ background:#081A33 !important; border-left:6px solid #4F46E5 !important; color:#FFFFFF !important; }
+      .tp-card{ background:#081A33 !important; border:1px solid rgba(255,255,255,0.16) !important; }
+      .tp-title{ color:#FFFFFF !important; }
+      .tp-status{ color: rgba(255,255,255,0.70) !important; }
+      .tp-meta{ color: rgba(255,255,255,0.78) !important; }
+      .tp-levels{ color:#FFFFFF !important; }
+      .tp-levels span{ background:#0F2A44 !important; border:1px solid rgba(255,255,255,0.18) !important; color:#FFFFFF !important; }
+      .tp-ref{ background:#0F2A44 !important; border:1px dashed rgba(255,255,255,0.28) !important; color:#FFFFFF !important; }
+      .tp-expl{ background:#081A33 !important; border:1px solid rgba(255,255,255,0.16) !important; border-left:5px solid #4F46E5 !important; color: rgba(255,255,255,0.86) !important; }
+
+      /* =========================
+         DECISION LAYER (dl-*) theme: blue/purple + white borders
+         ========================= */
+      .dl-wrap{ background:#081A33 !important; border:2px solid rgba(255,255,255,0.18) !important; }
+      .dl-header{ background:#0F2A44 !important; border:1px solid rgba(255,255,255,0.18) !important; color:#FFFFFF !important; }
+      .dl-card{ background:#0B1F3A !important; border:1px solid rgba(255,255,255,0.16) !important; }
+      .dl-k{ color: rgba(255,255,255,0.72) !important; }
+      .dl-v{ color:#FFFFFF !important; }
+      .dl-sub{ color: rgba(255,255,255,0.82) !important; }
+      .dl-sec{ border-top:1px dashed rgba(255,255,255,0.16) !important; }
+      .dl-sec-t{ color:#FFFFFF !important; }
+      .dl-flag{ background:#081A33 !important; border:1px solid rgba(255,255,255,0.16) !important; }
+      .dl-sev{ background:#4F46E5 !important; color:#FFFFFF !important; }
+      .dl-code{ color:#FFFFFF !important; }
+      .dl-note{ color: rgba(255,255,255,0.82) !important; }
+      .dl-pill{ background:#0F2A44 !important; border:1px solid rgba(255,255,255,0.18) !important; color:#FFFFFF !important; }
+
+      /* Risk/Reward metric cards: keep dark + white border accents */
+      .incept-metric{ border:1px solid rgba(255,255,255,0.14) !important; }
+      .incept-metric .k{ color: rgba(255,255,255,0.72) !important; }
+      .right-panel{ border: 1px dashed rgba(255,255,255,0.20) !important; }
+
+      /* GAME CHARACTER CARD (Current Status / Scenario & Scores) - force white text */
+      .gc-title,.gc-class,.gc-h1,.gc-blurb,.gc-sec-t,.gc-k,.gc-v,.gc-code,.gc-note{ color: var(--incept-text) !important; }
+      .gc-title{ color: rgba(255,255,255,0.70) !important; }
+      .gc-blurb,.gc-note{ color: rgba(255,255,255,0.78) !important; }
+      .gc-sec{ border-top: 1px dashed rgba(255,255,255,0.18) !important; }
+      .gc-bar{ background: rgba(255,255,255,0.12) !important; }
+      .gc-flag{ background:#0F2A44 !important; border:1px solid rgba(255,255,255,0.14) !important; }
+      .gc-sev{ background: rgba(255,255,255,0.14) !important; color: var(--incept-text) !important; }
+
+      /* =========================
+         TRADE PLAN THEME (replace orange/white with indigo + deep blue)
+         ========================= */
+      .tp-sec-h{background:#0F2A44 !important;border:1px solid rgba(255,255,255,0.20) !important;}
+      .tp-sec-title{color: var(--incept-text) !important;}
+      .tp-badge.active{background:#4F46E5 !important;color:#FFFFFF !important;border:1px solid rgba(255,255,255,0.22) !important;}
+      .tp-badge.watch{background:#081A33 !important;color:#FFFFFF !important;border:1px solid rgba(255,255,255,0.22) !important;}
+      .tp-note{background:#081A33 !important;border-left:6px solid #4F46E5 !important;color:#FFFFFF !important;}
+      .tp-title,.tp-meta,.tp-levels{color:#FFFFFF !important;}
+      .tp-meta{color: rgba(255,255,255,0.82) !important;}
+      .tp-status{color: rgba(255,255,255,0.70) !important;}
+      .tp-levels span{background:#0F2A44 !important;border:1px solid rgba(255,255,255,0.16) !important;color:#FFFFFF !important;}
+      .tp-ref{background:#0F2A44 !important;border:1px dashed rgba(255,255,255,0.30) !important;color:#FFFFFF !important;}
+      .tp-expl{border-left:5px solid #4F46E5 !important;color: rgba(255,255,255,0.86) !important;}
+      .tp-card{border:1px solid rgba(255,255,255,0.16) !important;}
+
+      /* =========================
+         DECISION LAYER THEME (indigo + deep blue)
+         ========================= */
+      .dl-header{background:#0F2A44 !important;border:1px solid rgba(255,255,255,0.20) !important;color:#FFFFFF !important;}
+      .dl-card{border:1px solid rgba(255,255,255,0.16) !important;background:#0F2A44 !important;color:#FFFFFF !important;}
+      .dl-card.low,.dl-card.med,.dl-card.high{background:#0F2A44 !important;border-color: rgba(255,255,255,0.16) !important;}
+      .dl-k{color: rgba(255,255,255,0.70) !important;}
+      .dl-v{color:#FFFFFF !important;}
+      .dl-sub{color: rgba(255,255,255,0.82) !important;}
+      .dl-sec{border-top:1px dashed rgba(255,255,255,0.18) !important;}
+      .dl-sec-t{color:#FFFFFF !important;}
+      .dl-flag{background:#081A33 !important;border:1px solid rgba(255,255,255,0.16) !important;}
+      .dl-sev{background:#4F46E5 !important;color:#FFFFFF !important;}
+      .dl-code{color:#FFFFFF !important;}
+      .dl-note{color: rgba(255,255,255,0.85) !important;}
+      .dl-pill{background:#0F2A44 !important;border:1px solid rgba(255,255,255,0.16) !important;color:#FFFFFF !important;}
     </style>
     """, unsafe_allow_html=True)
 
