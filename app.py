@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "7.4"
+APP_VERSION = "7.6"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -3870,7 +3870,7 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
             except Exception:
                 return "N/A"
 
-        st.markdown(f"#### 3.4. Risk / Reward Snapshot (Primary Plan: {name})")
+        st.markdown(f"#### Risk / Reward Snapshot (Primary Plan: {name})")
         st.markdown(
             f"""
             <div class="incept-metrics">
@@ -4131,32 +4131,18 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
         t0 = str(t)
         tags_vi.append(PLAYSTYLE_TAG_TRANSLATIONS.get(t0, t0))
 
-    # Header (more prominent than sections 1–3)
-    st.markdown(
-        """<div class="dl-header">4. DECISION LAYER — CÔNG TẮC TRUNG TÂM (QUYẾT ĐỊNH CUỐI)</div>""",
-        unsafe_allow_html=True,
-    )
-
     st.markdown('<div class="dl-wrap">', unsafe_allow_html=True)
 
-    # Hero cards: Final Bias + Conviction + Size Guidance
+    
+    # Hero card: Conviction + Size Guidance (FINAL BIAS hidden by UI policy)
     pts_disp = f"{pts:.1f}" if pd.notna(pts) else "N/A"
-
-    pills_html = "".join([f"<span class='dl-pill dl-pill-mini'>{html.escape(p)}</span>" for p in bias_pills])
-    pills_block = f"<div class='dl-bias-tags'>{pills_html}</div>" if pills_html else ""
-
     st.markdown(
         f"""
-        <div class="dl-hero">
-          <div class="dl-card {lvl}">
-            <div class="dl-k">FINAL BIAS (PROTECH)</div>
-            <div class="dl-v">{html.escape(alignment)}</div>
-            {pills_block}
-            <div class="dl-sub"><b>Execution Mode:</b> {html.escape(exec_mode_text)}<br><b>Preferred Plan:</b> {html.escape(preferred_plan)}</div>
-          </div>
+        <div class="dl-grid">
           <div class="dl-card {lvl}">
             <div class="dl-k">CONVICTION SCORE</div>
             <div class="dl-v">Tier {html.escape(str(tier))}/7  •  {html.escape(pts_disp)} pts</div>
+            <div class="dl-sub"><b>Execution Mode:</b> {html.escape(exec_mode_text)}<br><b>Preferred Plan:</b> {html.escape(preferred_plan)}</div>
             <div class="dl-sub">{html.escape(guide) if guide else ' '}</div>
           </div>
         </div>
@@ -4252,13 +4238,13 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
     # ============================================================
     # 1) STOCK DNA (CORE STATS – TRAITS)
     # ============================================================
-    st.markdown("### 1. STOCK DNA (CORE STATS – TRAITS)")
+    st.markdown('<div class="major-sec">STOCK DNA</div>', unsafe_allow_html=True)
     render_character_traits(cp)
 
     # ============================================================
     # 2) CURRENT STATUS
     # ============================================================
-    st.markdown("### 2. CURRENT STATUS")
+    st.markdown('<div class="major-sec">CURRENT STATUS</div>', unsafe_allow_html=True)
 
     # 2.1 Relative Strength vs VNINDEX
     rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
@@ -4319,29 +4305,10 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
         else:
             st.info("N/A")
 
-    # 2.4 FUNDAMENTAL ANALYSIS (reuse B-section body)
-    st.markdown('<div class="sec-title">FUNDAMENTAL ANALYSIS</div>', unsafe_allow_html=True)
-    b_raw = (b_section or "").replace("\r\n", "\n").strip()
-    if b_raw:
-        b_body = re.sub(r"(?m)^B\..*\n?", "", b_raw).strip()
-        if b_body:
-            st.markdown(
-                f"""
-                <div class="incept-callout">
-                  {b_body}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.info("N/A")
-    else:
-        st.info("N/A")
-
     # ============================================================
     # 3) TRADE PLAN & R:R (CONDITIONAL)
     # ============================================================
-    st.markdown("### 3. TRADE PLAN & R:R (CONDITIONAL)")
+    st.markdown('<div class="major-sec">TRADE PLAN &amp; R:R</div>', unsafe_allow_html=True)
     # Pass legacy C-section body to the trade-plan renderer so explanation
     # lives next to the numeric setup cards.
     c_body_clean = ""
@@ -4362,6 +4329,8 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
         exec_mode_text = "ACTIVE – được phép triển khai kế hoạch giao dịch theo điều kiện đã nêu."
     else:
         exec_mode_text = "WATCH ONLY – setup mang tính tham khảo, chờ thêm tín hiệu xác nhận."
+
+    st.markdown('<div class="major-sec">DECISION LAYER</div>', unsafe_allow_html=True)
 
     render_decision_layer_switch(cp, ap, gate_status, exec_mode_text, primary_name)
 
@@ -4598,21 +4567,6 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     else:
         st.markdown(a_body, unsafe_allow_html=False)
 
-    st.markdown('<div class="sec-title">FUNDAMENTAL ANALYSIS</div>', unsafe_allow_html=True)
-    b = sections.get("B", "").strip()
-    if b:
-        b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
-        st.markdown(
-            f"""
-            <div class="incept-callout">
-              {b_body}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.info("N/A")
-
     st.markdown('<div class="sec-title">TRADE PLAN</div>', unsafe_allow_html=True)
     c = sections.get("C", "").strip()
     if c:
@@ -4717,21 +4671,6 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
             )
     else:
         st.markdown(a_body, unsafe_allow_html=False)
-
-    st.markdown('<div class="sec-title">FUNDAMENTAL ANALYSIS</div>', unsafe_allow_html=True)
-    b = sections.get("B", "").strip()
-    if b:
-        b_body = re.sub(r"(?m)^B\..*\n?", "", b).strip()
-        st.markdown(
-            f"""
-            <div class="incept-callout">
-              {b_body}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.info("N/A")
 
     st.markdown('<div class="sec-title">TRADE PLAN</div>', unsafe_allow_html=True)
     c = sections.get("C", "").strip()
@@ -4899,7 +4838,24 @@ def main():
     .gc-conv{display:grid;gap:6px;}
     .gc-conv-tier,.gc-conv-pts{font-size:24px;color:#111827;font-weight:600;}
     .gc-conv-guide{font-size:20px;color:#6B7280;line-height:1.35;}
-    </style>
+    
+
+    /* =========================
+       MAJOR SECTION HEADERS
+       ========================= */
+    .major-sec{
+        background:#0B0B0B;
+        border:2px solid #000000;
+        border-radius:16px;
+        padding:12px 16px;
+        margin:14px 0 10px;
+        color:#FFFFFF;
+        font-weight:900;
+        font-size:22px;
+        letter-spacing:0.4px;
+    }
+    
+</style>
     """, unsafe_allow_html=True)
 
 
@@ -5084,6 +5040,84 @@ def main():
       }
     </style>
     """, unsafe_allow_html=True)
+
+
+    st.markdown("""
+    <style>
+      /* =========================
+         DARK BLUE THEME OVERRIDES
+         ========================= */
+      :root{
+        --incept-bg:#0B1F3A;         /* Dark Blue */
+        --incept-panel:#0F2A44;      /* Slightly lighter for inputs */
+        --incept-text:#FFFFFF;
+      }
+
+      /* Main background */
+      body, .stApp, [data-testid="stAppViewContainer"], .main, .block-container{
+        background: var(--incept-bg) !important;
+        color: var(--incept-text) !important;
+      }
+
+      /* Streamlit top header */
+      header[data-testid="stHeader"],
+      div[data-testid="stDecoration"]{
+        background: var(--incept-bg) !important;
+      }
+
+      /* Sidebar background + text */
+      section[data-testid="stSidebar"]{
+        background: var(--incept-bg) !important;
+        border-right: 1px solid rgba(255,255,255,0.10) !important;
+      }
+      section[data-testid="stSidebar"] > div{ background: transparent !important; }
+      section[data-testid="stSidebar"] *{
+        color: var(--incept-text) !important;
+      }
+
+      /* Global typography */
+      .stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown span, .stMarkdown div,
+      label, .stTextInput label, .stSelectbox label, .stRadio label{
+        color: var(--incept-text) !important;
+      }
+      h1,h2,h3,h4,h5,h6{ color: var(--incept-text) !important; }
+
+      /* Top nav links */
+      .incept-nav a{ color: var(--incept-text) !important; }
+
+      /* Inputs */
+      .stTextInput input,
+      section[data-testid="stSidebar"] input{
+        color: var(--incept-text) !important;
+        background: var(--incept-panel) !important;
+        border: 1px solid rgba(255,255,255,0.18) !important;
+      }
+      .stTextInput input::placeholder,
+      section[data-testid="stSidebar"] input::placeholder{
+        color: rgba(255,255,255,0.60) !important;
+      }
+
+      /* Sidebar button */
+      section[data-testid="stSidebar"] .stButton > button{
+        background: #000000 !important;
+        border: 1px solid rgba(255,255,255,0.18) !important;
+        color: var(--incept-text) !important;
+        box-shadow: none !important;
+      }
+      section[data-testid="stSidebar"] .stButton > button:hover{
+        background: #111827 !important;
+        border: 1px solid rgba(255,255,255,0.22) !important;
+        color: var(--incept-text) !important;
+      }
+
+      /* Major section headers: +1.5x size */
+      .major-sec{
+        font-size: 33px !important; /* was ~22px */
+        padding: 18px 20px !important;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+
 
     # 12. STREAMLIT UI & APP LAYOUT
     # ============================================================
