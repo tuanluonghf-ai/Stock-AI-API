@@ -112,8 +112,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "8.3"
-APP_TITLE = f"INCEPTION v{APP_VERSION}"
+APP_VERSION = "8.6"
+APP_TITLE = "INCEPTION"
 
 class DataError(Exception):
     """Raised when required local data files cannot be loaded."""
@@ -3904,9 +3904,7 @@ def render_current_status_insight(master_score_total: Any, conviction_score: Any
         b3 = "Momentum không suy yếu: histogram co lại liên tiếp hoặc phân kỳ giảm là cảnh báo"
         warn = "\n\nCờ tụt điểm: thủng MA/structure + volume xả, hoặc momentum đảo chiều rõ."
     section4_title = "4) Tín hiệu cần theo dõi để GIỮ lợi thế" if ms_b == "high" else "4) Tín hiệu cần thấy để điểm cải thiện"
-    block = f"""Với Điểm tổng hợp {ms:.1f}/10 và Điểm tin cậy {cs:.1f}/10, cách đọc thực dụng là:
-
-1) Điểm tổng hợp {ms:.1f}/10
+    block = f"""1) Điểm tổng hợp {ms:.1f}/10
 {ms_meaning[0]}
 {ms_meaning[1]}
 
@@ -3939,6 +3937,256 @@ Nếu bạn đang có vị thế:
 
 {b3}{warn}"""
     st.markdown(block)
+
+def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dict[str, Any], gate_status: str) -> None:
+    """
+    Executive Snapshot (auto-compressed): 7-line decision sheet.
+    Renderer-only: must not change engine scoring or trade-plan math.
+    Layout rules:
+      - Line 1: header (no callout)
+      - Lines 2..7: grouped into left-bordered callouts per spec.
+      - Omit missing lines (do not replace with paragraphs).
+    """
+    ap = analysis_pack or {}
+    cp = character_pack or {}
+
+    # ---------- helpers ----------
+    def _sf(x: Any) -> float:
+        v = _safe_float(x, default=np.nan)
+        return float(v) if (v is not None and isinstance(v, (int, float)) and not pd.isna(v) and math.isfinite(float(v))) else np.nan
+
+    def _fmt_num(x: Any, nd: int = 1) -> str:
+        v = _sf(x)
+        if pd.isna(v):
+            return "N/A"
+        return f"{v:.{nd}f}"
+
+    def _fmt_px(x: Any) -> str:
+        v = _sf(x)
+        if pd.isna(v):
+            return "N/A"
+        return f"{v:.2f}"
+
+    def _val(x: Any) -> str:
+        if x is None:
+            return "N/A"
+        if isinstance(x, float) and pd.isna(x):
+            return "N/A"
+        s = str(x).strip()
+        return s if s else "N/A"
+
+    def _lb_callout(inner_html: str) -> None:
+        inner_html = (inner_html or "").strip()
+        if not inner_html:
+            return
+        st.markdown(
+            f"""
+            <div style="
+              border-left: 6px solid #FFFFFF;
+              background: rgba(255,255,255,0.05);
+              box-shadow: 0 10px 22px rgba(0,0,0,0.35);
+              border-radius: 12px;
+              padding: 12px 14px;
+              margin: 10px 0 10px 0;
+            ">
+              {inner_html}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # ---------- Line 1: header ----------
+    ticker = _safe_text(ap.get("Ticker") or cp.get("_Ticker") or "").strip().upper()
+    scenario_name = _safe_text((ap.get("Scenario12") or {}).get("Name") or "N/A").strip()
+    master_total = (ap.get("MasterScore") or {}).get("Total", np.nan)
+    conviction = ap.get("Conviction", np.nan)
+
+    class_name = _safe_text(
+        cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "N/A"
+    ).strip()
+
+    ms_str = _fmt_num(master_total, nd=1)
+    cs_str = _fmt_num(conviction, nd=1)
+    gate = (gate_status or "N/A").strip().upper()
+
+    header_line = f"{ticker} — {class_name} | {scenario_name} | TA Điểm tổng hợp {ms_str}/10 | Tin cậy {cs_str}/10 | Gate hành động {gate}"
+    if header_line.strip() != "—  |  | TA Điểm tổng hợp N/A/10 | Tin cậy N/A/10 | Gate hành động N/A":
+        st.markdown(f"**{header_line}**")
+
+    # ---------- Line 2: DNA (callout #1) ----------
+    # Deterministic phrase bank by class (keeps output consistent & short)
+    class_key = class_name.lower()
+    dna_map = {
+        "balanced": "trend-follow + pullback; kỷ luật chính: vào theo nhịp, tránh đuổi giá; thủng cấu trúc là giảm rủi ro.",
+        "glass cannon": "tactical theo nhịp RR; kỷ luật chính: vào nhỏ, stop chặt; tuyệt đối không bình quân giá xuống.",
+        "tank": "defensive; kỷ luật chính: ưu tiên bảo toàn, vào chậm theo xác nhận; không FOMO.",
+        "defensive": "defensive; kỷ luật chính: ưu tiên bảo toàn, vào chậm theo xác nhận; không FOMO.",
+        "trend rider": "trend-follow; kỷ luật chính: buy-the-dip theo MA/structure; tránh bắt đáy ngược trend.",
+        "mean reverter": "range/mean-revert; kỷ luật chính: đánh theo biên, chốt theo mục tiêu; không kỳ vọng ôm trend.",
+        "illiquid sniper": "sniper; kỷ luật chính: vào nhỏ, ưu tiên lệnh giới hạn; giả định slippage luôn tồn tại.",
+        "chaotic": "high-noise; kỷ luật chính: giảm size tối đa, chỉ tham gia khi setup thật rõ; stop là bắt buộc.",
+        "wildcard": "high-noise; kỷ luật chính: giảm size tối đa, chỉ tham gia khi setup thật rõ; stop là bắt buộc.",
+    }
+    dna_text = None
+    for k, v in dna_map.items():
+        if k in class_key:
+            dna_text = v
+            break
+    if not dna_text:
+        # fallback: use stats signals if available
+        core = cp.get("CoreStats") or {}
+        combat = cp.get("CombatStats") or {}
+        rel = _sf(core.get("Reliability"))
+        sup = _sf(combat.get("Support Resilience"))
+        if (not pd.isna(rel)) and rel < 5.0:
+            dna_text = "tactical; kỷ luật chính: tín hiệu dễ nhiễu → vào nhỏ, stop chặt; tránh all-in."
+        elif (not pd.isna(sup)) and sup < 5.0:
+            dna_text = "trend-follow có kỷ luật; kỷ luật chính: hỗ trợ dễ vỡ → thủng là thoát nhanh, không gồng."
+        else:
+            dna_text = "trend-follow/tactical; kỷ luật chính: bám plan, tối ưu R:R; tránh đuổi giá."
+    if ticker and class_name:
+        line2 = f"{ticker} thuộc nhóm {class_name} do đó phù hợp: {dna_text}"
+        _lb_callout(f"<div>{html.escape(line2)}</div>")
+
+    # ---------- Line 3: TA status (callout #2) ----------
+    ms = _sf(master_total)
+    cs = _sf(conviction)
+    if (not pd.isna(ms)) and (not pd.isna(cs)):
+        if ms >= 8.0 and cs >= 7.0:
+            state = "Favorable"
+        elif ms < 5.0 and cs < 5.5:
+            state = "Weak"
+        else:
+            state = "Mixed"
+
+        if gate == "ACTIVE":
+            what_now = "được phép triển khai theo plan, tránh FOMO."
+        elif gate == "LOCK":
+            what_now = "ưu tiên bảo toàn, tránh mở vị thế mới."
+        else:
+            what_now = "chờ xác nhận, không commit size lớn."
+
+        line3 = f"Trạng thái TA: {state} — {what_now}"
+        _lb_callout(f"<div>{html.escape(line3)}</div>")
+
+    # ---------- Lines 4–5: Trade plan (callout #3) ----------
+    plans = list(ap.get("TradePlans") or [])
+    primary_name = _safe_text((ap.get("PrimarySetup") or {}).get("Name") or "").strip()
+    primary_plan = None
+    if primary_name:
+        for p in plans:
+            if _safe_text(p.get("Name") or "").strip() == primary_name:
+                primary_plan = p
+                break
+
+    def _prob_rank(p: Any) -> int:
+        s = str(p or "").lower()
+        if "high" in s:
+            return 3
+        if "med" in s:
+            return 2
+        if "low" in s:
+            return 1
+        return 0
+
+    def _status_rank(s: Any) -> int:
+        stt = str(s or "Watch").strip().lower()
+        if stt == "active":
+            return 0
+        if stt == "watch":
+            return 1
+        return 2
+
+    if (primary_plan is None) and plans:
+        # choose best plan for snapshot: prefer Active, then higher prob, then higher RR
+        primary_plan = sorted(
+            plans,
+            key=lambda x: (
+                _status_rank(x.get("Status")),
+                -_prob_rank(x.get("Probability")),
+                -_sf(x.get("RR")),
+            ),
+        )[0]
+
+    trade_lines = []
+    if primary_plan:
+        pn = _val(primary_plan.get("Name"))
+        ps = str(primary_plan.get("Status") or "Watch").strip().upper()
+        e = _fmt_px(primary_plan.get("Entry"))
+        s = _fmt_px(primary_plan.get("Stop"))
+        t = _fmt_px(primary_plan.get("TP"))
+        rr = _fmt_num(primary_plan.get("RR"), nd=1)
+        prob = _val(primary_plan.get("Probability"))
+        # enforce 1-line with limited numbers
+        primary_line = f"Primary: {pn} [{ps}] | Entry {e} | Stop {s} | TP {t} | RR {rr}"
+        if prob != "N/A":
+            primary_line += f" | Prob {prob}"
+        trade_lines.append(primary_line)
+
+        # optional switch line: only when a clearly different plan is Active while primary is Watch/Other
+        if ps != "ACTIVE":
+            alt_active = None
+            for p in plans:
+                if p is primary_plan:
+                    continue
+                if str(p.get("Status") or "").strip().lower() == "active":
+                    alt_active = p
+                    break
+            if alt_active:
+                alt_name = _val(alt_active.get("Name"))
+                trade_lines.append(f"Switch: nếu {alt_name} ACTIVE ⇒ ưu tiên {alt_name}.")
+
+    if trade_lines:
+        trade_html = "<div>" + "</div><div style='margin-top:6px;'>" + "</div><div style='margin-top:6px;'>".join(
+            html.escape(x) for x in trade_lines
+        ) + "</div>"
+        _lb_callout(trade_html)
+
+    # ---------- Lines 6–7: Decision + Size (callout #4) ----------
+    # Determine primary status for gating
+    primary_status = None
+    if primary_plan:
+        primary_status = str(primary_plan.get("Status") or "Watch").strip().upper()
+
+    if gate == "ACTIVE":
+        if primary_status == "ACTIVE":
+            decision = "ENTER"
+            reason = "theo plan"
+        else:
+            decision = "WAIT ENTRY"
+            reason = "plan chưa kích hoạt"
+    elif gate == "LOCK":
+        decision = "AVOID"
+        reason = "no trade"
+    else:
+        decision = "WATCHLIST"
+        reason = "chờ xác nhận"
+
+    line6 = f"Decision: {decision} — {reason}"
+    # Size guidance: tier-based, then gated by plan status
+    tier = _sf((cp.get("Conviction") or {}).get("Tier"))
+    if gate == "LOCK":
+        size_line = "Size Rule: NO TRADE."
+    elif gate == "WATCH":
+        size_line = "Size Rule: SMALL (≤50%) khi plan Active."
+    else:
+        # ACTIVE
+        if (not pd.isna(tier)) and tier >= 5:
+            base = "FULL size"
+        elif (not pd.isna(tier)) and tier >= 3:
+            base = "50–70%"
+        else:
+            base = "SMALL"
+
+        if primary_status != "ACTIVE":
+            size_line = f"Size Rule: {base} khi plan Active; add chỉ khi follow-through + volume."
+        else:
+            size_line = f"Size Rule: {base}; add chỉ khi follow-through + volume."
+
+    callout4 = f"<div>{html.escape(line6)}</div><div style='margin-top:6px;'>{html.escape(size_line)}</div>"
+    _lb_callout(callout4)
+
+
 def render_character_decision(character_pack: Dict[str, Any]) -> None:
     """
     Render only the 'Decision' part of Character Card (for Appendix E / anti-anchoring).
@@ -4386,6 +4634,33 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
             effective_exec_mode_text = "WATCH ONLY – primary plan hiện không hợp lệ; ưu tiên quan sát."
             effective_guide = "NO TRADE / WAIT RESET"
 
+
+    # --- Sanity-check layer (renderer only) ---
+    # Prevent contradictory messaging between plan status and sizing guidance.
+    try:
+        gs2 = _safe_text(gate_status).upper().strip()
+        if gs2 != "ACTIVE":
+            # In non-ACTIVE modes, never suggest aggressive sizing.
+            if effective_guide:
+                if "FULL SIZE" in effective_guide:
+                    effective_guide = "WATCH MODE — chưa vào lệnh; chỉ chuẩn bị kế hoạch và chờ điều kiện kích hoạt."
+                elif "ADD" in effective_guide or "Pyramid" in effective_guide:
+                    effective_guide = "WATCH MODE — không gia tăng; chỉ theo dõi theo Trade Plan."
+        else:
+            # ACTIVE but entry not triggered -> gate sizing to 'when plan active'
+            if pstat in ("WATCH", "PENDING", "WAIT", "WAITING", "TRACK"):
+                if effective_guide and "FULL SIZE" in effective_guide and "(KHI PLAN ACTIVE)" not in effective_guide:
+                    effective_guide = effective_guide.replace("FULL SIZE", "FULL SIZE (KHI PLAN ACTIVE)")
+                # Ensure add/pyramid is conditional
+                if effective_guide and "CÓ THỂ ADD" in effective_guide and "FOLLOW-THROUGH" not in effective_guide:
+                    effective_guide = effective_guide.replace("CÓ THỂ ADD", "CÓ THỂ ADD (SAU FOLLOW-THROUGH)")
+            # If primary is invalid, force conservative messaging
+            if pstat in ("INVALID", "DISABLED", "N/A", "NA"):
+                effective_exec_mode_text = "WATCH ONLY – primary plan hiện không hợp lệ; ưu tiên quan sát."
+                effective_guide = "NO TRADE / WAIT RESET"
+    except Exception:
+        pass
+
     def _conv_cls_from_tier(t: object) -> str:
         try:
             ti = int(t)
@@ -4545,7 +4820,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             header = f"{header} — {price_str}" if header else price_str
         if chg_str:
             header = f"{header} ({chg_str})"
-        st.markdown(f"## {header}")
+        render_executive_snapshot(ap, cp, gate_status)
 
     # Pre-split legacy report once for reuse
     sections = _split_sections(report_text or "")
@@ -5683,7 +5958,7 @@ def main():
     st.markdown(
         f"""
         <p style='text-align:center; color:#6B7280; font-size:13px;'>
-        © 2025 INCEPTION Research Framework<br>
+        © 2026 INCEPTION Research Framework<br>
         Phiên bản {APP_VERSION} | Engine GPT-4o
         </p>
         """,
