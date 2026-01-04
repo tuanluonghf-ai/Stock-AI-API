@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "7.7"
+APP_VERSION = "8.3"
 APP_TITLE = f"INCEPTION v{APP_VERSION}"
 
 class DataError(Exception):
@@ -3696,6 +3696,249 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+
+def render_stock_dna_insight(character_pack: Dict[str, Any]) -> None:
+    """
+    STOCK DNA Insight (GAS/MSN style) — renderer-only layer.
+    Requirements:
+      - 5 lines by stat (each line should contain at most the stat score number; the Reliability/Liquidity line contains two).
+      - 1 short conclusion sentence emphasizing playstyle + stop/size discipline.
+    Reads only AnalysisPack-derived CharacterPack stats (0–10). Does not alter any scoring.
+    """
+    cp = character_pack or {}
+    core = cp.get("CoreStats") or {}
+    combat = cp.get("CombatStats") or {}
+    cclass = _safe_text(cp.get("CharacterClass") or "N/A").strip()
+    ticker = _safe_text(cp.get("_Ticker") or "").strip().upper()
+
+    def _bucket(v: float) -> str:
+        if not math.isfinite(v):
+            return "na"
+        if v < 4.8:
+            return "low"
+        if v < 6.8:
+            return "mid"
+        return "high"
+
+    def _val(x: Any) -> float:
+        v = _safe_float(x, default=np.nan)
+        return float(v) if (isinstance(v, (int, float)) and math.isfinite(v)) else float("nan")
+
+    trend_v = _val(core.get("Trend"))
+    stab_v = _val(core.get("Stability"))
+    rel_v = _val(core.get("Reliability"))
+    liq_v = _val(core.get("Liquidity"))
+    rr_v = _val(combat.get("RREfficiency"))
+    sup_v = _val(combat.get("SupportResilience"))
+
+    # If critical stats missing, do not render (avoid ugly N/A blocks).
+    if not all(math.isfinite(x) for x in [trend_v, stab_v, rel_v, liq_v, rr_v, sup_v]):
+        return
+
+    trend_b = _bucket(trend_v)
+    stab_b = _bucket(stab_v)
+    rel_b = _bucket(rel_v)
+    liq_b = _bucket(liq_v)
+    rr_b = _bucket(rr_v)
+    sup_b = _bucket(sup_v)
+
+    # Opening (optional but recommended for GAS/MSN tone)
+    playstyle_hint = "tactical" if (rr_b == "high" and sup_b == "low") else ("trend-follow" if trend_b == "high" else ("defensive" if (stab_b == "high" and sup_b != "low") else "balanced"))
+    open_line = f"DNA tổng quát: {cclass} — ưu tiên {playstyle_hint}, kỷ luật size/stop là bắt buộc."
+    st.markdown(open_line)
+
+    # Phrase bank (no extra numbers)
+    trend_text = {
+        "low": "xu hướng yếu/đứt quãng, khó “ôm” theo trend; chỉ nên canh nhịp rất rõ.",
+        "mid": "có xu hướng nhưng chưa đủ “sạch” để ôm dài thoải mái.",
+        "high": "trend tương đối sạch, dễ theo nhịp nếu giữ đúng kỷ luật cấu trúc."
+    }[trend_b]
+
+    stab_text = {
+        "low": "nền rung lắc mạnh, dễ quét stop; trade cần chọn điểm vào kỹ và giảm kỳ vọng.",
+        "mid": "nền dao động vừa phải; vẫn cần chờ nhịp xác nhận trước khi tăng cam kết.",
+        "high": "nền ổn định, phù hợp triển khai theo kế hoạch rõ ràng và quản trị rủi ro chuẩn."
+    }[stab_b]
+
+    rel_liq_text = "tín hiệu dễ nhiễu, phản ứng giá có thể thất thường; cần kỷ luật stop và tránh all-in." if (rel_b == "low" or liq_b == "low") else (
+        "tín hiệu tương đối đọc được; vẫn cần xác nhận thêm để tránh vào nhầm nhịp." if (rel_b == "mid" or liq_b == "mid") else
+        "tín hiệu mượt, phản ứng giá “đúng bài”; thuận lợi cho việc bám plan và quản trị lệnh."
+    )
+
+    rr_text = {
+        "low": "RR khó “đẹp”; ưu tiên trade phòng thủ, tránh đuổi giá.",
+        "mid": "RR vừa phải; nên tối ưu điểm vào bằng cấu trúc và xác nhận.",
+        "high": "điểm mạnh là vẫn có thể tìm được “điểm vào ăn RR” tốt nếu chọn đúng nhịp."
+    }[rr_b]
+
+    sup_text = {
+        "low": "vùng hỗ trợ không đáng tin để “bắt đáy/đỡ rơi”; thủng là dễ trượt tiếp.",
+        "mid": "hỗ trợ dùng được cho quản trị rủi ro, nhưng không nên kỳ vọng “đỡ” mọi cú rung lắc.",
+        "high": "hỗ trợ đáng tin cho quản trị lệnh; phù hợp triển khai theo cấu trúc và giữ kỷ luật."
+    }[sup_b]
+
+    # 5 lines (fixed order). Each line contains only the stat number(s).
+    st.markdown(f"Trend {trend_v:.1f}/10: {trend_text}")
+    st.markdown(f"Stability {stab_v:.1f}/10: {stab_text}")
+    st.markdown(f"Reliability {rel_v:.1f}/10 & Liquidity {liq_v:.1f}/10: {rel_liq_text}")
+    st.markdown(f"RR Efficiency {rr_v:.1f}/10: {rr_text}")
+    st.markdown(f"Support Resilience {sup_v:.1f}/10: {sup_text}")
+
+    # One-sentence conclusion (no extra numbers)
+    name = ticker if ticker else "mã này"
+    if rr_b == "high" and (sup_b == "low" or rel_b == "low"):
+        concl = f"Nhận định ngắn gọn: {name} hợp đánh theo nhịp (tactical), ưu tiên setup rõ ràng và RR tốt; không phù hợp vào lớn rồi hy vọng giữ lâu—hỗ trợ gãy thì thoát nhanh, chỉ làm breakout khi có follow-through và thanh khoản xác nhận."
+    elif trend_b == "high" and rel_b != "low":
+        concl = f"Nhận định ngắn gọn: {name} hợp bám trend có kỷ luật, ưu tiên buy-the-dip theo cấu trúc; tránh đuổi giá và luôn giữ stop theo plan."
+    elif stab_b == "high" and sup_b == "high":
+        concl = f"Nhận định ngắn gọn: {name} hợp phong cách phòng thủ/giữ vị thế có kỷ luật; scale-in theo kế hoạch và tuyệt đối không phá vỡ stop."
+    else:
+        concl = f"Nhận định ngắn gọn: {name} phù hợp cách tiếp cận cân bằng, chờ tín hiệu rõ rồi mới tăng cam kết; giữ kỷ luật stop và size, tránh FOMO."
+    st.markdown(concl)
+
+
+def render_current_status_insight(master_score_total: Any, conviction_score: Any, gate_status: Optional[str] = None) -> None:
+    """Current Status Insight (MasterScore + Conviction) — fixed 4-part structure with score-aware wording."""
+    ms = _safe_float(master_score_total, default=np.nan)
+    cs = _safe_float(conviction_score, default=np.nan)
+    if pd.isna(ms) or pd.isna(cs) or (not math.isfinite(float(ms))) or (not math.isfinite(float(cs))):
+        return
+    ms = float(ms)
+    cs = float(cs)
+
+    # --- Buckets ---
+    def _bucket(v: float) -> str:
+        if v < 4.0:
+            return "low"
+        if v < 6.0:
+            return "mid"
+        if v < 8.0:
+            return "good"
+        return "high"
+
+    ms_b = _bucket(ms)
+    cs_b = _bucket(cs)
+
+    # --- Section 1: meaning ---
+    ms_meaning = {
+        "low": ("Chất lượng cơ hội hiện tại kém hấp dẫn.",
+                "Thường phản ánh: xu hướng/structure xấu hoặc R:R không đáng để mạo hiểm."),
+        "mid": ("Cơ hội ở mức trung tính – có chất liệu nhưng chưa ‘ngon’ để commit mạnh.",
+                "Thường phản ánh: trend chưa đủ sạch hoặc điểm vào chưa tối ưu; cần thêm xác nhận."),
+        "good": ("Cơ hội khá hấp dẫn và có thể triển khai nếu trade plan rõ.",
+                 "Thường phản ánh: cấu trúc/trend ổn và R:R tương đối tốt khi chọn đúng nhịp."),
+        "high": ("Cơ hội rất hấp dẫn, thuộc nhóm ‘đáng ưu tiên’ trong watchlist.",
+                 "Thường phản ánh: cấu trúc/trend đẹp và R:R/điểm vào đang ở vùng thuận lợi."),
+    }[ms_b]
+
+    cs_meaning = {
+        "low": ("‘Độ chắc chắn của nhận định’ thấp (tín hiệu còn nhiễu / dễ bị đảo).",
+                "chỉ quan sát; tránh hành động lớn vì xác suất sai cao."),
+        "mid": ("‘Độ chắc chắn của nhận định’ trung tính (đủ để theo dõi nghiêm túc).",
+                "Có tín hiệu hợp lý nhưng chưa đủ đồng thuận để trade mạnh."),
+        "good": ("‘Độ chắc chắn của nhận định’ khá tốt (đồng thuận tăng).",
+                 "có thể triển khai có kỷ luật; ưu tiên plan rõ ràng, tránh FOMO."),
+        "high": ("‘Độ chắc chắn của nhận định’ cao (đồng thuận mạnh, ít nhiễu).",
+                 "Phù hợp triển khai theo kế hoạch; tập trung quản trị rủi ro thay vì do dự."),
+    }[cs_b]
+
+    # --- Section 2: action conclusion (prefer gate_status if provided to avoid inconsistency) ---
+    gs = (gate_status or "").upper().strip()
+    if gs in ("ACTIVE", "WATCH", "LOCK"):
+        action = gs
+    else:
+        # fallback by MS/CS only
+        if ms >= 7.5 and cs >= 7.0:
+            action = "ACTIVE"
+        elif ms < 5.0 and cs < 5.0:
+            action = "LOCK"
+        else:
+            action = "WATCH"
+
+    action_text = {
+        "ACTIVE": "ACTIVE / có thể triển khai",
+        "WATCH": "WATCH / chờ xác nhận",
+        "LOCK": "LOCK / tránh vào mới",
+    }[action]
+
+    ms_short = {"low": "kém hấp dẫn", "mid": "trung tính", "good": "khá hấp dẫn", "high": "rất hấp dẫn"}[ms_b]
+    cs_short = {"low": "thấp", "mid": "trung bình", "good": "khá cao", "high": "rất cao"}[cs_b]
+
+    # --- Section 3: execution (keep it practical, avoid extra numbers) ---
+    if action == "ACTIVE":
+        exec_no_pos = "Bám Trade Plan. Có thể vào theo kịch bản ưu tiên; ưu tiên vào theo nhịp/pullback thay vì đuổi giá."
+        exec_have_pos = "Giữ kỷ luật stop theo plan. Có thể gia tăng theo đúng điều kiện pyramid (chỉ khi có follow-through/volume xác nhận)."
+        plan_note = "Nếu có trade plan: xem như ‘kế hoạch triển khai’, nhưng vẫn ưu tiên vào đúng nhịp để tối ưu R:R."
+    elif action == "LOCK":
+        exec_no_pos = "Không vào lệnh mới. Chỉ quan sát cho đến khi cấu trúc/đồng thuận cải thiện rõ ràng."
+        exec_have_pos = "Ưu tiên bảo toàn: siết kỷ luật stop/giảm rủi ro nếu có dấu hiệu mất cấu trúc."
+        plan_note = "Nếu có trade plan: chỉ giữ vai trò tham chiếu; hiện chưa đủ điều kiện để triển khai."
+    else:  # WATCH
+        exec_no_pos = "Không vào lệnh theo cảm tính. Chỉ vào khi Trade Plan chuyển sang điều kiện rõ ràng hơn (plan Active + xác nhận volume/structure)."
+        exec_have_pos = "Giữ kỷ luật stop, tránh tăng thêm vị thế."
+        plan_note = "Nếu có trade plan: chỉ xem như ‘kế hoạch theo dõi’, không commit size lớn."
+
+    # --- Section 4: what to see next (avoid nonsensical 'MS -> >6' when MS already high) ---
+    if ms_b == "low":
+        improve_line = f"Thông thường, để từ {ms:.1f} → >6, bạn sẽ cần ít nhất 2/3 tín hiệu sau:"
+        b1 = "Giá reclaim lại cấu trúc/MA quan trọng (đừng bắt đáy khi chưa reclaim)"
+        b2 = "Volume xác nhận: nhịp tăng có lực, nhịp lùi không bị xả mạnh"
+        b3 = "RSI/MACD chuyển từ ‘lưỡng lự’ sang ‘ủng hộ’ (momentum quay lại)"
+        warn = ""
+    elif ms_b == "mid":
+        improve_line = f"Thông thường, để nâng {ms:.1f} lên >6, bạn sẽ cần ít nhất 2/3 tín hiệu sau:"
+        b1 = "Giá giữ được vùng hỗ trợ/MA then chốt và bắt đầu tạo higher-low rõ ràng"
+        b2 = "Volume xác nhận: breakout/pullback không bị kiệt lực"
+        b3 = "RSI/MACD cải thiện: cross/độ dốc thuận lợi, histogram mở rộng"
+        warn = ""
+    elif ms_b == "good":
+        improve_line = f"Thông thường, để chuyển từ ‘khá’ ({ms:.1f}) sang ‘ưu tiên triển khai’, bạn sẽ cần ít nhất 1 tín hiệu sau:"
+        b1 = "Break/reclaim vùng kháng cự gần nhất và giữ được sau breakout (không false break)"
+        b2 = "Follow-through volume: tăng có lực đi kèm thanh khoản, pullback không xả"
+        b3 = "Momentum xác nhận: RSI giữ vững vùng bullish, MACD/histogram tiếp tục ủng hộ"
+        warn = ""
+    else:
+        improve_line = f"Với điểm cao ({ms:.1f}), mục tiêu là GIỮ lợi thế và tránh tụt điểm. Theo dõi 3 nhóm tín hiệu sau:"
+        b1 = "Giữ được cấu trúc/MA hỗ trợ: mất cấu trúc là tín hiệu giảm điểm nhanh nhất"
+        b2 = "Volume không ‘kiệt’ ở vùng breakout: nếu thanh khoản hụt, ưu thế sẽ mỏng dần"
+        b3 = "Momentum không suy yếu: histogram co lại liên tiếp hoặc phân kỳ giảm là cảnh báo"
+        warn = "\n\nCờ tụt điểm: thủng MA/structure + volume xả, hoặc momentum đảo chiều rõ."
+    section4_title = "4) Tín hiệu cần theo dõi để GIỮ lợi thế" if ms_b == "high" else "4) Tín hiệu cần thấy để điểm cải thiện"
+    block = f"""Với Điểm tổng hợp {ms:.1f}/10 và Điểm tin cậy {cs:.1f}/10, cách đọc thực dụng là:
+
+1) Điểm tổng hợp {ms:.1f}/10
+{ms_meaning[0]}
+{ms_meaning[1]}
+
+Điểm tin cậy {cs:.1f}/10
+{cs_meaning[0]}
+{cs_meaning[1]}
+
+2) Kết hợp 2 điểm → kết luận hành động
+Cơ hội {ms_short} ({ms:.1f}) + độ tin cậy {cs_short} ({cs:.1f}) ⇒ Trạng thái tiềm năng:
+
+{action_text}
+
+{plan_note}
+Ưu tiên kỷ luật và chờ market ‘trả đúng giá’ theo plan.
+
+3) Nếu bạn chưa có vị thế:
+
+{exec_no_pos}
+
+Nếu bạn đang có vị thế:
+
+{exec_have_pos}
+
+{section4_title}
+{improve_line}
+
+{b1}
+
+{b2}
+
+{b3}{warn}"""
+    st.markdown(block)
 def render_character_decision(character_pack: Dict[str, Any]) -> None:
     """
     Render only the 'Decision' part of Character Card (for Appendix E / anti-anchoring).
@@ -3874,10 +4117,10 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         st.markdown(
             f"""
             <div class="incept-metrics">
-              <div class="incept-metric"><div class="k">Risk%</div><div class="v">{_fmt_pct_local(risk)}</div></div>
-              <div class="incept-metric"><div class="k">Reward%</div><div class="v">{_fmt_pct_local(reward)}</div></div>
-              <div class="incept-metric"><div class="k">RR</div><div class="v">{_fmt_rr_local(rr)}</div></div>
-              <div class="incept-metric"><div class="k">Probability</div><div class="v">{_val_or_na(prob)}</div></div>
+              <div class="incept-metric"><div class="k">Risk%:</div><div class="v">{_fmt_pct_local(risk)}</div></div>
+              <div class="incept-metric"><div class="k">Reward%:</div><div class="v">{_fmt_pct_local(reward)}</div></div>
+              <div class="incept-metric"><div class="k">RR:</div><div class="v">{_fmt_rr_local(rr)}</div></div>
+              <div class="incept-metric"><div class="k">Probability:</div><div class="v">{_val_or_na(prob)}</div></div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -3885,17 +4128,17 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
 
     # If gate is locked, show defensive posture + still expose snapshot
     if gate_status == "LOCK":
-        st.info("Trade Plan locked (anti-FOMO). Maintain capital preservation posture and wait for confirmation.")
+        st.info("Trade Plan đang bị khóa (chống FOMO). Ưu tiên bảo toàn vốn và chờ tín hiệu xác nhận.")
         st.markdown(
             """
             <div class="tp-lock">
-              <div><b>Posture:</b> WAIT / DEFENSIVE</div>
-              <div style="margin-top:6px;"><b>Activation checklist:</b></div>
+              <div><b>Tư thế:</b> CHỜ / PHÒNG THỦ</div>
+              <div style="margin-top:6px;"><b>Checklist kích hoạt:</b></div>
               <ul>
-                <li>Conviction rises to activation threshold</li>
-                <li>Price reclaims key MA zone / structure stabilizes</li>
-                <li>Volume confirms (no exhaustion) and momentum improves</li>
-                <li>Weekly structure remains intact (no structural breakdown)</li>
+                <li>Conviction tăng lên ngưỡng kích hoạt</li>
+                <li>Giá lấy lại vùng MA quan trọng / cấu trúc ổn định trở lại</li>
+                <li>Khối lượng xác nhận (không có dấu hiệu kiệt sức), động lượng cải thiện</li>
+                <li>Cấu trúc tuần còn nguyên vẹn (không breakdown cấu trúc)</li>
               </ul>
             </div>
             """,
@@ -4106,6 +4349,64 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
     pts = _safe_float(conv.get("Points"), default=np.nan)
     guide = _safe_text(conv.get("SizeGuidance") or "").strip()
 
+    # --- Effective execution gating vs Primary Setup status (renderer-only) ---
+    primary_status = ""
+    try:
+        ps = ap.get("PrimarySetup") or {}
+        if isinstance(ps, dict):
+            primary_status = _safe_text(ps.get("Status")).strip()
+        if not primary_status:
+            tps = ap.get("TradePlans") or []
+            if isinstance(tps, list):
+                for p in tps:
+                    if _safe_text(p.get("Name")).strip() == preferred_plan:
+                        primary_status = _safe_text(p.get("Status")).strip()
+                        break
+    except Exception:
+        primary_status = ""
+
+    pstat = primary_status.upper().strip()
+
+    effective_exec_mode_text = exec_mode_text
+    effective_preferred_plan = preferred_plan
+    effective_guide = guide
+
+    # If overall mode is ACTIVE but the primary plan is still WATCH, downgrade wording to avoid "full size now" confusion.
+    if _safe_text(gate_status).upper().strip() == "ACTIVE":
+        if pstat in ("WATCH", "PENDING", "WAIT", "WAITING", "TRACK"):
+            effective_exec_mode_text = "ACTIVE (WAIT ENTRY) – được phép triển khai khi plan kích hoạt/đạt điều kiện vào lệnh."
+            if effective_guide:
+                # Soften aggressive sizing language: full size only when plan becomes Active/triggered
+                effective_guide = effective_guide.replace("FULL SIZE + CÓ THỂ ADD", "FULL SIZE (KHI PLAN ACTIVE) + CÓ THỂ ADD (SAU FOLLOW-THROUGH)")
+                if "FULL SIZE" in effective_guide and "(KHI PLAN ACTIVE)" not in effective_guide:
+                    effective_guide = effective_guide.replace("FULL SIZE", "FULL SIZE (KHI PLAN ACTIVE)")
+            else:
+                effective_guide = "EDGE MẠNH — FULL SIZE (KHI PLAN ACTIVE) + CÓ THỂ ADD (SAU FOLLOW-THROUGH)"
+        elif pstat in ("INVALID", "DISABLED", "N/A", "NA"):
+            effective_exec_mode_text = "WATCH ONLY – primary plan hiện không hợp lệ; ưu tiên quan sát."
+            effective_guide = "NO TRADE / WAIT RESET"
+
+    def _conv_cls_from_tier(t: object) -> str:
+        try:
+            ti = int(t)
+        except Exception:
+            return "conv-unknown"
+        if ti <= 1:
+            return "conv-noedge"
+        if ti == 2:
+            return "conv-weak"
+        if ti == 3:
+            return "conv-tradeable"
+        if ti in (4, 5):
+            return "conv-strong"
+        if ti == 6:
+            return "conv-high"
+        return "conv-god"
+
+    guide_upper = effective_guide.upper() if effective_guide else ""
+    guide_cls = _conv_cls_from_tier(tier)
+    guide_html = f"<span class='conv-tag {guide_cls}'>{html.escape(guide_upper)}</span>" if guide_upper else " "
+
     # Final Bias comes from ProTech.Bias (fact-only layer)
     bias = ((ap.get("ProTech") or {}).get("Bias") or {}) if isinstance(ap, dict) else {}
     alignment_raw = _safe_text(bias.get("Alignment") or "N/A").strip()
@@ -4142,8 +4443,8 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
           <div class="dl-card {lvl}">
             <div class="dl-k">CONVICTION SCORE</div>
             <div class="dl-v">Tier {html.escape(str(tier))}/7  •  {html.escape(pts_disp)} pts</div>
-            <div class="dl-sub"><b>Execution Mode:</b> {html.escape(exec_mode_text)}<br><b>Preferred Plan:</b> {html.escape(preferred_plan)}</div>
-            <div class="dl-sub">{html.escape(guide) if guide else ' '}</div>
+            <div class="dl-sub"><b>Execution Mode:</b> {html.escape(effective_exec_mode_text)}<br><b>Preferred Plan:</b> {html.escape(effective_preferred_plan)}</div>
+            <div class="dl-sub">{guide_html}</div>
           </div>
         </div>
         """,
@@ -4152,7 +4453,7 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
 
     # Weaknesses / Flags (short list)
     if isinstance(flags, list) and flags:
-        st.markdown('<div class="dl-sec"><div class="dl-sec-t">WEAKNESSES / FLAGS (RỦI RO CHÍNH)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="dl-sec"><div class="dl-sec-t">YẾU ĐIỂM VÀ RỦI RO CHÍNH CỦA TRADE PLAN</div>', unsafe_allow_html=True)
         for f in flags[:6]:
             if not isinstance(f, dict):
                 continue
@@ -4170,9 +4471,27 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
 
     # Playstyle tags (bilingual pills)
     if tags_vi:
-        st.markdown('<div class="dl-sec"><div class="dl-sec-t">PLAYSTYLE TAGS (EN/VI)</div>', unsafe_allow_html=True)
-        pills = "".join([f"<span class='dl-pill'>{html.escape(str(t))}</span>" for t in tags_vi[:10]])
-        st.markdown(f"<div class='dl-tags'>{pills}</div>", unsafe_allow_html=True)
+        st.markdown('<div class="dl-sec"><div class="dl-sec-t">ĐỀ XUẤT XU HƯỚNG HÀNH ĐỘNG</div>', unsafe_allow_html=True)
+        def _play_hint(tag: str) -> str:
+            tl = (tag or '').lower()
+            if 'breakout' in tl:
+                return 'Ưu tiên chờ phiên xác nhận và follow-through; tránh vào sớm khi chưa có lực phá vỡ rõ ràng.'
+            if 'pullback' in tl:
+                return 'Ưu tiên canh hồi về vùng hỗ trợ/MA/Fib để tối ưu điểm vào; tránh đuổi giá khi chưa hồi.'
+            if ('longstructure' in tl and 'shorttactical' in tl) or ('long structure' in tl and 'short tactical' in tl):
+                return 'Khung dài hạn quyết định bias; tác chiến ngắn hạn chỉ để tối ưu entry/exit theo đúng cấu trúc.'
+            if 'trend' in tl:
+                return 'Ưu tiên đi theo xu hướng; chỉ vào khi MA/cấu trúc ủng hộ và không vi phạm stop.'
+            return 'Tag này gợi ý cách hành động phù hợp bối cảnh hiện tại; làm theo để đồng bộ Trade Plan và giảm sai nhịp.'
+
+        items = []
+        for t in tags_vi[:10]:
+            t1 = str(t)
+            hint = _play_hint(t1)
+            items.append(
+                f"<div class='dl-tagitem'><span class='dl-pill'>{html.escape(t1)}</span><div class='dl-taghint'>{html.escape(hint)}</div></div>"
+            )
+        st.markdown("<div class='dl-tags'>" + "".join(items) + "</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -4240,6 +4559,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
     # ============================================================
     st.markdown('<div class="major-sec">STOCK DNA</div>', unsafe_allow_html=True)
     render_character_traits(cp)
+    render_stock_dna_insight(cp)
 
     # ============================================================
     # 2) CURRENT STATUS
@@ -4280,6 +4600,9 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
 
     _bar_row_cs("Điểm tổng hợp", master_pack.get("Total"), 10.0)
     _bar_row_cs("Điểm tin cậy", conviction_score, 10.0)
+
+    # Current Status Insight (MasterScore + Conviction)
+    render_current_status_insight(master_pack.get("Total"), conviction_score, gate_status)
 
     # 2.3 TECHNICAL ANALYSIS (reuse A-section body)
     st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
@@ -4612,10 +4935,10 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     st.markdown(
         f"""
         <div class="incept-metrics">
-          <div class="incept-metric"><div class="k">Risk%</div><div class="v">{_fmt_pct_local(risk)}</div></div>
-          <div class="incept-metric"><div class="k">Reward%</div><div class="v">{_fmt_pct_local(reward)}</div></div>
-          <div class="incept-metric"><div class="k">RR</div><div class="v">{_fmt_rr_local(rr)}</div></div>
-          <div class="incept-metric"><div class="k">Probability</div><div class="v">{prob}</div></div>
+          <div class="incept-metric"><div class="k">Risk%:</div><div class="v">{_fmt_pct_local(risk)}</div></div>
+          <div class="incept-metric"><div class="k">Reward%:</div><div class="v">{_fmt_pct_local(reward)}</div></div>
+          <div class="incept-metric"><div class="k">RR:</div><div class="v">{_fmt_rr_local(rr)}</div></div>
+          <div class="incept-metric"><div class="k">Probability:</div><div class="v">{prob}</div></div>
         </div>
         """,
         unsafe_allow_html=True
@@ -4717,10 +5040,10 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     st.markdown(
         f"""
         <div class="incept-metrics">
-          <div class="incept-metric"><div class="k">Risk%</div><div class="v">{_fmt_pct_local(risk)}</div></div>
-          <div class="incept-metric"><div class="k">Reward%</div><div class="v">{_fmt_pct_local(reward)}</div></div>
-          <div class="incept-metric"><div class="k">RR</div><div class="v">{_fmt_rr_local(rr)}</div></div>
-          <div class="incept-metric"><div class="k">Probability</div><div class="v">{prob}</div></div>
+          <div class="incept-metric"><div class="k">Risk%:</div><div class="v">{_fmt_pct_local(risk)}</div></div>
+          <div class="incept-metric"><div class="k">Reward%:</div><div class="v">{_fmt_pct_local(reward)}</div></div>
+          <div class="incept-metric"><div class="k">RR:</div><div class="v">{_fmt_rr_local(rr)}</div></div>
+          <div class="incept-metric"><div class="k">Probability:</div><div class="v">{prob}</div></div>
         </div>
         """,
         unsafe_allow_html=True
@@ -4844,15 +5167,16 @@ def main():
        MAJOR SECTION HEADERS
        ========================= */
     .major-sec{
-        background:#0B0B0B;
-        border:2px solid #000000;
+        background:#0b1426;
+        border:3px solid #FFFFFF;
         border-radius:18px;
-        padding:18px 20px;
-        margin:34px 0 18px;
+        padding:15px 20px;
+        margin:30px 0px 20px 0px;
         color:#FFFFFF;
-        font-weight:950;
-        font-size:34px;
-        letter-spacing:0.6px;
+        font-weight:900;
+        font-size:26px;
+        letter-spacing:0.8px;
+        text-transform:uppercase;
     }
     
 </style>
@@ -4971,8 +5295,12 @@ def main():
         color: white;
         border-radius: 14px;
         padding: 12px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
       }
-      .incept-metric .k { font-size: 12px; color: #CBD5E1; margin-bottom: 6px; font-weight: 700; }
+      .incept-metric .k { font-size: 14px; color: #CBD5E1; margin: 0; font-weight: 800; }
       .incept-metric .v { font-size: 20px; font-weight: 900; line-height: 1.2; }
 
 
@@ -5014,10 +5342,26 @@ def main():
       .dl-sev{background:#FB923C;color:#111827;font-weight:950;border-radius:10px;padding:4px 8px;font-size:12px;min-width:34px;text-align:center;}
       .dl-code{font-weight:900;color:#0F172A;font-size:12px;min-width:120px;}
       .dl-note{color:#334155;font-size:13px;line-height:1.45;}
+      .dl-taghint{ color: rgba(255,255,255,0.78) !important; }
       .dl-tags{margin-top:4px;}
       .dl-pill{display:inline-block;margin:6px 8px 0 0;padding:6px 10px;border-radius:999px;background:#F1F5F9;border:1px solid #E2E8F0;color:#0F172A;font-size:12px;font-weight:850;}
       .dl-bias-tags{margin-top:8px;line-height:1.2;}
       .dl-pill-mini{font-size:11px;padding:5px 9px;margin:6px 6px 0 0;}
+
+      /* Conviction tier label (Decision Layer) */
+      .conv-tag{display:block;font-weight:900;text-transform:uppercase;margin-top:8px;font-size:14px;letter-spacing:0.6px;}
+      .conv-noedge{color:#EF4444;}
+      .conv-weak{color:#FACC15;}
+      .conv-tradeable{color:#22C55E;}
+      .conv-strong{color:#16A34A;}
+      .conv-high{color:#3B82F6;}
+      .conv-god{color:#A855F7;}
+      .conv-unknown{color:#E5E7EB;}
+
+      /* Playstyle tag explanations */
+      .dl-tags{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;}
+      .dl-tagitem{display:inline-flex;flex-direction:column;gap:6px;max-width:520px;}
+      .dl-taghint{font-size:12px;color:rgba(255,255,255,0.78);line-height:1.45;}
 
       /* Right placeholder panel */
       .right-panel {
@@ -5110,14 +5454,21 @@ def main():
         color: var(--incept-text) !important;
       }
 
-      /* Major section headers: +1.5x size */
+      /* Major section headers: BIG, BOLD, HIGH-CONTRAST (no button/badge look) */
       .major-sec{
-        font-size: 38px !important;
-        padding: 20px 22px !important;
-        margin: 42px 0 22px !important;  /* extra spacing between MAIN sessions */
+        font-size: 26px !important;
+        font-weight: 900 !important;
+        border: 3px solid #FFFFFF !important;
+        background: #0b1426 !important;
+        padding: 15px 20px !important;
+        text-transform: UPPERCASE !important;
+        margin: 30px 0px 20px 0px !important;
+        border-radius: 18px !important;
+        color: #FFFFFF !important;
+        letter-spacing: 0.8px !important;
       }
 
-      /* Force strong text to stay readable on dark background */
+/* Force strong text to stay readable on dark background */
       strong, b{ color: var(--incept-text) !important; }
 
       /* Generic light cards -> dark cards */
@@ -5185,6 +5536,11 @@ def main():
       .dl-code{ color:#FFFFFF !important; }
       .dl-note{ color: rgba(255,255,255,0.82) !important; }
       .dl-pill{ background:#0F2A44 !important; border:1px solid rgba(255,255,255,0.18) !important; color:#FFFFFF !important; }
+      .dl-taghint{ color: rgba(255,255,255,0.78) !important; }
+      .dl-tags{display:flex !important;flex-wrap:wrap !important;gap:12px !important;margin-top:6px !important;}
+      .dl-tagitem{display:inline-flex !important;flex-direction:column !important;gap:6px !important;max-width:520px !important;}
+      .dl-taghint{font-size:12px !important;color: rgba(255,255,255,0.78) !important;line-height:1.45 !important;}
+
 
       /* Risk/Reward metric cards: keep dark + white border accents */
       .incept-metric{ border:1px solid rgba(255,255,255,0.14) !important; }
