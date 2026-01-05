@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "8.6"
+APP_VERSION = "9.1"
 APP_TITLE = "INCEPTION"
 
 class DataError(Exception):
@@ -3939,253 +3939,259 @@ Nếu bạn đang có vị thế:
     st.markdown(block)
 
 def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dict[str, Any], gate_status: str) -> None:
-    """
-    Executive Snapshot (auto-compressed): 7-line decision sheet.
+    """Executive Snapshot — dashboard-style summary card.
+
     Renderer-only: must not change engine scoring or trade-plan math.
-    Layout rules:
-      - Line 1: header (no callout)
-      - Lines 2..7: grouped into left-bordered callouts per spec.
-      - Omit missing lines (do not replace with paragraphs).
+
+    Notes:
+      - Uses HTML for layout; always escape dynamic strings.
+      - Detail sections (Stock DNA / Current Status / Trade Plan / Decision Layer) are rendered separately under an expander.
     """
     ap = analysis_pack or {}
     cp = character_pack or {}
 
-    # ---------- helpers ----------
+    # --------- helpers ---------
     def _sf(x: Any) -> float:
         v = _safe_float(x, default=np.nan)
-        return float(v) if (v is not None and isinstance(v, (int, float)) and not pd.isna(v) and math.isfinite(float(v))) else np.nan
+        try:
+            v = float(v)
+        except Exception:
+            return np.nan
+        return v if (not pd.isna(v) and math.isfinite(v)) else np.nan
 
     def _fmt_num(x: Any, nd: int = 1) -> str:
         v = _sf(x)
-        if pd.isna(v):
-            return "N/A"
-        return f"{v:.{nd}f}"
+        return "N/A" if pd.isna(v) else f"{v:.{nd}f}"
 
     def _fmt_px(x: Any) -> str:
         v = _sf(x)
+        return "N/A" if pd.isna(v) else f"{v:.2f}"
+
+    def _fmt_pct(x: Any) -> str:
+        v = _sf(x)
+        return "" if pd.isna(v) else f"{v:+.2f}%"
+
+    def _bar_pct_10(x: Any) -> float:
+        v = _sf(x)
         if pd.isna(v):
-            return "N/A"
-        return f"{v:.2f}"
+            return 0.0
+        return float(max(0.0, min(100.0, (v / 10.0) * 100.0)))
 
-    def _val(x: Any) -> str:
-        if x is None:
-            return "N/A"
-        if isinstance(x, float) and pd.isna(x):
-            return "N/A"
-        s = str(x).strip()
-        return s if s else "N/A"
+    def _dot(val: Any, good: float, warn: float) -> str:
+        v = _sf(val)
+        if pd.isna(v):
+            return "y"
+        if v >= good:
+            return "g"
+        if v >= warn:
+            return "y"
+        return "r"
 
-    def _lb_callout(inner_html: str) -> None:
-        inner_html = (inner_html or "").strip()
-        if not inner_html:
-            return
-        st.markdown(
-            f"""
-            <div style="
-              border-left: 6px solid #FFFFFF;
-              background: rgba(255,255,255,0.05);
-              box-shadow: 0 10px 22px rgba(0,0,0,0.35);
-              border-radius: 12px;
-              padding: 12px 14px;
-              margin: 10px 0 10px 0;
-            ">
-              {inner_html}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    def _tier_label(tier: Any) -> str:
+        try:
+            t = int(float(tier))
+        except Exception:
+            return "TIER N/A"
+        label_map = {
+            7: "GOD-TIER",
+            6: "VERY STRONG BUY",
+            5: "STRONG BUY",
+            4: "BUY",
+            3: "WATCH",
+            2: "CAUTIOUS",
+            1: "NO EDGE",
+        }
+        return f"TIER {t}: {label_map.get(t, 'N/A')}"
 
-    # ---------- Line 1: header ----------
+    def _kelly_label(tier: Any) -> str:
+        try:
+            t = int(float(tier))
+        except Exception:
+            return "KELLY BET: N/A"
+        if t >= 5:
+            return "KELLY BET: FULL SIZE"
+        if t == 4:
+            return "KELLY BET: FULL SIZE"
+        if t == 3:
+            return "KELLY BET: HALF SIZE"
+        if t == 2:
+            return "KELLY BET: SMALL"
+        return "KELLY BET: NO TRADE"
+
+    def _dna_label(class_name: str) -> str:
+        ck = (class_name or "").lower()
+        # Intent: one short Vietnamese nickname + optional class
+        if "balanced" in ck:
+            return "Ngựa chiến bền"
+        if "tank" in ck or "defensive" in ck:
+            return "Lá chắn phòng thủ"
+        if "glass" in ck:
+            return "Pháo thủ mạo hiểm"
+        if "trend" in ck:
+            return "Kỵ sĩ theo trend"
+        if "mean" in ck or "range" in ck:
+            return "Du kích theo biên"
+        if "illiquid" in ck:
+            return "Sniper thanh khoản"
+        if "chaotic" in ck or "wild" in ck:
+            return "Kẻ hỗn chiến"
+        return "Chiến binh kỷ luật"
+
+    # --------- data extraction ---------
     ticker = _safe_text(ap.get("Ticker") or cp.get("_Ticker") or "").strip().upper()
+    last_pack = ap.get("Last") or {}
+    close_px = last_pack.get("Close")
+
+    mkt = ap.get("Market") or {}
+    chg_pct = mkt.get("StockChangePct")
+
     scenario_name = _safe_text((ap.get("Scenario12") or {}).get("Name") or "N/A").strip()
+
     master_total = (ap.get("MasterScore") or {}).get("Total", np.nan)
     conviction = ap.get("Conviction", np.nan)
 
-    class_name = _safe_text(
-        cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "N/A"
-    ).strip()
+    class_name = _safe_text(cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "N/A").strip()
 
-    ms_str = _fmt_num(master_total, nd=1)
-    cs_str = _fmt_num(conviction, nd=1)
+    conv = cp.get("Conviction") or {}
+    tier = conv.get("Tier", None)
+
+    core = cp.get("CoreStats") or {}
+    combat = cp.get("CombatStats") or {}
+
+    # Primary setup (already computed by Python)
+    primary = ap.get("PrimarySetup") or {}
+    setup_name = _safe_text(primary.get("Name") or "N/A").strip()
+
+    # Try to find matching plan for TP
+    entry = stop = tp = rr = None
+    for p in (ap.get("TradePlans") or []):
+        if _safe_text(p.get("Name") or "").strip() == setup_name:
+            entry = p.get("Entry")
+            stop = p.get("Stop")
+            tp = p.get("TP")
+            rr = p.get("RR")
+            break
+
+    # Red flags (from CharacterPack weaknesses)
+    flags = list(cp.get("WeaknessFlags") or [])
+    red_notes = []
+    for f in flags:
+        try:
+            sev = int(f.get("severity", 0))
+        except Exception:
+            sev = 0
+        if sev >= 2:
+            note = _safe_text(f.get("note") or f.get("code") or "").strip()
+            if note:
+                red_notes.append(note)
+        if len(red_notes) >= 2:
+            break
+    if not red_notes:
+        red_notes = ["None"]
+
+    # Triggers
+    vol_ratio = (ap.get("ProTech") or {}).get("Volume", {}).get("Ratio")
+    rr_val = rr
+
+    dot_breakout = _dot(combat.get("BreakoutForce"), good=6.5, warn=5.0)
+    dot_volume = _dot(vol_ratio, good=1.1, warn=0.9)
+    dot_rr = _dot(rr_val, good=1.8, warn=1.4)
+
+    dna_nick = _dna_label(class_name)
+
+    # --------- render ---------
+    tier_badge = _tier_label(tier)
+    kelly_badge = _kelly_label(tier)
     gate = (gate_status or "N/A").strip().upper()
 
-    header_line = f"{ticker} — {class_name} | {scenario_name} | TA Điểm tổng hợp {ms_str}/10 | Tin cậy {cs_str}/10 | Gate hành động {gate}"
-    if header_line.strip() != "—  |  | TA Điểm tổng hợp N/A/10 | Tin cậy N/A/10 | Gate hành động N/A":
-        st.markdown(f"**{header_line}**")
+    # Header strings
+    title_left = f"{ticker}"
+    if _fmt_px(close_px) != "N/A":
+        title_left = f"{title_left} | {_fmt_px(close_px)}"
+    chg_str = _fmt_pct(chg_pct)
 
-    # ---------- Line 2: DNA (callout #1) ----------
-    # Deterministic phrase bank by class (keeps output consistent & short)
-    class_key = class_name.lower()
-    dna_map = {
-        "balanced": "trend-follow + pullback; kỷ luật chính: vào theo nhịp, tránh đuổi giá; thủng cấu trúc là giảm rủi ro.",
-        "glass cannon": "tactical theo nhịp RR; kỷ luật chính: vào nhỏ, stop chặt; tuyệt đối không bình quân giá xuống.",
-        "tank": "defensive; kỷ luật chính: ưu tiên bảo toàn, vào chậm theo xác nhận; không FOMO.",
-        "defensive": "defensive; kỷ luật chính: ưu tiên bảo toàn, vào chậm theo xác nhận; không FOMO.",
-        "trend rider": "trend-follow; kỷ luật chính: buy-the-dip theo MA/structure; tránh bắt đáy ngược trend.",
-        "mean reverter": "range/mean-revert; kỷ luật chính: đánh theo biên, chốt theo mục tiêu; không kỳ vọng ôm trend.",
-        "illiquid sniper": "sniper; kỷ luật chính: vào nhỏ, ưu tiên lệnh giới hạn; giả định slippage luôn tồn tại.",
-        "chaotic": "high-noise; kỷ luật chính: giảm size tối đa, chỉ tham gia khi setup thật rõ; stop là bắt buộc.",
-        "wildcard": "high-noise; kỷ luật chính: giảm size tối đa, chỉ tham gia khi setup thật rõ; stop là bắt buộc.",
-    }
-    dna_text = None
-    for k, v in dna_map.items():
-        if k in class_key:
-            dna_text = v
-            break
-    if not dna_text:
-        # fallback: use stats signals if available
-        core = cp.get("CoreStats") or {}
-        combat = cp.get("CombatStats") or {}
-        rel = _sf(core.get("Reliability"))
-        sup = _sf(combat.get("Support Resilience"))
-        if (not pd.isna(rel)) and rel < 5.0:
-            dna_text = "tactical; kỷ luật chính: tín hiệu dễ nhiễu → vào nhỏ, stop chặt; tránh all-in."
-        elif (not pd.isna(sup)) and sup < 5.0:
-            dna_text = "trend-follow có kỷ luật; kỷ luật chính: hỗ trợ dễ vỡ → thủng là thoát nhanh, không gồng."
-        else:
-            dna_text = "trend-follow/tactical; kỷ luật chính: bám plan, tối ưu R:R; tránh đuổi giá."
-    if ticker and class_name:
-        line2 = f"{ticker} thuộc nhóm {class_name} do đó phù hợp: {dna_text}"
-        _lb_callout(f"<div>{html.escape(line2)}</div>")
+    sub_1 = " | ".join([x for x in [class_name, scenario_name] if x and x != "N/A"])
+    sub_2 = f"Điểm tổng hợp: {_fmt_num(master_total,1)} | Điểm tin cậy: {_fmt_num(conviction,1)} | Gate: {gate}"
 
-    # ---------- Line 3: TA status (callout #2) ----------
-    ms = _sf(master_total)
-    cs = _sf(conviction)
-    if (not pd.isna(ms)) and (not pd.isna(cs)):
-        if ms >= 8.0 and cs >= 7.0:
-            state = "Favorable"
-        elif ms < 5.0 and cs < 5.5:
-            state = "Weak"
-        else:
-            state = "Mixed"
+    # Pillar metrics
+    def _metric_row(k: str, v: Any, nd: int = 1):
+        return f"<div class='es-metric'><div class='k'>{html.escape(k)}</div><div class='v'>{html.escape(_fmt_num(v, nd))}</div></div>"
 
-        if gate == "ACTIVE":
-            what_now = "được phép triển khai theo plan, tránh FOMO."
-        elif gate == "LOCK":
-            what_now = "ưu tiên bảo toàn, tránh mở vị thế mới."
-        else:
-            what_now = "chờ xác nhận, không commit size lớn."
+    # Panel 1 bars
+    t_pct = _bar_pct_10(core.get("Trend"))
+    s_pct = _bar_pct_10(core.get("Stability"))
+    r_pct = _bar_pct_10(core.get("Reliability"))
+    l_pct = _bar_pct_10(core.get("Liquidity"))
 
-        line3 = f"Trạng thái TA: {state} — {what_now}"
-        _lb_callout(f"<div>{html.escape(line3)}</div>")
+    panel1 = f"""
+    <div class="es-panel">
+      <div class="es-pt">1) STOCK DNA</div>
+      <div class="es-note" style="font-weight:900;">{html.escape(dna_nick)} <span class="es-meta">[{html.escape(class_name)}]</span></div>
+      <div class="es-note" style="margin-top:6px;">Core Stats</div>
+      {_metric_row('Trend', core.get('Trend'))}
+      <div class="es-mini"><div style="width:{t_pct:.0f}%"></div></div>
+      {_metric_row('Stability', core.get('Stability'))}
+      <div class="es-mini"><div style="width:{s_pct:.0f}%"></div></div>
+      {_metric_row('Reliability', core.get('Reliability'))}
+      <div class="es-mini"><div style="width:{r_pct:.0f}%"></div></div>
+      {_metric_row('Liquidity', core.get('Liquidity'))}
+      <div class="es-mini"><div style="width:{l_pct:.0f}%"></div></div>
+    </div>
+    """
 
-    # ---------- Lines 4–5: Trade plan (callout #3) ----------
-    plans = list(ap.get("TradePlans") or [])
-    primary_name = _safe_text((ap.get("PrimarySetup") or {}).get("Name") or "").strip()
-    primary_plan = None
-    if primary_name:
-        for p in plans:
-            if _safe_text(p.get("Name") or "").strip() == primary_name:
-                primary_plan = p
-                break
+    up_pct = _bar_pct_10(combat.get("UpsidePower"))
+    panel2 = f"""
+    <div class="es-panel">
+      <div class="es-pt">2) CURRENT STATUS</div>
+      <div class="es-metric"><div class="k">Upside Power</div><div class="v">{html.escape(_fmt_num(combat.get('UpsidePower')))}</div></div>
+      <div class="es-mini"><div style="width:{up_pct:.0f}%"></div></div>
+      <div class="es-note" style="margin-top:8px;font-weight:900;">Trigger Status</div>
+      <div class="es-note"><span class="es-dot {dot_breakout}"></span>Breakout</div>
+      <div class="es-note"><span class="es-dot {dot_volume}"></span>Volume</div>
+      <div class="es-note"><span class="es-dot {dot_rr}"></span>R:R</div>
+      <div class="es-note" style="margin-top:10px;">Gợi ý: Ưu tiên trigger xanh đồng pha; trigger đỏ = siết rủi ro hoặc chờ xác nhận.</div>
+    </div>
+    """
 
-    def _prob_rank(p: Any) -> int:
-        s = str(p or "").lower()
-        if "high" in s:
-            return 3
-        if "med" in s:
-            return 2
-        if "low" in s:
-            return 1
-        return 0
+    panel3 = f"""
+    <div class="es-panel">
+      <div class="es-pt">3) SCENARIO</div>
+      <div class="es-note"><b>Kịch bản chính:</b> {html.escape(scenario_name)}</div>
+      <ul class="es-bul">
+        <li>Setup: {html.escape(setup_name)}</li>
+        <li>Entry/Stop: {html.escape(_fmt_px(entry))} / {html.escape(_fmt_px(stop))}</li>
+        <li>Target: {html.escape(_fmt_px(tp))} (RR {html.escape(_fmt_num(rr,1))})</li>
+      </ul>
+      <div class="es-note" style="margin-top:8px;font-weight:900;">Red Flags</div>
+      <ul class="es-bul">{''.join([f'<li>{html.escape(x)}</li>' for x in red_notes])}</ul>
+    </div>
+    """
 
-    def _status_rank(s: Any) -> int:
-        stt = str(s or "Watch").strip().lower()
-        if stt == "active":
-            return 0
-        if stt == "watch":
-            return 1
-        return 2
+    card_html = f"""
+    <div class="es-card">
+      <div class="es-head">
+        <div class="es-left">
+          <div class="es-tline">
+            <div class="es-ticker">{html.escape(title_left)}</div>
+            {f'<div class="es-chg">{html.escape(chg_str)}</div>' if chg_str else ''}
+          </div>
+          <div class="es-sub">{html.escape(sub_1) if sub_1 else ''}</div>
+          <div class="es-meta">{html.escape(sub_2)}</div>
+        </div>
+        <div class="es-right">
+          <div class="es-badge">{html.escape(tier_badge)}</div>
+          <div class="es-kelly">{html.escape(kelly_badge)}</div>
+        </div>
+      </div>
+      <div class="es-body">
+        {panel1}
+        {panel2}
+        {panel3}
+      </div>
+    </div>
+    """
 
-    if (primary_plan is None) and plans:
-        # choose best plan for snapshot: prefer Active, then higher prob, then higher RR
-        primary_plan = sorted(
-            plans,
-            key=lambda x: (
-                _status_rank(x.get("Status")),
-                -_prob_rank(x.get("Probability")),
-                -_sf(x.get("RR")),
-            ),
-        )[0]
-
-    trade_lines = []
-    if primary_plan:
-        pn = _val(primary_plan.get("Name"))
-        ps = str(primary_plan.get("Status") or "Watch").strip().upper()
-        e = _fmt_px(primary_plan.get("Entry"))
-        s = _fmt_px(primary_plan.get("Stop"))
-        t = _fmt_px(primary_plan.get("TP"))
-        rr = _fmt_num(primary_plan.get("RR"), nd=1)
-        prob = _val(primary_plan.get("Probability"))
-        # enforce 1-line with limited numbers
-        primary_line = f"Primary: {pn} [{ps}] | Entry {e} | Stop {s} | TP {t} | RR {rr}"
-        if prob != "N/A":
-            primary_line += f" | Prob {prob}"
-        trade_lines.append(primary_line)
-
-        # optional switch line: only when a clearly different plan is Active while primary is Watch/Other
-        if ps != "ACTIVE":
-            alt_active = None
-            for p in plans:
-                if p is primary_plan:
-                    continue
-                if str(p.get("Status") or "").strip().lower() == "active":
-                    alt_active = p
-                    break
-            if alt_active:
-                alt_name = _val(alt_active.get("Name"))
-                trade_lines.append(f"Switch: nếu {alt_name} ACTIVE ⇒ ưu tiên {alt_name}.")
-
-    if trade_lines:
-        trade_html = "<div>" + "</div><div style='margin-top:6px;'>" + "</div><div style='margin-top:6px;'>".join(
-            html.escape(x) for x in trade_lines
-        ) + "</div>"
-        _lb_callout(trade_html)
-
-    # ---------- Lines 6–7: Decision + Size (callout #4) ----------
-    # Determine primary status for gating
-    primary_status = None
-    if primary_plan:
-        primary_status = str(primary_plan.get("Status") or "Watch").strip().upper()
-
-    if gate == "ACTIVE":
-        if primary_status == "ACTIVE":
-            decision = "ENTER"
-            reason = "theo plan"
-        else:
-            decision = "WAIT ENTRY"
-            reason = "plan chưa kích hoạt"
-    elif gate == "LOCK":
-        decision = "AVOID"
-        reason = "no trade"
-    else:
-        decision = "WATCHLIST"
-        reason = "chờ xác nhận"
-
-    line6 = f"Decision: {decision} — {reason}"
-    # Size guidance: tier-based, then gated by plan status
-    tier = _sf((cp.get("Conviction") or {}).get("Tier"))
-    if gate == "LOCK":
-        size_line = "Size Rule: NO TRADE."
-    elif gate == "WATCH":
-        size_line = "Size Rule: SMALL (≤50%) khi plan Active."
-    else:
-        # ACTIVE
-        if (not pd.isna(tier)) and tier >= 5:
-            base = "FULL size"
-        elif (not pd.isna(tier)) and tier >= 3:
-            base = "50–70%"
-        else:
-            base = "SMALL"
-
-        if primary_status != "ACTIVE":
-            size_line = f"Size Rule: {base} khi plan Active; add chỉ khi follow-through + volume."
-        else:
-            size_line = f"Size Rule: {base}; add chỉ khi follow-through + volume."
-
-    callout4 = f"<div>{html.escape(line6)}</div><div style='margin-top:6px;'>{html.escape(size_line)}</div>"
-    _lb_callout(callout4)
-
+    st.markdown(card_html, unsafe_allow_html=True)
 
 def render_character_decision(character_pack: Dict[str, Any]) -> None:
     """
@@ -4823,120 +4829,127 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
         render_executive_snapshot(ap, cp, gate_status)
 
     # Pre-split legacy report once for reuse
-    sections = _split_sections(report_text or "")
-    a_section = sections.get("A", "") or ""
-    b_section = sections.get("B", "") or ""
-    c_section = sections.get("C", "") or ""
-    d_section = sections.get("D", "") or ""
-
+    exp_label = "BẤM ĐỂ XEM CHI TIẾT PHÂN TÍCH & BIỂU ĐỒ"
+    exp_default = True if (gate_status or "").strip().upper() == "ACTIVE" else False
+    with st.expander(exp_label, expanded=exp_default):
+        left_col, right_col = st.columns([0.68, 0.32], gap="large")
+        with left_col:
+            sections = _split_sections(report_text or "")
+            a_section = sections.get("A", "") or ""
+            b_section = sections.get("B", "") or ""
+            c_section = sections.get("C", "") or ""
+            d_section = sections.get("D", "") or ""
+    
+            # ============================================================
+            # 1) STOCK DNA (CORE STATS – TRAITS)
+            # ============================================================
+            st.markdown('<div class="major-sec">STOCK DNA</div>', unsafe_allow_html=True)
+            render_character_traits(cp)
+            render_stock_dna_insight(cp)
+    
+            # ============================================================
+            # 2) CURRENT STATUS
+            # ============================================================
+            st.markdown('<div class="major-sec">CURRENT STATUS</div>', unsafe_allow_html=True)
+    
+            # 2.1 Relative Strength vs VNINDEX
+            rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
+            st.markdown(f"**Relative Strength vs VNINDEX:** {_val_or_na(rel)}")
+    
+            # 2.2 Scenario & Scores
+            scenario_pack = ap.get("Scenario12") or {}
+            master_pack = ap.get("MasterScore") or {}
+            conviction_score = ap.get("Conviction")
+    
+            st.markdown("**Scenario & Scores**")
+            st.markdown(f"- Scenario: {_val_or_na(scenario_pack.get('Name'))}")
+    
+            def _bar_row_cs(label: str, val: Any, maxv: float = 10.0) -> None:
+                v = _safe_float(val, default=np.nan)
+                if pd.isna(v):
+                    pct = 0.0
+                    v_disp = "N/A"
+                else:
+                    v = float(v)
+                    pct = _clip(v / maxv * 100.0, 0.0, 100.0)
+                    v_disp = f"{v:.1f}/{maxv:.0f}"
+                st.markdown(
+                    f"""
+                    <div class="gc-row">
+                      <div class="gc-k">{html.escape(str(label))}</div>
+                      <div class="gc-bar"><div class="gc-fill" style="width:{pct:.0f}%"></div></div>
+                      <div class="gc-v">{html.escape(str(v_disp))}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+    
+            _bar_row_cs("Điểm tổng hợp", master_pack.get("Total"), 10.0)
+            _bar_row_cs("Điểm tin cậy", conviction_score, 10.0)
+    
+            # Current Status Insight (MasterScore + Conviction)
+            render_current_status_insight(master_pack.get("Total"), conviction_score, gate_status)
+    
+            # 2.3 TECHNICAL ANALYSIS (reuse A-section body)
+            st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
+            a_items = _extract_a_items(a_section)
+            a_raw = (a_section or "").replace("\r\n", "\n")
+            a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
+            if a_items:
+                for i, body in enumerate(a_items, start=1):
+                    if not body.strip():
+                        continue
+                    st.markdown(
+                        f"""
+                        <div class="incept-card">
+                          <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
+                          <div>{body}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                if a_body:
+                    st.markdown(a_body, unsafe_allow_html=False)
+                else:
+                    st.info("N/A")
+    
+            # ============================================================
+            # 3) TRADE PLAN & R:R (CONDITIONAL)
+            # ============================================================
+            st.markdown('<div class="major-sec">TRADE PLAN &amp; R:R</div>', unsafe_allow_html=True)
+            # Pass legacy C-section body to the trade-plan renderer so explanation
+            # lives next to the numeric setup cards.
+            c_body_clean = ""
+            if c_section:
+                c_raw = c_section.replace("\r\n", "\n")
+                c_body_clean = re.sub(r"(?m)^C\..*\n?", "", c_raw).strip()
+            render_trade_plan_conditional(analysis_pack, gate_status, c_body_clean)
+            # ============================================================
+            # 4) DECISION LAYER (CONVICTION, WEAKNESSES, PLAYSTYLE TAGS)
+            # ============================================================
+            # Central switch — layout only (no scoring / rule changes)
+            primary_setup = (ap.get("PrimarySetup") or {}) if isinstance(ap, dict) else {}
+            primary_name = _val_or_na(primary_setup.get("Name"))
+    
+            if gate_status == "LOCK":
+                exec_mode_text = "WATCH ONLY – chưa kích hoạt lệnh mới (ưu tiên quan sát / bảo toàn vốn)."
+            elif gate_status == "ACTIVE":
+                exec_mode_text = "ACTIVE – được phép triển khai kế hoạch giao dịch theo điều kiện đã nêu."
+            else:
+                exec_mode_text = "WATCH ONLY – setup mang tính tham khảo, chờ thêm tín hiệu xác nhận."
+    
+            st.markdown('<div class="major-sec">DECISION LAYER</div>', unsafe_allow_html=True)
+    
+            render_decision_layer_switch(cp, ap, gate_status, exec_mode_text, primary_name)
+    
+    
+    
+        with right_col:
+            st.markdown("""<div style='border:1px dashed #E5E7EB;border-radius:14px;padding:14px;color:#64748B;font-weight:800;'>BIỂU ĐỒ (SẼ BỔ SUNG)</div>""", unsafe_allow_html=True)
     # ============================================================
-    # 1) STOCK DNA (CORE STATS – TRAITS)
+    # 11. GPT-4o STRATEGIC INSIGHT GENERATION
     # ============================================================
-    st.markdown('<div class="major-sec">STOCK DNA</div>', unsafe_allow_html=True)
-    render_character_traits(cp)
-    render_stock_dna_insight(cp)
-
-    # ============================================================
-    # 2) CURRENT STATUS
-    # ============================================================
-    st.markdown('<div class="major-sec">CURRENT STATUS</div>', unsafe_allow_html=True)
-
-    # 2.1 Relative Strength vs VNINDEX
-    rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
-    st.markdown(f"**Relative Strength vs VNINDEX:** {_val_or_na(rel)}")
-
-    # 2.2 Scenario & Scores
-    scenario_pack = ap.get("Scenario12") or {}
-    master_pack = ap.get("MasterScore") or {}
-    conviction_score = ap.get("Conviction")
-
-    st.markdown("**Scenario & Scores**")
-    st.markdown(f"- Scenario: {_val_or_na(scenario_pack.get('Name'))}")
-
-    def _bar_row_cs(label: str, val: Any, maxv: float = 10.0) -> None:
-        v = _safe_float(val, default=np.nan)
-        if pd.isna(v):
-            pct = 0.0
-            v_disp = "N/A"
-        else:
-            v = float(v)
-            pct = _clip(v / maxv * 100.0, 0.0, 100.0)
-            v_disp = f"{v:.1f}/{maxv:.0f}"
-        st.markdown(
-            f"""
-            <div class="gc-row">
-              <div class="gc-k">{html.escape(str(label))}</div>
-              <div class="gc-bar"><div class="gc-fill" style="width:{pct:.0f}%"></div></div>
-              <div class="gc-v">{html.escape(str(v_disp))}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    _bar_row_cs("Điểm tổng hợp", master_pack.get("Total"), 10.0)
-    _bar_row_cs("Điểm tin cậy", conviction_score, 10.0)
-
-    # Current Status Insight (MasterScore + Conviction)
-    render_current_status_insight(master_pack.get("Total"), conviction_score, gate_status)
-
-    # 2.3 TECHNICAL ANALYSIS (reuse A-section body)
-    st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
-    a_items = _extract_a_items(a_section)
-    a_raw = (a_section or "").replace("\r\n", "\n")
-    a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
-    if a_items:
-        for i, body in enumerate(a_items, start=1):
-            if not body.strip():
-                continue
-            st.markdown(
-                f"""
-                <div class="incept-card">
-                  <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
-                  <div>{body}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-    else:
-        if a_body:
-            st.markdown(a_body, unsafe_allow_html=False)
-        else:
-            st.info("N/A")
-
-    # ============================================================
-    # 3) TRADE PLAN & R:R (CONDITIONAL)
-    # ============================================================
-    st.markdown('<div class="major-sec">TRADE PLAN &amp; R:R</div>', unsafe_allow_html=True)
-    # Pass legacy C-section body to the trade-plan renderer so explanation
-    # lives next to the numeric setup cards.
-    c_body_clean = ""
-    if c_section:
-        c_raw = c_section.replace("\r\n", "\n")
-        c_body_clean = re.sub(r"(?m)^C\..*\n?", "", c_raw).strip()
-    render_trade_plan_conditional(analysis_pack, gate_status, c_body_clean)
-    # ============================================================
-    # 4) DECISION LAYER (CONVICTION, WEAKNESSES, PLAYSTYLE TAGS)
-    # ============================================================
-    # Central switch — layout only (no scoring / rule changes)
-    primary_setup = (ap.get("PrimarySetup") or {}) if isinstance(ap, dict) else {}
-    primary_name = _val_or_na(primary_setup.get("Name"))
-
-    if gate_status == "LOCK":
-        exec_mode_text = "WATCH ONLY – chưa kích hoạt lệnh mới (ưu tiên quan sát / bảo toàn vốn)."
-    elif gate_status == "ACTIVE":
-        exec_mode_text = "ACTIVE – được phép triển khai kế hoạch giao dịch theo điều kiện đã nêu."
-    else:
-        exec_mode_text = "WATCH ONLY – setup mang tính tham khảo, chờ thêm tín hiệu xác nhận."
-
-    st.markdown('<div class="major-sec">DECISION LAYER</div>', unsafe_allow_html=True)
-
-    render_decision_layer_switch(cp, ap, gate_status, exec_mode_text, primary_name)
-
-
-
-# ============================================================
-# 11. GPT-4o STRATEGIC INSIGHT GENERATION
-# ============================================================
 def generate_insight_report(data: Dict[str, Any]) -> str:
     if "Error" in data: return f"❌ {data['Error']}"
     tick = data["Ticker"]
@@ -5373,7 +5386,18 @@ def main():
             font-family: 'Segoe UI', sans-serif;
         }
 
-        /* Increase default text size across the app (Report + modules) */
+        
+        /* Layout: full width (dashboard + details) */
+        .block-container{
+            max-width: 100% !important;
+            padding-left: 2.2rem;
+            padding-right: 2.2rem;
+        }
+        @media (max-width: 900px){
+            .block-container{padding-left: 1rem; padding-right: 1rem;}
+        }
+
+/* Increase default text size across the app (Report + modules) */
         .stMarkdown p, .stMarkdown li, .stMarkdown span, .stMarkdown div {
             font-size: 17px !important;
             line-height: 1.55 !important;
@@ -5438,7 +5462,79 @@ def main():
     .gc-conv-guide{font-size:20px;color:#6B7280;line-height:1.35;}
     
 
-    /* =========================
+    
+/* =========================
+   EXECUTIVE SNAPSHOT (DASHBOARD) — DARK THEME
+   ========================= */
+.es-card{
+  border:1px solid rgba(255,255,255,0.16);
+  border-radius:18px;
+  padding:14px;
+  background:#081A33;
+  margin-top:8px;
+  width:100%;
+  box-sizing:border-box;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.20);
+}
+.es-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}
+.es-left{display:flex;flex-direction:column;gap:4px;}
+.es-tline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.es-ticker{font-weight:900;font-size:26px;color:#FFFFFF;letter-spacing:0.4px;}
+.es-price{font-weight:900;font-size:26px;color:#FFFFFF;}
+.es-chg{
+  font-weight:900;font-size:14px;padding:4px 10px;border-radius:999px;
+  background:rgba(255,255,255,0.10);
+  border:1px solid rgba(255,255,255,0.16);
+  color:#FFFFFF;
+}
+.es-sub{font-size:16px;color:rgba(255,255,255,0.82);font-weight:800;}
+.es-right{text-align:right;display:flex;flex-direction:column;gap:6px;}
+.es-badge{
+  font-weight:900;font-size:13px;padding:6px 10px;border-radius:999px;
+  background:#0B1426;color:#FFFFFF;display:inline-block;
+  border:1px solid rgba(255,255,255,0.14);
+}
+.es-kelly{
+  font-weight:900;font-size:13px;padding:6px 10px;border-radius:999px;
+  background:#0F2A44;color:#FFFFFF;border:1px solid rgba(255,255,255,0.18);
+  display:inline-block;
+}
+.es-meta{font-size:13px;color:rgba(255,255,255,0.70);font-weight:800;}
+.es-body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px;}
+@media(max-width: 980px){.es-body{grid-template-columns:1fr;}.es-right{text-align:left;}}
+.es-panel{
+  border:1px solid rgba(255,255,255,0.14);
+  border-radius:16px;
+  padding:12px;
+  background:#0F2A44;
+}
+.es-pt{font-weight:950;font-size:14px;color:rgba(255,255,255,0.70);letter-spacing:0.7px;margin-bottom:8px;}
+.es-metric{display:flex;justify-content:space-between;gap:10px;font-size:16px;margin:6px 0;}
+.es-metric .k{color:rgba(255,255,255,0.78);font-weight:850;}
+.es-metric .v{color:#FFFFFF;font-weight:950;}
+.es-mini{height:10px;background:rgba(255,255,255,0.12);border-radius:99px;overflow:hidden;margin-top:6px;}
+.es-mini>div{height:10px;background:linear-gradient(90deg,#2563EB 0%,#7C3AED 100%);border-radius:99px;}
+.es-note{font-size:14px;color:rgba(255,255,255,0.82);line-height:1.45;}
+.es-bul{margin:6px 0 0 16px;padding:0;}
+.es-bul li{margin:2px 0;font-size:14px;color:rgba(255,255,255,0.86);font-weight:650;}
+.es-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px;}
+.es-dot.g{background:#22C55E;}
+.es-dot.y{background:#F59E0B;}
+.es-dot.r{background:#EF4444;}
+
+
+/* Make expander summary look like an action button */
+div[data-testid="stExpander"] > details{border:0 !important; background:transparent !important;}
+div[data-testid="stExpander"] > details > summary{
+    background: linear-gradient(180deg, #111827 0%, #000000 100%);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 12px;
+    padding: 10px 14px;
+}
+div[data-testid="stExpander"] > details > summary:hover{opacity:0.98;}
+
+
+/* =========================
        MAJOR SECTION HEADERS
        ========================= */
     .major-sec{
@@ -5929,25 +6025,13 @@ def main():
                     if not report:
                         report = generate_insight_report(result)
                     st.markdown("<hr>", unsafe_allow_html=True)
-                    left, right = st.columns([0.68, 0.32], gap="large")
-                    with left:
-                        analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
-                        if 'output_mode' in locals() and output_mode == 'Character':
-                            # Decision Layer Report (Anti-Anchoring Output Order)
-                            render_appendix_e(result, report, analysis_pack)
-                        else:
-                            # Legacy report A–D
-                            render_report_pretty(report, analysis_pack)
-                    with right:
-                        st.markdown(
-                            """
-                            <div class="right-panel">
-                              <div class="t">KHU VỰC BIỂU ĐỒ (SẮP CÓ)</div>
-                              <div class="d">Chừa sẵn không gian cho charts / heatmap / timeline / notes. Hiện tại chưa gắn chức năng.</div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
+                    analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
+                    if 'output_mode' in locals() and output_mode == 'Character':
+                        # Decision Layer Report (Anti-Anchoring Output Order)
+                        render_appendix_e(result, report, analysis_pack)
+                    else:
+                        # Legacy report A–D
+                        render_report_pretty(report, analysis_pack)
                 except Exception as e:
                     st.error(f"⚠️ Lỗi xử lý: {e}")
 
