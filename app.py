@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "9.1"
+APP_VERSION = "10.4"
 APP_TITLE = "INCEPTION"
 
 class DataError(Exception):
@@ -589,6 +589,10 @@ def validate_section_d(text: str, primary: Dict[str, Any]) -> bool:
         r"R\s*[:/]\s*R\s*:\s*([0-9]+(?:\.[0-9]+)?)",
     ])
     got_prob = _grab_text(block, [
+        # New canonical label
+        r"Confidence\s*\(\s*Tech\s*\)\s*:\s*([A-Za-zÀ-ỹ0-9\-\s]+)",
+        r"Độ\s*tin\s*cậy\s*\(\s*Kỹ\s*thuật\s*\)\s*:\s*([A-Za-zÀ-ỹ0-9\-\s]+)",
+        # Backward compatibility
         r"Probability\s*:\s*([A-Za-zÀ-ỹ0-9\-\s]+)",
         r"Xác\s*suất\s*:\s*([A-Za-zÀ-ỹ0-9\-\s]+)",
     ]) or ""
@@ -596,7 +600,7 @@ def validate_section_d(text: str, primary: Dict[str, Any]) -> bool:
     exp_risk = _safe_float(primary.get("RiskPct"))
     exp_reward = _safe_float(primary.get("RewardPct"))
     exp_rr = _safe_float(primary.get("RR"))
-    exp_prob = _safe_text(primary.get("Probability")).strip().lower()
+    exp_prob = _safe_text(primary.get("Confidence (Tech)", primary.get("Probability"))).strip().lower()
     
     ok = True
     if pd.notna(exp_risk):
@@ -638,13 +642,13 @@ def call_gpt_with_guard(prompt: str, analysis_pack: Dict[str, Any], max_retry: i
             extra = f"""
 SỬA LỖI BẮT BUỘC (chỉ sửa mục D, giữ nguyên các mục khác):
 Mục D đang sai số. Hãy sửa lại mục D bằng cách COPY ĐÚNG các số sau (không được tự tính/ước lượng):
-Risk%={primary.get('RiskPct')}, Reward%={primary.get('RewardPct')}, RR={primary.get('RR')}, Probability={primary.get('Probability')}.
+Risk%={primary.get('RiskPct')}, Reward%={primary.get('RewardPct')}, RR={primary.get('RR')}, Confidence (Tech)={primary.get('Confidence (Tech)', primary.get('Probability'))}.
 
 Mục D bắt buộc đúng format 4 dòng:
 Risk%: <...>
 Reward%: <...>
 RR: <...>
-Probability: <...>
+Confidence (Tech): <...>
 """
         text = _call_openai(prompt + extra, temperature=temp)
         last_text = text
@@ -1770,177 +1774,798 @@ def _nearest_resistance_above(anchors: Dict[str, float], x: float, exclude_vals:
                 best_k, best_v = k, v
     return best_k, best_v
 
+
+# ============================================================
+# 8. TRADE PLAN (STRENGTH-AWARE) — v9.9
+# - Adds FibStrength + MAStrength + Confluence scoring for Stop/TP selection
+# - Uses tol = 0.25*ATR (fallback: 0.3%*Close) for zone matching
+# - Replaces fixed TP fallback (3.0R/2.6R) with Class/Regime-configured k·R
+# ============================================================
+
+def _atr14_last(df: pd.DataFrame) -> float:
+    a = atr_wilder(df, 14)
+    try:
+        v = _safe_float(a.dropna().iloc[-1]) if not a.dropna().empty else np.nan
+    except Exception:
+        v = np.nan
+    return v
+
+
+def _tol_price(df: pd.DataFrame, close: float) -> float:
+    """Tolerance used for confluence/zone matching.
+
+    Rule: tol = 0.25*ATR14 (fallback: 0.3%*Close when ATR unavailable).
+    """
+    atr14 = _atr14_last(df)
+    if pd.notna(atr14) and atr14 > 0:
+        return float(0.25 * atr14)
+    # ATR missing → fallback by % of price
+    if pd.notna(close) and close > 0:
+        return float(0.003 * close)
+    return np.nan
+
+
+def _fib_strength_from_key(k: str) -> int:
+    """Discrete strength for the fib keys used in this project (38.2/50.0/61.8/127.2/161.8)."""
+    s = (str(k) or '').strip()
+    # normalize
+    s = s.replace('%', '').replace(' ', '')
+    # Retracements
+    if s in ('61.8', '61.80'):
+        return 3
+    if s in ('50.0', '50', '50.00', '38.2', '38.20'):
+        return 2
+    # Extensions
+    if s in ('161.8', '161.80'):
+        return 3
+    if s in ('127.2', '127.20'):
+        return 2
+    return 1
+
+
+def _infer_character_class_quick(df: pd.DataFrame) -> str:
+    """Quick, deterministic class inference used ONLY for k·R fallback in Trade Plan.
+    Returns one of: Trend Tank | Glass Cannon | Momentum Fighter | Range Rogue | Balanced
+    """
+    if df.empty:
+        return 'Balanced'
+    last = df.iloc[-1]
+    close = _safe_float(last.get('Close'))
+    ma20 = _safe_float(last.get('MA20'))
+    ma50 = _safe_float(last.get('MA50'))
+    ma200 = _safe_float(last.get('MA200'))
+    rsi = _safe_float(last.get('RSI'))
+    vr = _vol_ratio(df)
+    atr14 = _atr14_last(df)
+    atr_pct = (atr14 / close * 100) if (pd.notna(atr14) and pd.notna(close) and close != 0) else np.nan
+
+    trend_stack = (pd.notna(ma20) and pd.notna(ma50) and pd.notna(ma200) and ma20 > ma50 > ma200)
+    price_above = (pd.notna(close) and pd.notna(ma20) and close > ma20)
+
+    # Vol / tail proxy via ATR% and volume bursts
+    very_wild = (pd.notna(atr_pct) and atr_pct >= 6.0) or (pd.notna(vr) and vr >= 2.5)
+    high_vol = (pd.notna(atr_pct) and atr_pct >= 4.5) or (pd.notna(vr) and vr >= 1.8)
+
+    if trend_stack and price_above and (not high_vol) and (pd.isna(rsi) or rsi >= 50):
+        return 'Trend Tank'
+    if very_wild:
+        return 'Glass Cannon'
+    if trend_stack and (pd.notna(rsi) and rsi >= 55) and (pd.notna(vr) and vr >= 1.1):
+        return 'Momentum Fighter'
+
+    # Range/whipsaw proxy: price around MA50 and RSI mid
+    if pd.notna(close) and pd.notna(ma50) and abs(close - ma50) / ma50 * 100 <= 2.0 and (pd.notna(rsi) and 40 <= rsi <= 60):
+        return 'Range Rogue'
+
+    return 'Balanced'
+
+
+def _infer_risk_regime_quick(df: pd.DataFrame) -> str:
+    """Quick risk regime tag used ONLY for k·R fallback."""
+    if df.empty:
+        return 'Normal'
+    last = df.iloc[-1]
+    close = _safe_float(last.get('Close'))
+    avg20 = _safe_float(last.get('Avg20Vol'))
+    vr = _vol_ratio(df)
+    atr14 = _atr14_last(df)
+    atr_pct = (atr14 / close * 100) if (pd.notna(atr14) and pd.notna(close) and close != 0) else np.nan
+
+    if pd.notna(avg20) and avg20 > 0 and avg20 < 120_000:
+        return 'LowLiquidity'
+    if (pd.notna(atr_pct) and atr_pct >= 6.0) or (pd.notna(vr) and vr >= 2.8):
+        return 'EventRisk'
+    if (pd.notna(atr_pct) and atr_pct >= 4.5) or (pd.notna(vr) and vr >= 2.0):
+        return 'HighVol'
+    return 'Normal'
+
+
+def _kr_fallback_mult(setup: str, cclass: str, regime: str) -> float:
+    """k·R fallback multiplier per CharacterClass/Regime. Deterministic config."""
+    setup_k = (setup or '').strip().lower()
+    cc = (cclass or 'Balanced').strip()
+    rg = (regime or 'Normal').strip()
+
+    # Base by class (maintains prior behavior approximately; breakout > pullback)
+    base = {
+        'Trend Tank':     {'breakout': 2.4, 'pullback': 2.2},
+        'Momentum Fighter': {'breakout': 3.0, 'pullback': 2.6},
+        'Balanced':       {'breakout': 2.8, 'pullback': 2.4},
+        'Range Rogue':    {'breakout': 2.0, 'pullback': 1.7},
+        'Glass Cannon':   {'breakout': 3.2, 'pullback': 2.8},
+    }
+    by_setup = base.get(cc, base['Balanced'])
+    k = by_setup.get('breakout' if 'break' in setup_k else 'pullback', 2.6)
+
+    # Regime adjustment (risk-aware, modest)
+    adj = {
+        'Normal': 1.0,
+        'HighVol': 0.90,
+        'EventRisk': 0.85,
+        'LowLiquidity': 0.85,
+    }.get(rg, 1.0)
+
+    return float(k * adj)
+
+
+def _ma_slope_sign(series: pd.Series, lookback: int = 5) -> float:
+    """Return slope sign proxy: last - prev(lookback)."""
+    try:
+        s = series.dropna()
+        if len(s) <= lookback:
+            return np.nan
+        return float(s.iloc[-1] - s.iloc[-1 - lookback])
+    except Exception:
+        return np.nan
+
+
+def _ma_respect_count(df: pd.DataFrame, ma_col: str, tol: float, lookback: int = 60) -> int:
+    """Count how often price comes within tol of MA and then rejects in next 1–3 bars.
+    A lightweight proxy for 'respect'.
+    """
+    if df.empty or ma_col not in df.columns or 'Close' not in df.columns or pd.isna(tol) or tol <= 0:
+        return 0
+    d = df.tail(max(lookback + 5, 20)).copy()
+    c = d['Close'].astype(float)
+    m = d[ma_col].astype(float)
+    if c.isna().all() or m.isna().all():
+        return 0
+
+    # touch when within tol
+    touch = (c - m).abs() <= tol
+    cnt = 0
+    idxs = list(d.index)
+    for i in range(len(d) - 3):
+        if not bool(touch.iloc[i]):
+            continue
+        # rejection: next bars move away at least 0.5*tol
+        base = float(c.iloc[i])
+        away = False
+        for j in (1, 2, 3):
+            if i + j >= len(d):
+                break
+            if abs(float(c.iloc[i + j]) - float(m.iloc[i + j])) >= 0.5 * tol:
+                away = True
+                break
+        if away:
+            cnt += 1
+    return int(cnt)
+
+
+def _ma_strength(df: pd.DataFrame, ma_name: str, ma_val: float, close: float, tol: float) -> int:
+    """MAStrength: base(MA200=3, MA50=2, MA20=1) + boosts - penalties; clamp 1..5."""
+    name = (ma_name or '').upper().strip()
+    base = 1
+    if name == 'MA200':
+        base = 3
+    elif name == 'MA50':
+        base = 2
+    elif name == 'MA20':
+        base = 1
+
+    boosts = 0
+    penalties = 0
+
+    # slope boost
+    if name in df.columns:
+        slope = _ma_slope_sign(df[name].astype(float), lookback=5)
+        if pd.notna(slope):
+            if slope > 0:
+                boosts += 1
+            elif slope < 0:
+                penalties += 1
+
+    # respect count boost
+    rc = _ma_respect_count(df, name, tol=tol, lookback=60)
+    if rc >= 2:
+        boosts += 1
+
+    # distance penalty (too far from price)
+    atr14 = _atr14_last(df)
+    if pd.notna(atr14) and atr14 > 0 and pd.notna(close) and close > 0 and pd.notna(ma_val):
+        dist = abs(ma_val - close)
+        if dist > 5 * atr14:
+            penalties += 2
+        elif dist > 3 * atr14:
+            penalties += 1
+
+    score = base + boosts - penalties
+    if score < 1:
+        score = 1
+    if score > 5:
+        score = 5
+    return int(score)
+
+
+def _confluence_bonus(level_price: float, fib_strong_prices: List[float], ma_major_prices: List[float], tol: float) -> int:
+    """Confluence: +1 if close to one other strong set, +2 if close to both; cap 2."""
+    if pd.isna(level_price) or pd.isna(tol) or tol <= 0:
+        return 0
+    hit_f = any((pd.notna(p) and abs(p - level_price) <= tol) for p in (fib_strong_prices or []))
+    hit_m = any((pd.notna(p) and abs(p - level_price) <= tol) for p in (ma_major_prices or []))
+    if hit_f and hit_m:
+        return 2
+    if hit_f or hit_m:
+        return 1
+    return 0
+
+
+def _pick_best_anchor(cands: List[Dict[str, Any]], entry: float, atr14: float) -> Optional[Dict[str, Any]]:
+    """Pick candidate with highest score; tie-breaker: closer to entry (tradeable)."""
+    if not cands:
+        return None
+    def dist_penalty(price: float) -> int:
+        if pd.isna(price) or pd.isna(entry) or pd.isna(atr14) or atr14 <= 0:
+            return 0
+        d = abs(entry - price)
+        if d > 5 * atr14:
+            return 2
+        if d > 3 * atr14:
+            return 1
+        return 0
+
+    best = None
+    for c in cands:
+        price = _safe_float(c.get('price'))
+        score = _safe_float(c.get('score'))
+        if pd.isna(price) or pd.isna(score):
+            continue
+        # add distance penalty at selection time
+        sc = float(score) - dist_penalty(price)
+        c['_score_adj'] = sc
+        if best is None:
+            best = c
+            continue
+        if sc > best.get('_score_adj', -1e9):
+            best = c
+            continue
+        if sc == best.get('_score_adj', -1e9):
+            # closer wins
+            if abs(entry - price) < abs(entry - _safe_float(best.get('price'))):
+                best = c
+
+    return best
+
+
 def build_trade_plan(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, TradeSetup]:
+    """Strength-aware Trade Plan.
+
+    Notes:
+    - Keeps existing output shape (Breakout/Pullback with single TP)
+    - Stop/TP selection uses strength scoring.
+    - Fallback TP uses k·R by class/regime (quick inference, non-invasive).
+    """
     if df.empty:
         return {}
 
     last = df.iloc[-1]
-    close = _safe_float(last.get("Close"))
+    close = _safe_float(last.get('Close'))
 
-    fib_short = (dual_fib or {}).get("auto_short", {}).get("levels", {}) or {}
-    fib_long  = (dual_fib or {}).get("fixed_long", {}).get("levels", {}) or {}
+    fib_short = (dual_fib or {}).get('auto_short', {}).get('levels', {}) or {}
+    fib_long  = (dual_fib or {}).get('fixed_long', {}).get('levels', {}) or {}
 
-    # unified TP pool (fib only)
-    levels_tp = {}
-    levels_tp.update(fib_short)
-    levels_tp.update(fib_long)
-
+    # Build anchors for supports/resistances (existing behavior)
     anchors = _build_anchor_level_map(df, fib_short, fib_long)
     vr = _vol_ratio(df)
+
+    atr14 = _atr14_last(df)
+    tol = _tol_price(df, close)
+
+    # Precompute strong fib prices & major MA prices for confluence scoring
+    fib_prices_strong = []
+    for src in (fib_short, fib_long):
+        for k, v in (src or {}).items():
+            if _fib_strength_from_key(k) >= 3:
+                fv = _safe_float(v)
+                if pd.notna(fv):
+                    fib_prices_strong.append(float(fv))
+
+    ma_vals = {
+        'MA20': _safe_float(last.get('MA20')),
+        'MA50': _safe_float(last.get('MA50')),
+        'MA200': _safe_float(last.get('MA200')),
+    }
+    ma_major_prices = [float(ma_vals['MA50'])] if pd.notna(ma_vals.get('MA50')) else []
+    if pd.notna(ma_vals.get('MA200')):
+        ma_major_prices.append(float(ma_vals['MA200']))
+
+    # k·R profile (used only when fib/MA targets unavailable)
+    cclass = _infer_character_class_quick(df)
+    regime = _infer_risk_regime_quick(df)
 
     plans: Dict[str, TradeSetup] = {}
 
     # ----------------------------
     # 1) BREAKOUT PLAN
-    # Entry anchor: nearest resistance above close (prefer fib short 61.8 if available)
-    # Stop anchor: nearest support below entry (MA/Fib short/long) - buffer
-    # TP: nearest fib above entry (else 3R fallback)
+    # Entry: same as v9.8 (base resistance * 1.01)
+    # Stop: strongest support anchor below entry (Fib/MA/Anchors) - dynamic buffer
+    # TP: strongest target above entry (Fib/MA). If none → k·R fallback.
     # ----------------------------
-    # Choose a "base resistance" for breakout trigger:
-    # - Prefer FibS_61.8 if exists and >= close (acts like resistance), else nearest anchor above close.
     base_res = np.nan
+    base_res_tag = ''
     if pd.notna(close):
-        s618 = _safe_float(fib_short.get("61.8"))
+        s618 = _safe_float(fib_short.get('61.8'))
         if pd.notna(s618) and s618 >= close:
             base_res = s618
-            base_res_tag = "Anchor=FibS_61.8"
+            base_res_tag = 'EntryAnchor=FibS_61.8'
         else:
             k_res, v_res = _nearest_resistance_above(anchors, close)
             base_res = v_res
-            base_res_tag = f"Anchor={k_res}" if k_res != "N/A" else "Anchor=Fallback_Close"
+            base_res_tag = f'EntryAnchor={k_res}' if k_res != 'N/A' else 'EntryAnchor=Fallback_Close'
             if pd.isna(base_res):
                 base_res = close
 
     entry_b = _round_price(base_res * 1.01) if pd.notna(base_res) else np.nan
     buf_b = _buffer_price_dynamic(df, entry_b) if pd.notna(entry_b) else np.nan
 
-    stop_ref_tag_b, stop_ref_val_b = _nearest_support_below(anchors, entry_b)
+    # ---- STOP candidates (below entry)
+    stop_cands: List[Dict[str, Any]] = []
+
+    # fib supports below entry
+    def _push_fib(src_name: str, lv: Dict[str, Any]):
+        for k, v in (lv or {}).items():
+            pv = _safe_float(v)
+            if pd.isna(pv) or pd.isna(entry_b):
+                continue
+            if pv >= entry_b:
+                continue
+            fs = _fib_strength_from_key(k)
+            bonus = _confluence_bonus(pv, fib_prices_strong, ma_major_prices, tol)
+            stop_cands.append({
+                'type': 'Fib',
+                'name': f'{src_name}_{k}',
+                'price': float(pv),
+                'strength': fs,
+                'bonus': bonus,
+                'score': float(fs + bonus),
+            })
+
+    _push_fib('FibS', fib_short)
+    _push_fib('FibL', fib_long)
+
+    # MA supports below entry
+    for mn, mv in ma_vals.items():
+        if pd.notna(mv) and pd.notna(entry_b) and mv < entry_b:
+            ms = _ma_strength(df, mn, float(mv), close, tol)
+            bonus = _confluence_bonus(float(mv), fib_prices_strong, ma_major_prices, tol)
+            stop_cands.append({
+                'type': 'MA',
+                'name': mn,
+                'price': float(mv),
+                'strength': ms,
+                'bonus': bonus,
+                'score': float(ms + bonus),
+            })
+
+    # fallback anchors (from existing merged anchors)
+    try:
+        k_sup, v_sup = _nearest_support_below(anchors, entry_b)
+    except Exception:
+        k_sup, v_sup = ('N/A', np.nan)
+    if pd.notna(v_sup):
+        bonus = _confluence_bonus(float(v_sup), fib_prices_strong, ma_major_prices, tol)
+        stop_cands.append({
+            'type': 'Anchor',
+            'name': f'{k_sup}',
+            'price': float(v_sup),
+            'strength': 2,
+            'bonus': bonus,
+            'score': float(2 + bonus),
+        })
+
+    # ---- Breakout stop constraint (Rule 3): keep tactical stop tradeable
+    stop_constraint_tag = "StopConstraint=2.5ATR"
+    stop_cands_trade = stop_cands
+    try:
+        if pd.notna(atr14) and float(atr14) > 0 and pd.notna(entry_b):
+            _tmp = []
+            for c in stop_cands:
+                pv = _safe_float(c.get('price'))
+                if pd.isna(pv):
+                    continue
+                # distance from entry to anchor for LONG stop
+                if (float(entry_b) - float(pv)) <= 2.5 * float(atr14):
+                    _tmp.append(c)
+            if _tmp:
+                stop_cands_trade = _tmp
+            else:
+                stop_constraint_tag = "StopConstraint=Relaxed"
+    except Exception:
+        stop_constraint_tag = "StopConstraint=Relaxed"
+
+    best_stop = _pick_best_anchor(stop_cands_trade, entry=entry_b, atr14=atr14)
+    stop_ref_tag_b = best_stop.get('name') if best_stop else 'N/A'
+    stop_ref_val_b = _safe_float(best_stop.get('price')) if best_stop else np.nan
+
     stop_b = _round_price(stop_ref_val_b - buf_b) if (pd.notna(stop_ref_val_b) and pd.notna(buf_b)) else np.nan
 
-    tp_label_b, tp_val_b = _nearest_above(levels_tp, entry_b) if pd.notna(entry_b) else (None, np.nan)
-    if pd.notna(tp_val_b):
-        tp_b = _round_price(tp_val_b)
+    # ---- TARGET candidates (above entry)
+    tgt_cands: List[Dict[str, Any]] = []
+
+    def _push_fib_above(src_name: str, lv: Dict[str, Any]):
+        for k, v in (lv or {}).items():
+            pv = _safe_float(v)
+            if pd.isna(pv) or pd.isna(entry_b):
+                continue
+            if pv <= entry_b:
+                continue
+            fs = _fib_strength_from_key(k)
+            bonus = _confluence_bonus(pv, fib_prices_strong, ma_major_prices, tol)
+            # proximity score for TP1
+            prox = 0
+            if pd.notna(atr14) and atr14 > 0:
+                d = pv - entry_b
+                if 1.0 * atr14 <= d <= 3.0 * atr14:
+                    prox = 1
+            tgt_cands.append({
+                'type': 'Fib',
+                'name': f'{src_name}_{k}',
+                'price': float(pv),
+                'strength': fs,
+                'bonus': bonus,
+                'score': float(fs + bonus + prox),
+            })
+
+    _push_fib_above('FibS', fib_short)
+    _push_fib_above('FibL', fib_long)
+
+    # MA overhead as resistance/TP
+    for mn, mv in ma_vals.items():
+        if pd.notna(mv) and pd.notna(entry_b) and mv > entry_b:
+            ms = _ma_strength(df, mn, float(mv), close, tol)
+            bonus = _confluence_bonus(float(mv), fib_prices_strong, ma_major_prices, tol)
+            prox = 0
+            if pd.notna(atr14) and atr14 > 0:
+                d = float(mv) - entry_b
+                if 1.0 * atr14 <= d <= 3.0 * atr14:
+                    prox = 1
+            tgt_cands.append({
+                'type': 'MA',
+                'name': mn,
+                'price': float(mv),
+                'strength': ms,
+                'bonus': bonus,
+                'score': float(ms + bonus + prox),
+            })
+
+    # ---- TARGET selection (Rule 1–2)
+    # TP1: nearest strong "first trouble area" (structure/MA)
+    # TP2: extension-biased payoff target (used for gate/validity)
+    def _fib_key_num(_k: Any) -> float:
+        try:
+            return float(str(_k).strip())
+        except Exception:
+            return float('nan')
+
+    for c in tgt_cands:
+        pv = _safe_float(c.get('price'))
+        if pd.isna(pv) or pd.isna(entry_b):
+            c['score_tp1'] = c.get('score', 0.0)
+            c['score_tp2'] = c.get('score', 0.0)
+            continue
+        d = float(pv) - float(entry_b)
+        c['dist'] = d
+
+        # Base score from strength + confluence bonus
+        s_base = float(_safe_float(c.get('strength')) or 0.0) + float(_safe_float(c.get('bonus')) or 0.0)
+
+        # Proximity bonus for TP1 (realistic first take-profit)
+        prox = 0.0
+        if pd.notna(atr14) and float(atr14) > 0:
+            if 1.0 * float(atr14) <= d <= 3.0 * float(atr14):
+                prox = 1.0
+
+        # Payoff bonus for TP2 (room for breakout payoff)
+        payoff = 0.0
+        if pd.notna(atr14) and float(atr14) > 0:
+            if d >= 2.5 * float(atr14):
+                payoff = 1.0
+
+        # Breakout bias: prefer fib extensions (>=127.2) for TP2
+        ext_bias = 0.0
+        near100_pen = 0.0
+        if c.get('type') == 'Fib':
+            name = str(c.get('name', ''))
+            fib_k = name.split('_')[-1] if '_' in name else name
+            fk = _fib_key_num(fib_k)
+
+            is_100 = (pd.notna(fk) and (99.5 <= fk <= 100.5))
+            is_ext = (pd.notna(fk) and (fk >= 127.0))
+            if is_ext:
+                ext_bias = 1.0
+
+            # Penalize 100% if too close to entry (insufficient upside)
+            if is_100 and pd.notna(atr14) and float(atr14) > 0 and d < 1.0 * float(atr14):
+                near100_pen = -1.5
+
+        # Score for TP1 vs TP2
+        c['score_tp1'] = s_base + prox + 0.5 * ext_bias + near100_pen
+        c['score_tp2'] = s_base + payoff + 1.0 * ext_bias + near100_pen
+
+    best_tp1 = None
+    best_tp2 = None
+    try:
+        if tgt_cands:
+            best_tp1 = max(tgt_cands, key=lambda x: float(_safe_float(x.get('score_tp1')) or 0.0))
+            tp1_val_tmp = _safe_float(best_tp1.get('price')) if best_tp1 else np.nan
+
+            if pd.notna(tp1_val_tmp):
+                pool2 = [c for c in tgt_cands
+                         if pd.notna(_safe_float(c.get('price')))
+                         and float(_safe_float(c.get('price'))) > float(tp1_val_tmp) + (float(tol) if pd.notna(tol) else 0.0)]
+            else:
+                pool2 = list(tgt_cands)
+
+            best_tp2 = max(pool2, key=lambda x: float(_safe_float(x.get('score_tp2')) or 0.0)) if pool2 else None
+    except Exception:
+        best_tp1 = None
+        best_tp2 = None
+
+    tp1_label_b = best_tp1.get('name') if best_tp1 else None
+    tp1_val_b = _safe_float(best_tp1.get('price')) if best_tp1 else np.nan
+
+    tp2_label_b = best_tp2.get('name') if best_tp2 else None
+    tp2_val_b = _safe_float(best_tp2.get('price')) if best_tp2 else np.nan
+
+    # Breakout shows TP2 by default (Rule 1). TP1 saved in tags.
+    tp_label_b = None
+    if pd.notna(tp2_val_b):
+        tp_b = _round_price(tp2_val_b)
+        tp_label_b = tp2_label_b
+    elif pd.notna(tp1_val_b):
+        tp_b = _round_price(tp1_val_b)
+        tp_label_b = tp1_label_b
+        tp2_label_b = None
     else:
-        # fallback 3R
+        # fallback k·R by Class/Regime
         if pd.notna(entry_b) and pd.notna(stop_b) and entry_b > stop_b:
-            tp_b = _round_price(entry_b + 3.0 * (entry_b - stop_b))
+            k = _kr_fallback_mult('breakout', cclass=cclass, regime=regime)
+            tp_b = _round_price(entry_b + k * (entry_b - stop_b))
+            tp_label_b = f'Fallback_kR({cclass}/{regime},k={round(k,2)})'
+            tp1_label_b = None
+            tp2_label_b = None
         else:
             tp_b = np.nan
+            tp_label_b = None
+            tp1_label_b = None
+            tp2_label_b = None
 
     rr_b = _compute_rr(entry_b, stop_b, tp_b)
 
     tags_b: List[str] = []
-    if base_res_tag: tags_b.append(base_res_tag)
-    if stop_ref_tag_b != "N/A": tags_b.append(f"StopRef={stop_ref_tag_b}")
-    if pd.notna(vr): tags_b.append(f"VolRatio={round(vr,2)}")
-    if pd.notna(buf_b): tags_b.append("Buffer=Dynamic(ATR/Proxy)")
-    if tp_label_b: tags_b.append(f"TP=Fib{tp_label_b}")
+    if base_res_tag:
+        tags_b.append(base_res_tag)
+    if stop_ref_tag_b and stop_ref_tag_b != 'N/A':
+        tags_b.append(f'StopRef={stop_ref_tag_b}')
+    if pd.notna(vr):
+        tags_b.append(f'VolRatio={round(vr,2)}')
+    if pd.notna(buf_b):
+        tags_b.append('Buffer=Dynamic(ATR/Proxy)')
+    # Stop constraint debug tag (Rule 3)
+    if 'stop_constraint_tag' in locals():
+        tags_b.append(stop_constraint_tag)
+    if tp_label_b:
+        tags_b.append(f'TP={tp_label_b}')
+    if 'tp1_label_b' in locals() and tp1_label_b:
+        tags_b.append(f'TP1={tp1_label_b}')
+    if 'tp2_label_b' in locals() and tp2_label_b:
+        tags_b.append(f'TP2={tp2_label_b}')
+    tags_b.append(f'KRProfile={cclass}/{regime}')
 
-    status_b = "Watch"
+    status_b = 'Watch'
     if any(pd.isna([entry_b, stop_b, tp_b, rr_b])) or (entry_b <= stop_b) or (rr_b < 1.2):
-        status_b = "Invalid"
-        tags_b.append("Invalid=GeometryOrRR")
+        status_b = 'Invalid'
+        tags_b.append('Invalid=GeometryOrRR')
     else:
         near_entry = (abs(close - entry_b) / close * 100) <= 1.2 if (pd.notna(close) and close != 0) else False
         vol_ok = (vr >= 1.1) if pd.notna(vr) else True
         if near_entry and vol_ok:
-            status_b = "Active"
-            tags_b.append("Trigger=NearEntry")
+            status_b = 'Active'
+            tags_b.append('Trigger=NearEntry')
             if pd.notna(vr) and vr >= 1.1:
-                tags_b.append("Trigger=VolumeSupport")
+                tags_b.append('Trigger=VolumeSupport')
 
     prob_b = _probability_label_from_facts(df, rr_b, status_b, vr)
-    breakout = TradeSetup(
-        name="Breakout",
+    plans['Breakout'] = TradeSetup(
+        name='Breakout',
         entry=entry_b, stop=stop_b, tp=tp_b, rr=rr_b,
         probability=prob_b,
         status=status_b,
         reason_tags=tags_b
     )
-    plans["Breakout"] = breakout
 
     # ----------------------------
     # 2) PULLBACK PLAN
-    # Entry anchor: nearest support below close (prefer FibS_50 / FibS_38.2 / MA50 if available)
-    # Stop anchor: next support below entry (exclude entry anchor) - buffer
-    # TP: nearest fib above entry (else 2.6R fallback)
+    # Entry: strongest nearby support below close (Fib/MA/Anchors)
+    # Stop: strongest support below entry (next level down) - dynamic buffer
+    # TP: strongest target above entry (Fib/MA). If none → k·R fallback.
     # ----------------------------
-    entry_anchor_tag = "EntryAnchor=Fallback_Close"
+    entry_anchor_tag = 'EntryAnchor=Fallback_Close'
     entry_anchor_val = close
 
-    # Preferred candidates if below close
-    candidates: List[Tuple[str, float]] = []
-    if pd.notna(close):
-        for lab, val in [
-            ("FibS_50.0", _safe_float(fib_short.get("50.0"))),
-            ("FibS_38.2", _safe_float(fib_short.get("38.2"))),
-            ("MA50", _safe_float(last.get("MA50"))),
-            ("MA20", _safe_float(last.get("MA20"))),
-        ]:
-            if pd.notna(val) and val < close:
-                candidates.append((lab, float(val)))
+    entry_cands: List[Dict[str, Any]] = []
 
-    if candidates:
-        candidates.sort(key=lambda kv: abs(close - kv[1]))
-        entry_anchor_tag, entry_anchor_val = candidates[0]
-        entry_anchor_tag = f"EntryAnchor={entry_anchor_tag}"
-    else:
-        # fallback: nearest support below close from merged anchors
-        k_sup, v_sup = _nearest_support_below(anchors, close)
-        if pd.notna(v_sup):
-            entry_anchor_tag = f"EntryAnchor={k_sup}"
-            entry_anchor_val = v_sup
+    # fib/ma supports below close
+    for src_name, lv in [('FibS', fib_short), ('FibL', fib_long)]:
+        for k, v in (lv or {}).items():
+            pv = _safe_float(v)
+            if pd.isna(pv) or pd.isna(close):
+                continue
+            if pv >= close:
+                continue
+            fs = _fib_strength_from_key(k)
+            bonus = _confluence_bonus(pv, fib_prices_strong, ma_major_prices, tol)
+            # proximity bonus: closer to close preferred
+            prox = 0
+            if pd.notna(atr14) and atr14 > 0:
+                d = close - pv
+                if 0.5 * atr14 <= d <= 3.0 * atr14:
+                    prox = 1
+            entry_cands.append({'type': 'Fib', 'name': f'{src_name}_{k}', 'price': float(pv), 'score': float(fs + bonus + prox)})
+
+    for mn, mv in ma_vals.items():
+        if pd.notna(mv) and pd.notna(close) and mv < close:
+            ms = _ma_strength(df, mn, float(mv), close, tol)
+            bonus = _confluence_bonus(float(mv), fib_prices_strong, ma_major_prices, tol)
+            prox = 0
+            if pd.notna(atr14) and atr14 > 0:
+                d = close - float(mv)
+                if 0.5 * atr14 <= d <= 3.0 * atr14:
+                    prox = 1
+            entry_cands.append({'type': 'MA', 'name': mn, 'price': float(mv), 'score': float(ms + bonus + prox)})
+
+    # anchor fallback below close
+    k_sup_close, v_sup_close = _nearest_support_below(anchors, close)
+    if pd.notna(v_sup_close):
+        bonus = _confluence_bonus(float(v_sup_close), fib_prices_strong, ma_major_prices, tol)
+        entry_cands.append({'type': 'Anchor', 'name': f'{k_sup_close}', 'price': float(v_sup_close), 'score': float(2 + bonus)})
+
+    best_entry = _pick_best_anchor(entry_cands, entry=close, atr14=atr14)
+    if best_entry and pd.notna(best_entry.get('price')):
+        entry_anchor_val = float(best_entry.get('price'))
+        entry_anchor_tag = f"EntryAnchor={best_entry.get('name')}"
 
     entry_p = _round_price(entry_anchor_val) if pd.notna(entry_anchor_val) else np.nan
     buf_p = _buffer_price_dynamic(df, entry_p) if pd.notna(entry_p) else np.nan
 
-    # stop = nearest support below entry, excluding entry anchor value (so "next level down")
-    stop_ref_tag_p, stop_ref_val_p = _nearest_support_below(anchors, entry_p, exclude_vals=[entry_anchor_val])
-    if pd.isna(stop_ref_val_p):
-        # if no lower support, allow MA200 if below entry, else mark invalid by geometry later
-        ma200 = _safe_float(last.get("MA200"))
-        if pd.notna(ma200) and pd.notna(entry_p) and ma200 < entry_p and abs(ma200 - entry_anchor_val) > 1e-9:
-            stop_ref_tag_p, stop_ref_val_p = "MA200", float(ma200)
+    # Stop candidates below entry, excluding the chosen entry anchor price
+    stop_cands_p: List[Dict[str, Any]] = []
+    ex = float(entry_anchor_val) if pd.notna(entry_anchor_val) else None
+
+    def _push_fib_below_ex(src_name: str, lv: Dict[str, Any]):
+        for k, v in (lv or {}).items():
+            pv = _safe_float(v)
+            if pd.isna(pv) or pd.isna(entry_p):
+                continue
+            if pv >= entry_p:
+                continue
+            if ex is not None and abs(pv - ex) <= 1e-9:
+                continue
+            fs = _fib_strength_from_key(k)
+            bonus = _confluence_bonus(pv, fib_prices_strong, ma_major_prices, tol)
+            stop_cands_p.append({'type': 'Fib', 'name': f'{src_name}_{k}', 'price': float(pv), 'score': float(fs + bonus)})
+
+    _push_fib_below_ex('FibS', fib_short)
+    _push_fib_below_ex('FibL', fib_long)
+
+    for mn, mv in ma_vals.items():
+        if pd.notna(mv) and pd.notna(entry_p) and mv < entry_p:
+            if ex is not None and abs(float(mv) - ex) <= 1e-9:
+                continue
+            ms = _ma_strength(df, mn, float(mv), close, tol)
+            bonus = _confluence_bonus(float(mv), fib_prices_strong, ma_major_prices, tol)
+            stop_cands_p.append({'type': 'MA', 'name': mn, 'price': float(mv), 'score': float(ms + bonus)})
+
+    # fallback anchors below entry (exclude exact match)
+    k_sup_p, v_sup_p = _nearest_support_below(anchors, entry_p)
+    if pd.notna(v_sup_p) and (ex is None or abs(float(v_sup_p) - ex) > 1e-9):
+        bonus = _confluence_bonus(float(v_sup_p), fib_prices_strong, ma_major_prices, tol)
+        stop_cands_p.append({'type': 'Anchor', 'name': f'{k_sup_p}', 'price': float(v_sup_p), 'score': float(2 + bonus)})
+
+    best_stop_p = _pick_best_anchor(stop_cands_p, entry=entry_p, atr14=atr14)
+    stop_ref_tag_p = best_stop_p.get('name') if best_stop_p else 'N/A'
+    stop_ref_val_p = _safe_float(best_stop_p.get('price')) if best_stop_p else np.nan
 
     stop_p = _round_price(stop_ref_val_p - buf_p) if (pd.notna(stop_ref_val_p) and pd.notna(buf_p)) else np.nan
 
-    tp_label_p, tp_val_p = _nearest_above(levels_tp, entry_p) if pd.notna(entry_p) else (None, np.nan)
+    # Targets above entry
+    tgt_cands_p: List[Dict[str, Any]] = []
+
+    def _push_fib_above_p(src_name: str, lv: Dict[str, Any]):
+        for k, v in (lv or {}).items():
+            pv = _safe_float(v)
+            if pd.isna(pv) or pd.isna(entry_p):
+                continue
+            if pv <= entry_p:
+                continue
+            fs = _fib_strength_from_key(k)
+            bonus = _confluence_bonus(pv, fib_prices_strong, ma_major_prices, tol)
+            prox = 0
+            if pd.notna(atr14) and atr14 > 0:
+                d = pv - entry_p
+                if 1.0 * atr14 <= d <= 3.0 * atr14:
+                    prox = 1
+            tgt_cands_p.append({'type': 'Fib', 'name': f'{src_name}_{k}', 'price': float(pv), 'score': float(fs + bonus + prox)})
+
+    _push_fib_above_p('FibS', fib_short)
+    _push_fib_above_p('FibL', fib_long)
+
+    for mn, mv in ma_vals.items():
+        if pd.notna(mv) and pd.notna(entry_p) and mv > entry_p:
+            ms = _ma_strength(df, mn, float(mv), close, tol)
+            bonus = _confluence_bonus(float(mv), fib_prices_strong, ma_major_prices, tol)
+            prox = 0
+            if pd.notna(atr14) and atr14 > 0:
+                d = float(mv) - entry_p
+                if 1.0 * atr14 <= d <= 3.0 * atr14:
+                    prox = 1
+            tgt_cands_p.append({'type': 'MA', 'name': mn, 'price': float(mv), 'score': float(ms + bonus + prox)})
+
+    best_tp_p = _pick_best_anchor(tgt_cands_p, entry=entry_p, atr14=atr14)
+    tp_label_p = best_tp_p.get('name') if best_tp_p else None
+    tp_val_p = _safe_float(best_tp_p.get('price')) if best_tp_p else np.nan
+
     if pd.notna(tp_val_p):
         tp_p = _round_price(tp_val_p)
     else:
-        # fallback 2.6R
         if pd.notna(entry_p) and pd.notna(stop_p) and entry_p > stop_p:
-            tp_p = _round_price(entry_p + 2.6 * (entry_p - stop_p))
+            k = _kr_fallback_mult('pullback', cclass=cclass, regime=regime)
+            tp_p = _round_price(entry_p + k * (entry_p - stop_p))
+            tp_label_p = f'Fallback_kR({cclass}/{regime},k={round(k,2)})'
         else:
             tp_p = np.nan
 
     rr_p = _compute_rr(entry_p, stop_p, tp_p)
 
     tags_p: List[str] = [entry_anchor_tag]
-    if stop_ref_tag_p != "N/A": tags_p.append(f"StopRef={stop_ref_tag_p}")
-    if pd.notna(vr): tags_p.append(f"VolRatio={round(vr,2)}")
-    if pd.notna(buf_p): tags_p.append("Buffer=Dynamic(ATR/Proxy)")
-    if tp_label_p: tags_p.append(f"TP=Fib{tp_label_p}")
+    if stop_ref_tag_p and stop_ref_tag_p != 'N/A':
+        tags_p.append(f'StopRef={stop_ref_tag_p}')
+    if pd.notna(vr):
+        tags_p.append(f'VolRatio={round(vr,2)}')
+    if pd.notna(buf_p):
+        tags_p.append('Buffer=Dynamic(ATR/Proxy)')
+    if tp_label_p:
+        tags_p.append(f'TP={tp_label_p}')
+    tags_p.append(f'KRProfile={cclass}/{regime}')
 
-    status_p = "Watch"
+    status_p = 'Watch'
     if any(pd.isna([entry_p, stop_p, tp_p, rr_p])) or (entry_p <= stop_p) or (rr_p < 1.2):
-        status_p = "Invalid"
-        tags_p.append("Invalid=GeometryOrRR")
+        status_p = 'Invalid'
+        tags_p.append('Invalid=GeometryOrRR')
     else:
         near_entry = (abs(close - entry_p) / close * 100) <= 1.2 if (pd.notna(close) and close != 0) else False
         if near_entry:
-            status_p = "Active"
-            tags_p.append("Trigger=NearEntry")
+            status_p = 'Active'
+            tags_p.append('Trigger=NearEntry')
 
     prob_p = _probability_label_from_facts(df, rr_p, status_p, vr)
-    pullback = TradeSetup(
-        name="Pullback",
+    plans['Pullback'] = TradeSetup(
+        name='Pullback',
         entry=entry_p, stop=stop_p, tp=tp_p, rr=rr_p,
         probability=prob_p,
         status=status_p,
         reason_tags=tags_p
     )
-    plans["Pullback"] = pullback
 
     return plans
 # ============================================================
@@ -2190,7 +2815,7 @@ def build_rr_sim(trade_plans: Dict[str, TradeSetup]) -> Dict[str, Any]:
         reward_pct = ((tp - entry) / entry * 100) if (pd.notna(tp) and pd.notna(entry) and entry != 0) else np.nan
         rows.append({
             "Setup": k, "Entry": entry, "Stop": stop, "TP": tp, "RR": rr,
-            "RiskPct": risk_pct, "RewardPct": reward_pct, "Probability": s.probability,
+            "RiskPct": risk_pct, "RewardPct": reward_pct, "Confidence (Tech)": s.probability,
             "Status": status, "ReasonTags": list(getattr(s, "reason_tags", []) or [])
         })
         if pd.notna(rr):
@@ -2470,7 +3095,7 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
                 "Stop": _safe_float(v.stop),
                 "TP": _safe_float(v.tp),
                 "RR": _safe_float(v.rr),
-                "Probability": v.probability,
+                "Confidence (Tech)": v.probability,
                 "Status": getattr(v, "status", "Watch"),
                 "ReasonTags": list(getattr(v, "reason_tags", []) or [])
             } for k, v in trade_plans.items()
@@ -2500,7 +3125,8 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     # Primary Picker
     def pick_primary_setup_v2(rrsim: Dict[str, Any]) -> Dict[str, Any]:
         setups = rrsim.get("Setups", []) or []
-        if not setups: return {"Name": "N/A", "RiskPct": None, "RewardPct": None, "RR": None, "Probability": "N/A"}
+        if not setups:
+            return {"Name": "N/A", "RiskPct": None, "RewardPct": None, "RR": None, "Confidence (Tech)": "N/A"}
         def status_rank(s):
             stt = (s.get("Status") or "Watch").strip().lower()
             if stt == "active": return 0
@@ -2526,7 +3152,7 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
             "RiskPct": _safe_float(best.get("RiskPct")),
             "RewardPct": _safe_float(best.get("RewardPct")),
             "RR": _safe_float(best.get("RR")),
-            "Probability": best.get("Probability", "N/A")
+            "Confidence (Tech)": best.get("Confidence (Tech)", best.get("Probability", "N/A"))
         }
     
     primary = pick_primary_setup_v2(rrsim)
@@ -2647,9 +3273,105 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     vol = vol if isinstance(vol, dict) else {}
     pa = protech.get("PriceAction", {})
     pa = pa if isinstance(pa, dict) else {}
-    lvl = protech.get("LevelContext", {})
-    lvl = lvl if isinstance(lvl, dict) else {}
+    # Pre-read close/MA levels from Last pack (needed for LevelContext fallback inference)
+    close = _safe_float(last.get("Close"))
+    ma20 = _safe_float(last.get("MA20"))
+    ma50 = _safe_float(last.get("MA50"))
+    ma200 = _safe_float(last.get("MA200"))
 
+    # ---- Level Context (Support/Resistance distances) ----
+    # Depending on pipeline version, LevelContext may live in different locations.
+    # We MUST NOT accept an "empty" dict (or a dict with only null values), otherwise UpsidePower becomes N/A.
+    def _lvl_num(v: Any) -> float:
+        if v is None:
+            return np.nan
+        if isinstance(v, dict):
+            v = v.get("Value")
+        return _safe_float(v)
+
+    def _lvl_strength(d: Any) -> int:
+        if not isinstance(d, dict) or len(d) == 0:
+            return 0
+        # count how many expected fields have finite numeric content
+        keys = [
+            "NearestResistance", "NearestSupport",
+            "UpsideToResistance", "DownsideToSupport",
+            # common alternates
+            "Upside", "Downside",
+            "Resistance", "Support",
+        ]
+        score = 0
+        for k in keys:
+            if k in d:
+                x = _lvl_num(d.get(k))
+                if pd.notna(x):
+                    score += 1
+        return score
+
+    lvl_source = "None"
+    lvl: Dict[str, Any] = {}
+
+    _candidates = [
+        ("ProTech.LevelContext", protech.get("LevelContext")),
+        ("Top.LevelContext", ap.get("LevelContext")),
+        ("ProTech.Levels", protech.get("Levels")),
+        ("Top.Levels", ap.get("Levels")),
+    ]
+
+    best_score = 0
+    best_name = "None"
+    best_cand = None
+    for _name, _cand in _candidates:
+        s = _lvl_strength(_cand)
+        if s > best_score:
+            best_score, best_name, best_cand = s, _name, _cand
+
+    if best_score > 0 and isinstance(best_cand, dict):
+        lvl = best_cand
+        lvl_source = best_name
+
+    # Final safety net: infer nearest S/R locally (MA levels + recent swing high/low)
+    # This guarantees Upside/Downside when upstream packs are absent.
+    if not isinstance(lvl, dict) or len(lvl) == 0:
+        def _infer_nearest_sr(_df: pd.DataFrame, _close: float,
+                              _ma20: float, _ma50: float, _ma200: float,
+                              lookback: int = 60) -> Tuple[float, float]:
+            if _df is None or not isinstance(_df, pd.DataFrame) or _df.empty or pd.isna(_close):
+                return (np.nan, np.nan)
+
+            # Candidates from MA levels (if available)
+            ma_vals = [x for x in [_ma20, _ma50, _ma200] if pd.notna(x)]
+            res_cands = [x for x in ma_vals if x > _close]
+            sup_cands = [x for x in ma_vals if x < _close]
+
+            # Candidates from recent swing extremes (robust fallback)
+            try:
+                if "High" in _df.columns:
+                    hh = float(pd.to_numeric(_df["High"], errors="coerce").tail(lookback).max())
+                    # If price is at/near a recent high, treat it as the nearest "resistance" (upside room ~ 0).
+                    # This avoids UpsidePower=N/A when the stock is making new highs within lookback.
+                    if pd.notna(hh) and hh >= _close:
+                        res_cands.append(hh)
+                if "Low" in _df.columns:
+                    ll = float(pd.to_numeric(_df["Low"], errors="coerce").tail(lookback).min())
+                    if pd.notna(ll) and ll < _close:
+                        sup_cands.append(ll)
+            except Exception:
+                pass
+
+            nearest_res = min(res_cands) if res_cands else np.nan
+            nearest_sup = max(sup_cands) if sup_cands else np.nan
+            return (nearest_res, nearest_sup)
+
+        _nr, _ns = _infer_nearest_sr(df, close, ma20, ma50, ma200, lookback=60)
+        if pd.notna(_nr) or pd.notna(_ns):
+            lvl = {
+                "NearestResistance": {"Value": _nr} if pd.notna(_nr) else None,
+                "NearestSupport": {"Value": _ns} if pd.notna(_ns) else None,
+                "UpsideToResistance": (max(0.0, _nr - close) if (pd.notna(_nr) and pd.notna(close)) else np.nan),
+                "DownsideToSupport": (max(0.0, close - _ns) if (pd.notna(_ns) and pd.notna(close)) else np.nan),
+            }
+            lvl_source = "Local.Infer"
     fib_ctx = ap.get("FibonacciContext", {})
     fib_ctx = fib_ctx if isinstance(fib_ctx, dict) else {}
     # prefer nested AnalysisPack["Fibonacci"]["Context"] if available
@@ -2722,6 +3444,24 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     upside_n = upside / denom if pd.notna(denom) and denom > 0 else np.nan
     downside_n = downside / denom if pd.notna(denom) and denom > 0 else np.nan
     rr = (upside / downside) if (pd.notna(upside) and pd.notna(downside) and downside > 0) else _safe_float(primary.get("RR"))
+
+    # If we have a valid downside but no resistance/upside, infer an upside target from RR.
+    # This prevents UpsidePower=N/A in "open sky" cases (new highs / no nearby resistance).
+    # Conservative approach: only infer when RR is explicitly available and downside>0.
+    if pd.isna(upside) and pd.notna(rr) and pd.notna(downside) and downside > 0 and pd.notna(close):
+        try:
+            upside = float(rr) * float(downside)
+            if pd.isna(nearest_res):
+                nearest_res = float(close) + float(upside)
+            if isinstance(lvl, dict):
+                lvl["NearestResistance"] = {"Value": float(nearest_res)}
+                lvl["UpsideToResistance"] = float(upside)
+                # keep existing support if present
+            # recompute normalized upside
+            if pd.notna(denom) and denom > 0:
+                upside_n = upside / denom
+        except Exception:
+            pass
     fib_conflict = False
     try:
         fc = fib_ctx if isinstance(fib_ctx, dict) else {}
@@ -2858,7 +3598,35 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     rsi_ok = 2.5 if (pd.notna(rsi14) and rsi14 >= 50) else 1.2
     support_resilience = _clip(conf + absorption + rsi_ok, 0, 10)
 
+    # Upside quality (0–10): keep UpsidePower as raw "room", then score a quality-adjusted variant.
+    # - Confidence (Tech) acts as a stabilizer: High > Medium > Low.
+    # - BreakoutForce / VolumeRatio / RR reinforce quality (not room).
+    ps = ap.get("PrimarySetup") or {}
+    conf_label = _safe_text(ps.get("Confidence (Tech)", ps.get("Probability", ""))).strip().lower()
+
+    conf_mult = 1.0
+    if "high" in conf_label:
+        conf_mult = 1.15
+    elif "med" in conf_label:
+        conf_mult = 1.00
+    elif "low" in conf_label:
+        conf_mult = 0.80
+
+    m_breakout = 0.85 + 0.30 * (float(breakout_force) / 10.0)
+    m_vol = 1.0
+    if pd.notna(vol_ratio):
+        m_vol = 0.90 + 0.20 * _clip((float(vol_ratio) - 0.80) / 1.80, 0, 1)
+    m_rr = 1.0
+    if pd.notna(rr):
+        m_rr = 0.90 + 0.20 * _clip((float(rr) - 1.20) / 3.00, 0, 1)
+
+    total_mult = _clip(conf_mult * m_breakout * m_vol * m_rr, 0.65, 1.35)
+    upside_quality = _clip(float(_clip(upside_power, 0, 10)) * float(total_mult), 0, 10)
+
     combat_stats = {
+        # Naming: UpsidePower is kept for backward compatibility; UI should call it "Upside Room".
+        "UpsideRoom": float(_clip(upside_power, 0, 10)),
+        "UpsideQuality": float(upside_quality),
         "UpsidePower": float(_clip(upside_power, 0, 10)),
         "DownsideRisk": float(downside_risk),
         "RREfficiency": float(_clip(rr_eff, 0, 10)),
@@ -3252,6 +4020,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     # ===== Liquidity & Tradability (LT) — higher = more tradable =====
     liq_tradability = 5.0
     dv20 = amihud20 = vol_cv20 = np.nan
+    dv_score = ami_score = cv_score = 5.0
     if _n >= 120 and pd.notna(c.iloc[-1]) and len(v.dropna()) >= 60:
         dollar_vol = (c * v).replace([np.inf, -np.inf], np.nan)
         dv20_s = dollar_vol.rolling(20, min_periods=20).median()
@@ -3272,6 +4041,61 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         cv_score = _clip(((1.0 - cv_pct) * 10.0) if np.isfinite(cv_pct) else 5.0, 0, 10)
 
         liq_tradability = _clip(0.50*dv_score + 0.30*ami_score + 0.20*cv_score, 0, 10)
+
+    # ===== Drawdown & Recovery (DR) — higher = worse (riskier) =====
+    mdd_abs = dd_freq = rec_days = np.nan
+    mdd_risk = dd_freq_risk = rec_risk = 5.0
+    if _n >= 260 and len(c.dropna()) >= 260:
+        c2 = c.dropna()
+        roll_max = c2.cummax()
+        dd = (c2 / roll_max) - 1.0
+        mdd = float(dd.min()) if len(dd) else np.nan
+        mdd_abs = abs(mdd) * 100.0 if np.isfinite(mdd) else np.nan
+    
+        # Count drawdown "episodes" deeper than -10%
+        thresh = -0.10
+        below = (dd <= thresh).astype(int)
+        dd_events = int(((below.diff() == 1).sum())) if len(below) > 1 else 0
+        years = max(1.0, float(len(dd)) / 252.0)
+        dd_freq = float(dd_events) / years
+    
+        # Recovery speed: median days from DD episode start back to prior peak
+        rec_days_list: List[int] = []
+        in_dd = False
+        start_i = None
+        peak_val = None
+        vals = c2.values
+        peaks = roll_max.values
+        for i in range(len(vals)):
+            ddv = float(dd.iloc[i])
+            if (not in_dd) and (ddv <= thresh):
+                in_dd = True
+                start_i = i
+                peak_val = float(peaks[i])
+            if in_dd and peak_val and (vals[i] >= peak_val * 0.999):
+                rec_days_list.append(int(i - (start_i or 0)))
+                in_dd = False
+                start_i = None
+                peak_val = None
+        if rec_days_list:
+            rec_days = float(np.median(rec_days_list))
+    
+        mdd_risk = _score_from_bins(mdd_abs, bins=[12, 20, 30, 45], scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+        dd_freq_risk = _score_from_bins(dd_freq, bins=[0.5, 1.2, 2.5, 4.0], scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+        rec_risk = _score_from_bins(rec_days, bins=[20, 45, 90, 150], scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    
+    # Autocorrelation (lag-1) — momentum vs mean-reversion tendency (higher = more momentum)
+    autocorr1 = np.nan
+    autocorr_score = 5.0
+    try:
+        _ret = c.pct_change().dropna()
+        if len(_ret) >= 260:
+            autocorr1 = float(_ret.tail(756).autocorr(lag=1))
+            autocorr_score = _score_from_bins(autocorr1, bins=[-0.15, -0.05, 0.05, 0.15],
+                                              scores=[2.0, 4.0, 6.0, 8.0, 10.0])
+    except Exception:
+        pass
+
 
     stock_traits = {
         "TrendIntegrity": float(trend_integrity),
@@ -3322,20 +4146,118 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         "StabilityAdj": float(stability_adj),
         "ReliabilityAdj": float(reliability_adj)
     }
+    # Character class (2-tier DNA taxonomy; stable, long-run oriented)
+    # Tier-1: StyleAxis ∈ {"Trend","Momentum","Range","Hybrid"}; RiskRegime ∈ {"Low","Mid","High"}
+    # Tier-2: 6–8 classes mapped via thresholds (designed to be stable, not "current snapshot").
+    # Notes:
+    # - Risk metrics (VolRisk/TailGapRisk/Drawdown*) are "higher = worse".
+    # - Style metrics (TrendIntegrity/BreakoutQuality/MeanReversion*) define how the stock typically trades.
+    def _tier1_style() -> str:
+        # Momentum attempt dominates only when breakout quality + momentum are persistent.
+        if (breakout_quality >= 6.8 and momentum_adj >= 6.5 and meanrev_prop <= 6.5):
+            return "Momentum"
+        if (meanrev_prop >= 6.8 or whipsaw or (autocorr1 is not None and np.isfinite(autocorr1) and autocorr1 <= -0.05)):
+            return "Range"
+        if (trend_integrity >= 6.7 and meanrev_prop <= 5.7 and (autocorr1 is None or (not np.isfinite(autocorr1)) or autocorr1 >= -0.02)):
+            return "Trend"
+        return "Hybrid"
 
+    def _tier1_risk() -> Tuple[str, float]:
+        risks = []
+        for x in [vol_risk, tail_risk, mdd_risk, rec_risk]:
+            try:
+                xv = float(x)
+                if np.isfinite(xv):
+                    risks.append(xv)
+            except Exception:
+                pass
+        rscore = float(np.mean(risks)) if risks else 5.0
+        if rscore <= 4.5:
+            return "Low", rscore
+        if rscore >= 6.5:
+            return "High", rscore
+        return "Mid", rscore
 
-    # Character class (traits-aware, non-invasive; reports A–D unaffected)
-    # Rules are applied in order (top-down).
-    if (trend_adj >= 7 and stability_adj >= 7 and trend_integrity >= 7 and tail_risk <= 4):
-        cclass = "Trend Tank"
-    elif ((momentum_adj >= 7 and stability_adj <= 5) or (tail_risk >= 7) or (vol_risk >= 7)):
+    style_axis = _tier1_style()
+    risk_regime, risk_score = _tier1_risk()
+
+    # Tier-2 mapping (ordered rules)
+    if (risk_regime == "High" and (tail_risk >= 7.5 or vol_risk >= 7.5 or mdd_risk >= 7.5)):
         cclass = "Glass Cannon"
-    elif (trend_adj >= 6 and momentum_adj >= 6 and rr_eff >= 7 and breakout_quality >= 6 and meanrev_prop <= 6):
+    elif (style_axis == "Trend" and risk_regime == "Low" and trend_integrity >= 7.0 and stability_adj >= 6.8 and tail_risk <= 5.5):
+        cclass = "Trend Tank"
+    elif (risk_regime == "Low" and reliability_adj >= 7.0 and stability_adj >= 6.5 and liq_tradability >= 6.0):
+        cclass = "Defensive Anchor"
+    elif (style_axis == "Momentum" and risk_regime == "High" and breakout_quality >= 7.2 and rr_eff >= 6.5 and tail_risk <= 7.5):
+        cclass = "Breakout Sprinter"
+    elif (style_axis == "Momentum" and risk_regime in ("Low", "Mid") and breakout_quality >= 6.5 and rr_eff >= 6.5 and trend_integrity >= 6.0):
         cclass = "Momentum Fighter"
-    elif (whipsaw or meanrev_prop >= 7 or (trend_adj <= 4 and reliability_adj <= 5)):
+    elif (style_axis == "Range" and risk_regime == "Low" and meanrev_prop >= 6.8 and liq_tradability >= 6.0):
+        cclass = "Mean-Revert Grinder"
+    elif (style_axis == "Range" and meanrev_prop >= 6.5):
         cclass = "Range Rogue"
     else:
         cclass = "Balanced"
+
+# Enrich StockTraits with stable 2-tier DNA taxonomy + 15-parameter pack (for Python tagging & UI)
+    try:
+        stock_traits.setdefault("DNA", {})
+        stock_traits["DNA"]["Tier1"] = {
+            "StyleAxis": str(style_axis),
+            "RiskRegime": str(risk_regime),
+            "RiskScore": float(risk_score) if np.isfinite(risk_score) else np.nan,
+        }
+        stock_traits["DNA"]["Params"] = {
+            # Group 1: Trend Structure (higher = better)
+            "TrendIntegrity": float(trend_integrity),
+            "TrendPersistence": float(ti_pct_score),
+            "TrendChurnControl": float(ti_flip_score),
+    
+            # Group 2: Volatility & Tail (higher = worse)
+            "VolRisk": float(vol_risk),
+            "TailGapRisk": float(tail_risk),
+            "VolOfVolRisk": float(vs_vov_risk),
+    
+            # Group 3: Drawdown & Recovery (higher = worse)
+            "MaxDrawdownRisk": float(mdd_risk),
+            "RecoverySlownessRisk": float(rec_risk),
+            "DrawdownFrequencyRisk": float(dd_freq_risk),
+    
+            # Group 4: Liquidity & Tradability (higher = better)
+            "LiquidityTradability": float(liq_tradability),
+            "LiquidityLevel": float(dv_score),
+            "LiquidityConsistency": float(cv_score),
+    
+            # Group 5: Behavior / Setup Bias
+            "BreakoutQuality": float(breakout_quality),
+            "MeanReversionWhipsaw": float(meanrev_prop),
+            "AutoCorrMomentum": float(autocorr_score),
+        }
+        stock_traits["DNA"]["Groups"] = {
+            "TrendStructure": ["TrendIntegrity", "TrendPersistence", "TrendChurnControl"],
+            "VolatilityTail": ["VolRisk", "TailGapRisk", "VolOfVolRisk"],
+            "DrawdownRecovery": ["MaxDrawdownRisk", "RecoverySlownessRisk", "DrawdownFrequencyRisk"],
+            "LiquidityTradability": ["LiquidityTradability", "LiquidityLevel", "LiquidityConsistency"],
+            "BehaviorSetup": ["BreakoutQuality", "MeanReversionWhipsaw", "AutoCorrMomentum"],
+        }
+        # Store extra raw metrics (optional diagnostics)
+        stock_traits.setdefault("Raw", {})
+        stock_traits["Raw"].update({
+            "RealizedVolPct": float(rv) if np.isfinite(rv) else np.nan,
+            "ATRpct": float(atr_pct) if np.isfinite(atr_pct) else np.nan,
+            "VolOfVol": float(vol_of_vol) if np.isfinite(vol_of_vol) else np.nan,
+            "TRExpansionRate": float(exp_rate) if np.isfinite(exp_rate) else np.nan,
+            "LeftTailFreq": float(left_tail_freq) if np.isfinite(left_tail_freq) else np.nan,
+            "ES5AbsPct": float(es5_abs) if np.isfinite(es5_abs) else np.nan,
+            "GapFreq": float(gap_freq) if np.isfinite(gap_freq) else np.nan,
+            "MaxDrawdownAbsPct": float(mdd_abs) if np.isfinite(mdd_abs) else np.nan,
+            "DrawdownEpisodesPerYear": float(dd_freq) if np.isfinite(dd_freq) else np.nan,
+            "RecoveryDaysMedian": float(rec_days) if np.isfinite(rec_days) else np.nan,
+            "AutoCorr1": float(autocorr1) if np.isfinite(autocorr1) else np.nan,
+        })
+    except Exception:
+        # Hard-fail is not allowed; keep backward compatibility.
+        pass
 
     # Action tags (lightweight, for GPT/UI)
     tags = []
@@ -3372,6 +4294,15 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         "ActionTags": tags,
         "Meta": {
             "DenomUsed": "ATR14" if atr_pos else "VolProxy",
+            "ConfidenceTech": ps.get("Confidence (Tech)", ps.get("Probability", "N/A")),
+            "UpsideQualityMult": float(total_mult) if pd.notna(total_mult) else np.nan,
+            "LevelCtxSource": lvl_source,
+            "LevelCtxKeys": ",".join(list(lvl.keys())[:8]) if isinstance(lvl, dict) else "",
+            "Close": float(close) if pd.notna(close) else np.nan,
+            "NearestRes": float(nearest_res) if pd.notna(nearest_res) else np.nan,
+            "NearestSup": float(nearest_sup) if pd.notna(nearest_sup) else np.nan,
+            "UpsideRaw": float(upside) if pd.notna(upside) else np.nan,
+            "DownsideRaw": float(downside) if pd.notna(downside) else np.nan,
             "ATR14": atr_f if (atr_f is not None) else np.nan,
             "VolProxy": float(vol_proxy) if pd.notna(vol_proxy) else np.nan,
             "UpsideNorm": float(upside_n) if pd.notna(upside_n) else np.nan,
@@ -3390,6 +4321,22 @@ def _character_blurb_fallback(ticker: str, cclass: str) -> str:
                 f"ưu tiên các chiến lược theo trend, gom khi điều chỉnh và giữ vị thế khi cấu trúc còn khỏe. "
                 f"Không phù hợp với kiểu lướt lát quá ngắn hoặc bắt đáy ngược trend. Hành vi thường gặp là "
                 f"bật lại tốt khi về vùng hỗ trợ động và duy trì nhịp tăng đều nếu dòng tiền không suy yếu.")
+
+    if cc == "Defensive Anchor":
+        return (f"{name} thuộc nhóm phòng thủ, ưu tiên độ bền và tính nhất quán. Giá thường vận động có kỷ luật, "
+                f"ít có các nhịp sốc và phù hợp với chiến lược tích lũy theo vùng hỗ trợ, giữ vị thế khi cấu trúc còn vững. "
+                f"Không phù hợp với kiểu đánh đòn bẩy cao hoặc săn biến động cực ngắn. Hành vi thường gặp là đi lên từ tốn, "
+                f"rung lắc vừa phải rồi tiếp tục xu hướng nếu dòng tiền không suy yếu.")
+    if cc == "Breakout Sprinter":
+        return (f"{name} thuộc nhóm thiên về bứt phá theo nhịp ngắn, khi có tín hiệu thì chạy nhanh nhưng cũng dễ đảo chiều. "
+                f"Phù hợp với trader đánh breakout có xác nhận, vào lệnh dứt khoát và chốt lời chủ động theo từng phần. "
+                f"Không phù hợp với nhà đầu tư muốn sự êm và nắm giữ dài trong giai đoạn thị trường nhiễu. Hành vi thường gặp là "
+                f"nén rồi bung mạnh, sau đó có nhịp retest hoặc rung lắc sâu nếu lực cầu không duy trì.")
+    if cc == "Mean-Revert Grinder":
+        return (f"{name} thuộc nhóm dao động trong biên nhưng kiểm soát rủi ro tương đối tốt. Cổ phiếu thường quay về vùng cân bằng "
+                f"sau các nhịp lệch khỏi biên, phù hợp với chiến lược mua gần hỗ trợ và bán gần kháng cự khi có tín hiệu đảo chiều. "
+                f"Không phù hợp với kiểu mua đuổi giữa biên hoặc kỳ vọng chạy trend dài liên tục. Hành vi thường gặp là lên–xuống có nhịp, "
+                f"cần kỷ luật điểm vào và điểm ra theo khung đã định.")
     if cc == "Glass Cannon":
         return (f"{name} thuộc nhóm biến động mạnh, tăng nhanh khi có hưng phấn và cũng dễ rung lắc sâu. "
                 f"Phù hợp với trader đánh momentum, phản xạ nhanh, kỷ luật stop-loss và chốt lời từng phần. "
@@ -3453,21 +4400,26 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
 
     ticker = _safe_text(cp.get('_Ticker') or '').strip().upper()
     headline = f"{ticker} - {cclass}" if ticker else str(cclass)
-    blurb = get_character_blurb(ticker, str(cclass))
+    class_key = str(cclass).strip()
+    dash_lines: List[str] = (CLASS_TEMPLATES_DASHBOARD.get(class_key) or []).copy()
+    if not dash_lines:
+        # Fallback: keep Dashboard readable even if class is unknown
+        fallback = get_character_blurb(ticker, class_key)
+        if fallback:
+            dash_lines = [f"Đặc tính: {fallback}"]
+        else:
+            dash_lines = [f"Đặc tính: {class_key}"]
 
-    # Prepare class label + blurb paragraphs for STOCK DNA section
-    class_label = f"CLASS: {cclass}"
-    blurb_paragraphs: List[str] = []
-    if str(cclass).strip().lower() == "glass cannon":
-        # Custom 3-paragraph structure for Glass Cannon class (layout only)
-        blurb_paragraphs = [
-            "Cổ phiếu thuộc nhóm Glass Cannon thường được biết đến với khả năng tăng trưởng mạnh mẽ nhưng cũng đi kèm với mức độ rủi ro cao. Những cổ phiếu này thường có biến động giá nhanh chóng và có thể dễ dàng bị ảnh hưởng bởi các yếu tố thị trường hoặc thông tin đột biến.",
-            "Nhóm cổ phiếu Glass Cannon thường dao động mạnh trong một biên độ hẹp trước khi có những cú bật lên hoặc giảm mạnh tại các ngưỡng hỗ trợ và kháng cự quan trọng. Điều này đòi hỏi nhà đầu tư phải có khả năng phân tích kỹ thuật tốt và phản ứng nhanh với các tín hiệu thị trường.",
-            "Đây là loại cổ phiếu thường thu hút những nhà đầu tư ưa mạo hiểm, những người theo trường phái giao dịch ngắn hạn và có khả năng chấp nhận rủi ro cao.",
-        ]
-    elif blurb:
-        blurb_paragraphs = [str(blurb)]
+    def _fmt_bline(s: str) -> str:
+        s = (s or "").strip()
+        if not s:
+            return ""
+        if ":" in s:
+            k, v = s.split(":", 1)
+            return f'<div class="gc-bline"><b>{html.escape(k.strip())}:</b> {html.escape(v.strip())}</div>'
+        return f'<div class="gc-bline">{html.escape(s)}</div>'
 
+    blurb_html = "".join([_fmt_bline(x) for x in dash_lines if str(x).strip()])
     # Show runtime error (if CharacterPack fallback was used)
     if err:
         st.error(f"Character module error: {err}")
@@ -3477,26 +4429,76 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
                 st.code(str(tb))
 
 
-    def bar(label: str, val: float, maxv: float = 10.0):
-        v = 0.0 if pd.isna(val) else float(val)
-        pct = _clip(v / maxv * 100, 0, 100)
-        st.markdown(
-            f"""
-            <div class="gc-row">
-              <div class="gc-k">{label}</div>
-              <div class="gc-bar"><div class="gc-fill" style="width:{pct:.0f}%"></div></div>
-              <div class="gc-v">{v:.1f}/{maxv:.0f}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    def _radar_svg(stats: List[Tuple[str, float]], maxv: float = 10.0, size: int = 220) -> str:
+        """Return an inline SVG radar chart (0–maxv) for the Character Card."""
+        n = len(stats)
+        if n < 3:
+            return ""
+        cx = cy = size / 2.0
+        r = size * 0.34
+        angles = [(-math.pi / 2.0) + i * (2.0 * math.pi / n) for i in range(n)]
+
+        def pt(angle: float, radius: float) -> Tuple[float, float]:
+            return (cx + radius * math.cos(angle), cy + radius * math.sin(angle))
+
+        # Normalize values
+        vals: List[float] = []
+        for _, v in stats:
+            vv = 0.0 if pd.isna(v) else float(v)
+            vv = float(_clip(vv, 0.0, maxv))
+            vals.append(vv)
+
+        # Grid polygons
+        grid_levels = [2, 4, 6, 8, 10]
+        grid_polys = []
+        for lv in grid_levels:
+            rr = r * (lv / maxv)
+            pts = [pt(a, rr) for a in angles]
+            grid_polys.append(" ".join([f"{x:.1f},{y:.1f}" for x, y in pts]))
+
+        # Axis endpoints
+        axis_pts = [pt(a, r) for a in angles]
+
+        # Data polygon
+        data_pts = [pt(angles[i], r * (vals[i] / maxv)) for i in range(n)]
+        data_points = " ".join([f"{x:.1f},{y:.1f}" for x, y in data_pts])
+
+        # Labels
+        label_pts = [pt(a, r + 28) for a in angles]
+
+        parts: List[str] = []
+        parts.append(f'<svg class="gc-radar-svg" viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg">')
+        # grid
+        for poly in grid_polys:
+            parts.append(f'<polygon points="{poly}" fill="none" stroke="#E5E7EB" stroke-width="1" />')
+        # axes
+        for (x, y) in axis_pts:
+            parts.append(f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{x:.1f}" y2="{y:.1f}" stroke="#CBD5E1" stroke-width="1" />')
+        # data
+        parts.append(f'<polygon points="{data_points}" fill="rgba(15,23,42,0.12)" stroke="#0F172A" stroke-width="2" />')
+        # points
+        for (x, y) in data_pts:
+            parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.2" fill="#0F172A" />')
+        # labels
+        for i, (lx, ly) in enumerate(label_pts):
+            lab = html.escape(str(stats[i][0]))
+            # anchor by horizontal position
+            anchor = "middle"
+            if lx < cx - 10:
+                anchor = "end"
+            elif lx > cx + 10:
+                anchor = "start"
+            parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" font-size="12" font-weight="700" fill="#334155">{lab}</text>')
+        parts.append('</svg>')
+        return "".join(parts)
+
 
     st.markdown(
         f"""
         <div class="gc-card">
           <div class="gc-head">
             <div class="gc-h1">{html.escape(str(headline))}</div>
-            <div class="gc-blurb">{html.escape(str(blurb))}</div>
+            <div class="gc-blurb">{blurb_html}</div>
           </div>
         """,
         unsafe_allow_html=True
@@ -3507,21 +4509,40 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     if cp.get("Error"):
         st.warning(f"Character module error: {cp.get('Error')}")
 
-    st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
-    bar("Trend", core.get("Trend"))
-    bar("Momentum", core.get("Momentum"))
-    bar("Stability", core.get("Stability"))
-    bar("Reliability", core.get("Reliability"))
-    bar("Liquidity", core.get("Liquidity"))
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Dashboard Class Signature (Radar) — 5 metrics (mixed Core + Combat) that best describe the Class
+    radar_stats: List[Tuple[str, float]] = [
+        ("Trend", core.get("Trend")),
+        ("Momentum", core.get("Momentum")),
+        ("Stability", core.get("Stability")),
+        ("Upside", combat.get("UpsidePower")),
+        ("Risk", combat.get("DownsideRisk")),
+    ]
+    svg = _radar_svg(radar_stats, maxv=10.0, size=220)
 
-    st.markdown('<div class="gc-sec"><div class="gc-sec-t">COMBAT STATS</div>', unsafe_allow_html=True)
-    bar("Upside Power", combat.get("UpsidePower"))
-    bar("Downside Risk", combat.get("DownsideRisk"))
-    bar("RR Efficiency", combat.get("RREfficiency"))
-    bar("Breakout Force", combat.get("BreakoutForce"))
-    bar("Support Resilience", combat.get("SupportResilience"))
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Side metrics list (keep numbers traceable, do not decide here)
+    _metrics_html_parts: List[str] = []
+    for lab, val in radar_stats:
+        vv = 0.0 if pd.isna(val) else float(val)
+        vv = float(_clip(vv, 0.0, 10.0))
+        _metrics_html_parts.append(
+            f'<div class="gc-radar-item"><span class="gc-radar-lab">{html.escape(str(lab))}</span>'
+            f'<span class="gc-radar-val">{vv:.1f}/10</span></div>'
+        )
+    metrics_html = "".join(_metrics_html_parts)
+
+    st.markdown(
+        f'''
+        <div class="gc-sec">
+          <div class="gc-sec-t">CLASS SIGNATURE</div>
+          <div class="gc-radar-wrap">
+            {svg}
+            <div class="gc-radar-metrics">{metrics_html}</div>
+          </div>
+        </div>
+        ''',
+        unsafe_allow_html=True
+    )
+
 
     tier = conv.get("Tier", "N/A")
     pts = conv.get("Points", np.nan)
@@ -3592,10 +4613,55 @@ CLASS_TEMPLATES: Dict[str, List[str]] = {
         "Nhà đầu tư phù hợp với nhóm này thường ưa phong cách giao dịch theo biên độ, kiên nhẫn chờ mua gần vùng hỗ trợ rõ và chốt lời gần vùng kháng cự, chấp nhận biên lợi nhuận vừa phải nhưng lặp lại nhiều lần. Các chiến lược buy low – sell high trong hộp giá, dùng stoploss khi giá đóng cửa ra khỏi vùng biên và hạn chế đòn bẩy thường dễ chiến thắng. Ngược lại, các chiến lược đuổi theo breakout/breakdown mà không có xác nhận thêm, kỳ vọng xu hướng kéo dài trong khi cấu trúc vẫn sideway hoặc liên tục vào/ra giữa vùng giữa hộp giá thường dễ thất bại.",
         "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát việc xác định và cập nhật vùng hỗ trợ/kháng cự biên trên – biên dưới, dạng nến và khối lượng mỗi lần giá chạm biên. Việc theo dõi số lần phá vỡ giả, khối lượng đi kèm các cú phá biên, và cách giá cư xử ở vùng giữa hộp giá giúp phân biệt khi nào nên tiếp tục trade trong biên, khi nào nên đứng ngoài hoặc chuẩn bị cho kịch bản chuyển sang một xu hướng mới.",
     ],
+
+"Defensive Anchor": [
+    "Đặc tính: Phòng thủ tốt, biến động thấp, thường giữ nhịp ổn định ngay cả khi thị trường nhiễu.",
+    "Phù hợp: NĐT ưu tiên bảo toàn vốn, ưa nhịp tăng chậm nhưng chắc, ít chịu stress.",
+    "Chiến thuật: Accumulate & Protect. Mua theo lớp khi về hỗ trợ, giữ vị thế khi cấu trúc còn vững.",
+],
+"Breakout Sprinter": [
+    "Đặc tính: Thiên về cú bứt phá ngắn hạn; khi chạy rất nhanh nhưng rủi ro đảo chiều cũng cao.",
+    "Phù hợp: Trader đánh breakout/sự kiện, phản xạ nhanh, chấp nhận rung lắc để đổi tốc độ.",
+    "Chiến thuật: Breakout timing. Chỉ vào khi có follow-through + Volume; chốt lời từng phần nhanh.",
+],
+"Mean-Revert Grinder": [
+    "Đặc tính: Sideway có biên nhưng kiểm soát rủi ro tốt hơn. Hay quay về mức cân bằng theo nhịp lặp lại.",
+    "Phù hợp: Trader kỷ luật, kiên nhẫn, thích đánh trong biên với tần suất vừa phải.",
+    "Chiến thuật: Mean-reversion swing. Mua gần đáy biên + tín hiệu đảo chiều; bán gần đỉnh biên.",
+],
     "Balanced": [
         "Cổ phiếu nhóm này thường thể hiện sự cân bằng giữa tăng trưởng và rủi ro, mức biến động trung bình và hành vi giá tương đối sạch so với các nhóm quá phòng thủ hoặc quá biến động. Giá của cổ phiếu nhóm này thường tôn trọng khá tốt các vùng hỗ trợ/kháng cự và các đường trung bình động chính, nhịp điều chỉnh hiếm khi quá sâu nhưng cũng không quá nông, tạo nên cấu trúc giá tương đối dễ theo dõi.",
         "Nhà đầu tư phù hợp với nhóm này thường tìm kiếm sự cân đối giữa khả năng sinh lời và độ ổn định, chấp nhận biến động vừa phải để đổi lấy xác suất duy trì xu hướng tốt hơn so với nhóm biến động cao. Các chiến lược kết hợp như mua tại các nhịp điều chỉnh về vùng hỗ trợ đáng tin cậy, nắm giữ theo xu hướng trung hạn và điều chỉnh vị thế theo thay đổi về định giá hoặc chất lượng dòng tiền thường dễ chiến thắng. Ngược lại, các chiến lược sử dụng đòn bẩy như với cổ phiếu cực kỳ biến động hoặc quá thụ động mua rồi bỏ quên trong khi bối cảnh cơ bản thay đổi thường không phù hợp với nhóm này.",
         "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát diễn biến xu hướng trung hạn (độ dốc MA, chuỗi đỉnh – đáy), các mốc định giá so với lịch sử và dòng tiền so với phần còn lại của ngành. Việc theo dõi khối lượng tại các vùng hỗ trợ/kháng cự, phản ứng giá trước tin cơ bản quan trọng và sự dịch chuyển dòng tiền giữa các nhóm cổ phiếu trong cùng ngành giúp xác định thời điểm nên gia tăng, giữ nguyên hay thu hẹp vị thế.",
+    ],
+}
+
+# Dashboard (Character Card) short narrative per class — single source of truth for Dashboard narrative
+CLASS_TEMPLATES_DASHBOARD: Dict[str, List[str]] = {
+    "Trend Tank": [
+        "Đặc tính: Tăng trưởng bền, biến động thấp, tài chính mạnh (Bluechip). Hiếm khi sụt giảm sốc.",
+        "Phù hợp: NĐT an toàn, tích sản, thích nắm giữ trung – dài hạn, ngại biến động.",
+        "Chiến thuật: Buy & Hold. Mua khi chỉnh về hỗ trợ, nắm giữ để tận dụng lãi kép.",
+    ],
+    "Glass Cannon": [
+        "Đặc tính: Biến động cực mạnh, nhạy cảm tin tức. Thường nén chặt trước khi \"nổ\" (Breakout/Breakdown).",
+        "Phù hợp: Trader mạo hiểm, phản ứng nhanh (Sniper), chấp nhận rủi ro cao để đổi lãi lớn.",
+        "Chiến thuật: Hit & Run. Quan sát vùng nén, vào dứt khoát tại điểm nổ. Tuân thủ tuyệt đối Stop-loss.",
+    ],
+    "Momentum Fighter": [
+        "Đặc tính: Sức bật mạnh, tăng tốc nhanh (Explosive). Dễ đảo chiều gắt nếu mất đà hoặc tiền rút.",
+        "Phù hợp: Trader đánh theo đà, linh hoạt, chốt lời chủ động, không \"yêu\" cổ phiếu quá lâu.",
+        "Chiến thuật: Breakout & Follow Trend. Mua bứt phá kèm Volume. Chốt ngay khi suy yếu, không gồng lỗ.",
+    ],
+    "Range Rogue": [
+        "Đặc tính: Sideway biên độ rõ. Dao động \"Ping-pong\" lặp lại giữa Hỗ trợ - Kháng cự, khó có xu hướng lớn.",
+        "Phù hợp: Trader kiên nhẫn, kỷ luật cao. Thích đánh trong biên, không nôn nóng.",
+        "Chiến thuật: Buy Low - Sell High. Mua Hỗ trợ, Bán Kháng cự. Tránh mua đuổi ở giữa hoặc đỉnh hộp.",
+    ],
+    "Balanced": [
+        "Đặc tính: Cân bằng Rủi ro & Lợi nhuận. Xu hướng rõ nhưng dễ chuyển trạng thái theo thị trường (Hybrid).",
+        "Phù hợp: NĐT linh hoạt, kết hợp công thủ (vừa giữ trung hạn, vừa lướt ngắn).",
+        "Chiến thuật: Swing Trading. Mua khi xác nhận xu hướng, gia tăng khi chỉnh. Quản trị rủi ro linh hoạt.",
     ],
 }
 
@@ -3612,7 +4678,7 @@ PLAYSTYLE_TAG_TRANSLATIONS: Dict[str, str] = {
 def render_character_traits(character_pack: Dict[str, Any]) -> None:
     """
     Render only the 'Traits' part of Character Card (for Appendix E / anti-anchoring).
-    Includes: class + blurb + CORE STATS + COMBAT STATS.
+    Includes: class + blurb + CORE STATS + STOCK DNA (long-run).
     Excludes: Conviction / Weaknesses / Playstyle Tags.
 
     IMPORTANT: This function must NOT change scoring scale or underlying metrics.
@@ -3689,13 +4755,72 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
     for label, value in core_order:
         bar_0_10(label, value)
     st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="gc-sec"><div class="gc-sec-t">COMBAT STATS</div>', unsafe_allow_html=True)
-    for label, value in combat_order:
-        bar_0_10(label, value)
+    # STOCK DNA (LONG-RUN) — stable traits pack (15 params, 2-tier)
+    dna = (cp.get("StockTraits") or {}).get("DNA") or {}
+    tier1 = dna.get("Tier1") or {}
+    params = dna.get("Params") or {}
+    
+    def _avg(keys: List[str]) -> float:
+        vals: List[float] = []
+        for k in keys:
+            v = _safe_float(params.get(k), default=np.nan)
+            if not pd.isna(v):
+                vals.append(float(v))
+        return float(np.mean(vals)) if vals else float("nan")
+    
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">STOCK DNA (LONG-RUN)</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='gc-muted'>Tier-1: {html.escape(str(tier1.get('StyleAxis','N/A')))} | "
+        f"Risk: {html.escape(str(tier1.get('RiskRegime','N/A')))}</div>",
+        unsafe_allow_html=True
+    )
+    bar_0_10("Trend Structure", _avg(["TrendIntegrity", "TrendPersistence", "TrendChurnControl"]))
+    bar_0_10("Volatility & Tail (Risk)", _avg(["VolRisk", "TailGapRisk", "VolOfVolRisk"]))
+    bar_0_10("Drawdown & Recovery (Risk)", _avg(["MaxDrawdownRisk", "RecoverySlownessRisk", "DrawdownFrequencyRisk"]))
+    bar_0_10("Liquidity & Tradability", _avg(["LiquidityTradability", "LiquidityLevel", "LiquidityConsistency"]))
+    bar_0_10("Behavior / Setup Bias", _avg(["BreakoutQuality", "MeanReversionWhipsaw", "AutoCorrMomentum"]))
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+
+def render_combat_stats_panel(character_pack: Dict[str, Any]) -> None:
+    """Render Combat Stats as 'Now / Opportunity' metrics (0–10), intended to live under CURRENT STATUS."""
+    cp = character_pack or {}
+    combat = cp.get("CombatStats") or {}
+
+    combat_order = [
+        ("Upside Power", combat.get("UpsidePower")),
+        ("Downside Risk", combat.get("DownsideRisk")),
+        ("RR Efficiency", combat.get("RREfficiency")),
+        ("Breakout Force", combat.get("BreakoutForce")),
+        ("Support Resilience", combat.get("SupportResilience")),
+    ]
+
+    def bar_0_10(label: str, value: Any) -> None:
+        v = _safe_float(value, default=np.nan)
+        if pd.isna(v):
+            pct = 0.0
+            v_disp = "N/A"
+        else:
+            v10 = float(max(0.0, min(10.0, float(v))))
+            pct = _clip(v10 / 10.0 * 100.0, 0.0, 100.0)
+            v_disp = f"{v10:.1f}/10"
+
+        st.markdown(
+            f"""
+            <div class="gc-row">
+              <div class="gc-k">{html.escape(str(label))}</div>
+              <div class="gc-bar"><div class="gc-fill" style="width:{pct:.1f}%"></div></div>
+              <div class="gc-v">{html.escape(v_disp)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">COMBAT STATS (NOW)</div>', unsafe_allow_html=True)
+    for label, value in combat_order:
+        bar_0_10(label, value)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 def render_stock_dna_insight(character_pack: Dict[str, Any]) -> None:
     """
@@ -4097,6 +5222,13 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     dot_volume = _dot(vol_ratio, good=1.1, warn=0.9)
     dot_rr = _dot(rr_val, good=1.8, warn=1.4)
 
+    # --- DEBUG (auto-show only when Upside Room is N/A) ---
+    meta = cp.get("Meta") or {}
+    if pd.isna(_sf((combat or {}).get("UpsideRoom", (combat or {}).get("UpsidePower")))):
+        st.caption(f"[DEBUG] UpsideRoom=N/A | DenomUsed={meta.get('DenomUsed')} | ATR14={_fmt_num(meta.get('ATR14'),2)} | VolProxy={_fmt_num(meta.get('VolProxy'),2)}")
+        st.caption(f"[DEBUG] Close={_fmt_num(meta.get('Close'),2)} | NR={_fmt_num(meta.get('NearestRes'),2)} | NS={_fmt_num(meta.get('NearestSup'),2)} | UpsideRaw={_fmt_num(meta.get('UpsideRaw'),2)} | DownsideRaw={_fmt_num(meta.get('DownsideRaw'),2)} | LvlSrc={meta.get('LevelCtxSource')}")
+        st.caption(f"[DEBUG] UpsideNorm={_fmt_num(meta.get('UpsideNorm'),2)} | DownsideNorm={_fmt_num(meta.get('DownsideNorm'),2)} | RR={_fmt_num(meta.get('RR'),2)} | BreakoutForce={_fmt_num((combat or {}).get('BreakoutForce'),2)} | VolRatio={_fmt_num(vol_ratio,2)} | RR_plan={_fmt_num(rr_val,2)} | LvlKeys={meta.get('LevelCtxKeys')}")
+
     dna_nick = _dna_label(class_name)
 
     # --------- render ---------
@@ -4117,34 +5249,117 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     def _metric_row(k: str, v: Any, nd: int = 1):
         return f"<div class='es-metric'><div class='k'>{html.escape(k)}</div><div class='v'>{html.escape(_fmt_num(v, nd))}</div></div>"
 
-    # Panel 1 bars
-    t_pct = _bar_pct_10(core.get("Trend"))
-    s_pct = _bar_pct_10(core.get("Stability"))
-    r_pct = _bar_pct_10(core.get("Reliability"))
-    l_pct = _bar_pct_10(core.get("Liquidity"))
+        # Panel 1 (DNA) — compact class narrative + Class Signature radar (5 metrics)
+    dash_lines: List[str] = (CLASS_TEMPLATES_DASHBOARD.get(class_name) or []).copy()
+    if not dash_lines:
+        # Fallback: keep Dashboard readable even if class is unknown
+        fallback = get_character_blurb(ticker, class_name)
+        if fallback:
+            dash_lines = [f"Đặc tính: {fallback}"]
+        else:
+            dash_lines = [f"Đặc tính: {dna_nick}"]
+
+    def _fmt_bline_es(s: str) -> str:
+        s = (s or "").strip()
+        if not s:
+            return ""
+        if ":" in s:
+            k, v = s.split(":", 1)
+            return f'<div class="es-bline"><b>{html.escape(k.strip())}:</b> {html.escape(v.strip())}</div>'
+        return f'<div class="es-bline">{html.escape(s)}</div>'
+
+    narrative_html = "".join([_fmt_bline_es(x) for x in dash_lines if str(x).strip()])
+
+    def _radar_svg_es(stats: List[Tuple[str, float]], maxv: float = 10.0, size: int = 180) -> str:
+        """Inline SVG radar chart (0–maxv) for Executive Snapshot (dark background)."""
+        n = len(stats)
+        if n < 3:
+            return ""
+        cx = cy = size / 2.0
+        r = size * 0.34
+        angles = [(-math.pi / 2.0) + i * (2.0 * math.pi / n) for i in range(n)]
+
+        def pt(angle: float, radius: float) -> Tuple[float, float]:
+            return (cx + radius * math.cos(angle), cy + radius * math.sin(angle))
+
+        vals: List[float] = []
+        for _, v in stats:
+            vv = 0.0 if pd.isna(v) else float(v)
+            vv = float(_clip(vv, 0.0, maxv))
+            vals.append(vv)
+
+        grid_levels = [2, 4, 6, 8, 10]
+        grid_polys = []
+        for lv in grid_levels:
+            rr_ = r * (lv / maxv)
+            pts = [pt(a, rr_) for a in angles]
+            grid_polys.append(" ".join([f"{x:.1f},{y:.1f}" for x, y in pts]))
+
+        axis_pts = [pt(a, r) for a in angles]
+        data_pts = [pt(angles[i], r * (vals[i] / maxv)) for i in range(n)]
+        data_points = " ".join([f"{x:.1f},{y:.1f}" for x, y in data_pts])
+        label_pts = [pt(a, r + 26) for a in angles]
+
+        parts: List[str] = []
+        parts.append(f'<svg class="es-radar-svg" viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg">')
+        for poly in grid_polys:
+            parts.append(f'<polygon points="{poly}" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1" />')
+        for (x, y) in axis_pts:
+            parts.append(f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{x:.1f}" y2="{y:.1f}" stroke="rgba(255,255,255,0.18)" stroke-width="1" />')
+        parts.append(f'<polygon points="{data_points}" fill="rgba(124,58,237,0.20)" stroke="rgba(124,58,237,0.95)" stroke-width="2" />')
+        for (x, y) in data_pts:
+            parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.0" fill="rgba(124,58,237,0.95)" />')
+        for i, (lx, ly) in enumerate(label_pts):
+            lab = html.escape(str(stats[i][0]))
+            anchor = "middle"
+            if lx < cx - 10:
+                anchor = "end"
+            elif lx > cx + 10:
+                anchor = "start"
+            parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" font-size="12" font-weight="900" fill="rgba(255,255,255,0.85)">{lab}</text>')
+        parts.append('</svg>')
+        return "".join(parts)
+
+    sig_stats: List[Tuple[str, float]] = [
+        ("Trend", _sf(core.get("Trend"))),
+        ("Momentum", _sf(core.get("Momentum"))),
+        ("Stability", _sf(core.get("Stability"))),
+        ("Upside", _sf((combat or {}).get("UpsidePower", (combat or {}).get("UpsideRoom")))),
+        ("Risk", _sf((combat or {}).get("DownsideRisk"))),
+    ]
+    radar_svg = _radar_svg_es(sig_stats, maxv=10.0, size=180)
+
+    sig_rows = []
+    for k, v in sig_stats:
+        sig_rows.append(f"<div class='es-sig-row'><div class='k'>{html.escape(k)}</div><div class='v'>{html.escape(_fmt_num(v,1))}</div></div>")
+    sig_rows_html = "".join(sig_rows)
 
     panel1 = f"""
     <div class="es-panel">
       <div class="es-pt">1) STOCK DNA</div>
       <div class="es-note" style="font-weight:900;">{html.escape(dna_nick)} <span class="es-meta">[{html.escape(class_name)}]</span></div>
-      <div class="es-note" style="margin-top:6px;">Core Stats</div>
-      {_metric_row('Trend', core.get('Trend'))}
-      <div class="es-mini"><div style="width:{t_pct:.0f}%"></div></div>
-      {_metric_row('Stability', core.get('Stability'))}
-      <div class="es-mini"><div style="width:{s_pct:.0f}%"></div></div>
-      {_metric_row('Reliability', core.get('Reliability'))}
-      <div class="es-mini"><div style="width:{r_pct:.0f}%"></div></div>
-      {_metric_row('Liquidity', core.get('Liquidity'))}
-      <div class="es-mini"><div style="width:{l_pct:.0f}%"></div></div>
+      <div class="es-bline-wrap">{narrative_html}</div>
+      <div class="es-sig-wrap">
+        <div class="es-sig-radar">{radar_svg}</div>
+        <div class="es-sig-metrics">
+          <div class="es-note" style="margin-bottom:6px;font-weight:900;">Class Signature</div>
+          {sig_rows_html}
+        </div>
+      </div>
     </div>
     """
 
-    up_pct = _bar_pct_10(combat.get("UpsidePower"))
+    upside_room = (combat or {}).get("UpsideRoom", (combat or {}).get("UpsidePower"))
+    upside_quality = (combat or {}).get("UpsideQuality")
+    up_pct = _bar_pct_10(upside_room)
+    uq_pct = _bar_pct_10(upside_quality)
     panel2 = f"""
     <div class="es-panel">
       <div class="es-pt">2) CURRENT STATUS</div>
-      <div class="es-metric"><div class="k">Upside Power</div><div class="v">{html.escape(_fmt_num(combat.get('UpsidePower')))}</div></div>
+      <div class="es-metric"><div class="k">Upside Room</div><div class="v">{html.escape(_fmt_num(upside_room))}</div></div>
       <div class="es-mini"><div style="width:{up_pct:.0f}%"></div></div>
+      <div class="es-metric" style="margin-top:6px;"><div class="k">Upside Quality</div><div class="v">{html.escape(_fmt_num(upside_quality))}</div></div>
+      <div class="es-mini"><div style="width:{uq_pct:.0f}%"></div></div>
       <div class="es-note" style="margin-top:8px;font-weight:900;">Trigger Status</div>
       <div class="es-note"><span class="es-dot {dot_breakout}"></span>Breakout</div>
       <div class="es-note"><span class="es-dot {dot_volume}"></span>Volume</div>
@@ -4153,14 +5368,26 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     </div>
     """
 
+    def _delta_pct(entry_x: Any, level_x: Any) -> Any:
+        e = _safe_float(entry_x)
+        l = _safe_float(level_x)
+        if pd.notna(e) and pd.notna(l) and e != 0:
+            return (l - e) / e * 100.0
+        return np.nan
+
+    stop_delta = _delta_pct(entry, stop)
+    tp_delta = _delta_pct(entry, tp)
+    stop_str = _fmt_px(stop) if pd.isna(stop_delta) else f"{_fmt_px(stop)} ({_fmt_pct(stop_delta)})"
+    tp_str = _fmt_px(tp) if pd.isna(tp_delta) else f"{_fmt_px(tp)} ({_fmt_pct(tp_delta)})"
+
     panel3 = f"""
     <div class="es-panel">
       <div class="es-pt">3) SCENARIO</div>
       <div class="es-note"><b>Kịch bản chính:</b> {html.escape(scenario_name)}</div>
       <ul class="es-bul">
         <li>Setup: {html.escape(setup_name)}</li>
-        <li>Entry/Stop: {html.escape(_fmt_px(entry))} / {html.escape(_fmt_px(stop))}</li>
-        <li>Target: {html.escape(_fmt_px(tp))} (RR {html.escape(_fmt_num(rr,1))})</li>
+        <li>Entry/Stop: {html.escape(_fmt_px(entry))} / {html.escape(stop_str)}</li>
+        <li>Target: {html.escape(tp_str)} (RR {html.escape(_fmt_num(rr,1))})</li>
       </ul>
       <div class="es-note" style="margin-top:8px;font-weight:900;">Red Flags</div>
       <ul class="es-bul">{''.join([f'<li>{html.escape(x)}</li>' for x in red_notes])}</ul>
@@ -4349,7 +5576,7 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         risk = primary.get("RiskPct")
         reward = primary.get("RewardPct")
         rr = primary.get("RR")
-        prob = primary.get("Probability")
+        conf_tech = primary.get("Confidence (Tech)", primary.get("Probability"))
 
         def _fmt_pct_local(x: Any) -> str:
             try:
@@ -4374,7 +5601,7 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
               <div class="incept-metric"><div class="k">Risk%:</div><div class="v">{_fmt_pct_local(risk)}</div></div>
               <div class="incept-metric"><div class="k">Reward%:</div><div class="v">{_fmt_pct_local(reward)}</div></div>
               <div class="incept-metric"><div class="k">RR:</div><div class="v">{_fmt_rr_local(rr)}</div></div>
-              <div class="incept-metric"><div class="k">Probability:</div><div class="v">{_val_or_na(prob)}</div></div>
+              <div class="incept-metric"><div class="k">Confidence (Tech):</div><div class="v">{_val_or_na(conf_tech)}</div></div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -4419,10 +5646,13 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
             return 1
         return 0
 
+    def _conf_val(p: Dict[str, Any]) -> Any:
+        return p.get("Confidence (Tech)", p.get("Probability"))
+
     plans_sorted = sorted(
         plans,
         key=lambda x: (
-            -_prob_rank(x.get("Probability")),
+            -_prob_rank(_conf_val(x)),
             -_safe_float(x.get("RR"), default=-1e9),
         ),
     )
@@ -4507,7 +5737,7 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         stop = _safe_float(p.get("Stop"), default=np.nan)
         tp = _safe_float(p.get("TP"), default=np.nan)
         rr = _safe_float(p.get("RR"), default=np.nan)
-        prob = _val_or_na(p.get("Probability"))
+        conf_tech = _val_or_na(p.get("Confidence (Tech)", p.get("Probability")))
         status = _val_or_na(p.get("Status"))
 
         is_ref = (gate_status == "WATCH" and idx == 1)
@@ -4525,15 +5755,27 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], gate_status: st
         else:
             rr_disp = "N/A"
 
+        def _fmt_px(x: Any) -> str:
+            v = _safe_float(x, default=np.nan)
+            return f"{v:.2f}" if pd.notna(v) else "N/A"
+
+        def _fmt_px_with_delta(x: Any, entry_x: Any) -> str:
+            v = _safe_float(x, default=np.nan)
+            e = _safe_float(entry_x, default=np.nan)
+            if pd.notna(v) and pd.notna(e) and e != 0:
+                d = (v - e) / e * 100.0
+                return f"{v:.2f} ({d:+.1f}%)"
+            return _fmt_px(v)
+
         st.markdown(
             f"""
             <div class="{card_cls}">
               <div class="tp-title"><b>{html.escape(str(name))}</b> <span class="tp-status">[{html.escape(str(status))}]</span> {ref_badge}</div>
-              <div class="tp-meta">Probability: <b>{html.escape(str(prob))}</b> | R:R: <b>{html.escape(str(rr_disp))}</b> ({rr_label})</div>
+              <div class="tp-meta">Confidence (Tech): <b>{html.escape(str(conf_tech))}</b> | R:R: <b>{html.escape(str(rr_disp))}</b> ({rr_label})</div>
               <div class="tp-levels">
-                <span>Entry: <b>{_val_or_na(entry)}</b></span>
-                <span>Stop: <b>{_val_or_na(stop)}</b></span>
-                <span>TP: <b>{_val_or_na(tp)}</b></span>
+                <span>Entry: <b>{_fmt_px(entry)}</b></span>
+                <span>Stop: <b>{_fmt_px_with_delta(stop, entry)}</b></span>
+                <span>TP: <b>{_fmt_px_with_delta(tp, entry)}</b></span>
               </div>
             </div>
             """,
@@ -4971,7 +6213,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     must_risk = primary.get("RiskPct")
     must_reward = primary.get("RewardPct")
     must_rr = primary.get("RR")
-    must_prob = primary.get("Probability")
+    must_conf = primary.get("Confidence (Tech)", primary.get("Probability"))
     # ============================================================
     # STEP 10 — PROMPT v10 (Narrative Refinement)
     # - Context → Impact → Action
@@ -5018,7 +6260,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     Risk%: ...
     Reward%: ...
     RR: ...
-    Probability: ...
+    Confidence (Tech): ...
     
     QUY TẮC VĂN PHONG (chống "khô"):
     - Mỗi mục (A1→A8) viết 2–4 câu theo mẫu: (Bối cảnh) → (Tác động) → (Hành động).
@@ -5067,13 +6309,13 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     - Risk% = {must_risk}
     - Reward% = {must_reward}
     - RR = {must_rr}
-    - Probability = {must_prob}
+    - Confidence (Tech) = {must_conf}
     
     Trong mục D, bắt buộc đúng 4 dòng theo format:
     Risk%: <...>
     Reward%: <...>
     RR: <...>
-    Probability: <...>
+    Confidence (Tech): <...>
     
     Dữ liệu (AnalysisPack JSON):
     {pack_json}
@@ -5198,7 +6440,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     risk = ps.get("RiskPct", None)
     reward = ps.get("RewardPct", None)
     rr = ps.get("RR", None)
-    prob = ps.get("Probability", "N/A")
+    prob = ps.get("Confidence (Tech)", ps.get("Probability", "N/A"))
 
     def _fmt_pct_local(x):
         try:
@@ -5226,7 +6468,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
           <div class="incept-metric"><div class="k">Risk%:</div><div class="v">{_fmt_pct_local(risk)}</div></div>
           <div class="incept-metric"><div class="k">Reward%:</div><div class="v">{_fmt_pct_local(reward)}</div></div>
           <div class="incept-metric"><div class="k">RR:</div><div class="v">{_fmt_rr_local(rr)}</div></div>
-          <div class="incept-metric"><div class="k">Probability:</div><div class="v">{prob}</div></div>
+          <div class="incept-metric"><div class="k">Confidence (Tech):</div><div class="v">{prob}</div></div>
         </div>
         """,
         unsafe_allow_html=True
@@ -5303,7 +6545,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
     risk = ps.get("RiskPct", None)
     reward = ps.get("RewardPct", None)
     rr = ps.get("RR", None)
-    prob = ps.get("Probability", "N/A")
+    prob = ps.get("Confidence (Tech)", ps.get("Probability", "N/A"))
 
     def _fmt_pct_local(x):
         try:
@@ -5331,7 +6573,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
           <div class="incept-metric"><div class="k">Risk%:</div><div class="v">{_fmt_pct_local(risk)}</div></div>
           <div class="incept-metric"><div class="k">Reward%:</div><div class="v">{_fmt_pct_local(reward)}</div></div>
           <div class="incept-metric"><div class="k">RR:</div><div class="v">{_fmt_rr_local(rr)}</div></div>
-          <div class="incept-metric"><div class="k">Probability:</div><div class="v">{prob}</div></div>
+          <div class="incept-metric"><div class="k">Confidence (Tech):</div><div class="v">{prob}</div></div>
         </div>
         """,
         unsafe_allow_html=True
@@ -5443,6 +6685,14 @@ def main():
     .gc-class{font-weight:800;font-size:18px;color:#111827;}
     .gc-h1{font-weight:900;font-size:32px;color:#0F172A;line-height:1.2;}
     .gc-blurb{margin-top:8px;font-size:18px;line-height:1.6;color:#334155;}
+    .gc-bline{margin-top:6px;font-size:18px;line-height:1.5;color:#334155;}
+    .gc-bline b{color:#0F172A;}
+    .gc-radar-wrap{display:flex;gap:14px;align-items:center;}
+    .gc-radar-svg{width:220px;height:220px;flex:0 0 auto;}
+    .gc-radar-metrics{flex:1;min-width:220px;}
+    .gc-radar-item{display:flex;justify-content:space-between;gap:10px;margin:4px 0;font-size:16px;color:#334155;}
+    .gc-radar-lab{font-weight:700;color:#334155;}
+    .gc-radar-val{font-weight:800;color:#0F172A;}
 
     .gc-sec{margin-top:10px;padding-top:10px;border-top:1px dashed #E5E7EB;}
     .gc-sec-t{font-weight:900;font-size:20px;color:#374151;margin-bottom:10px;}
@@ -5514,6 +6764,15 @@ def main():
 .es-metric .v{color:#FFFFFF;font-weight:950;}
 .es-mini{height:10px;background:rgba(255,255,255,0.12);border-radius:99px;overflow:hidden;margin-top:6px;}
 .es-mini>div{height:10px;background:linear-gradient(90deg,#2563EB 0%,#7C3AED 100%);border-radius:99px;}
+.es-bline-wrap{margin-top:6px;}
+.es-bline{font-size:13px;color:rgba(255,255,255,0.82);line-height:1.35;margin:2px 0;}
+.es-sig-wrap{display:flex;gap:12px;align-items:flex-start;margin-top:10px;}
+.es-sig-radar{flex:0 0 180px;}
+.es-radar-svg{width:180px;height:180px;display:block;}
+.es-sig-metrics{flex:1;}
+.es-sig-row{display:flex;justify-content:space-between;gap:10px;font-size:14px;margin:4px 0;}
+.es-sig-row .k{color:rgba(255,255,255,0.78);font-weight:850;}
+.es-sig-row .v{color:#FFFFFF;font-weight:950;}
 .es-note{font-size:14px;color:rgba(255,255,255,0.82);line-height:1.45;}
 .es-bul{margin:6px 0 0 16px;padding:0;}
 .es-bul li{margin:2px 0;font-size:14px;color:rgba(255,255,255,0.86);font-weight:650;}
