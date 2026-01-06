@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "10.4"
+APP_VERSION = "11.1"
 APP_TITLE = "INCEPTION"
 
 class DataError(Exception):
@@ -1825,16 +1825,26 @@ def _fib_strength_from_key(k: str) -> int:
 
 def _infer_character_class_quick(df: pd.DataFrame) -> str:
     """Quick, deterministic class inference used ONLY for k·R fallback in Trade Plan.
-    Returns one of: Trend Tank | Glass Cannon | Momentum Fighter | Range Rogue | Balanced
+
+    This is a lightweight proxy that uses only local price/volume/ATR context.
+    Returns one of the new 8-class taxonomy (subset, when signals are insufficient):
+      - Smooth Trend
+      - Momentum Trend
+      - Aggressive Trend
+      - Range / Mean-Reversion (Stable)
+      - Volatile Range
+      - Mixed / Choppy Trader
     """
-    if df.empty:
-        return 'Balanced'
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return "Mixed / Choppy Trader"
+
     last = df.iloc[-1]
-    close = _safe_float(last.get('Close'))
-    ma20 = _safe_float(last.get('MA20'))
-    ma50 = _safe_float(last.get('MA50'))
-    ma200 = _safe_float(last.get('MA200'))
-    rsi = _safe_float(last.get('RSI'))
+    close = _safe_float(last.get("Close"))
+    ma20 = _safe_float(last.get("MA20"))
+    ma50 = _safe_float(last.get("MA50"))
+    ma200 = _safe_float(last.get("MA200"))
+    rsi = _safe_float(last.get("RSI"))
+
     vr = _vol_ratio(df)
     atr14 = _atr14_last(df)
     atr_pct = (atr14 / close * 100) if (pd.notna(atr14) and pd.notna(close) and close != 0) else np.nan
@@ -1842,22 +1852,23 @@ def _infer_character_class_quick(df: pd.DataFrame) -> str:
     trend_stack = (pd.notna(ma20) and pd.notna(ma50) and pd.notna(ma200) and ma20 > ma50 > ma200)
     price_above = (pd.notna(close) and pd.notna(ma20) and close > ma20)
 
-    # Vol / tail proxy via ATR% and volume bursts
     very_wild = (pd.notna(atr_pct) and atr_pct >= 6.0) or (pd.notna(vr) and vr >= 2.5)
     high_vol = (pd.notna(atr_pct) and atr_pct >= 4.5) or (pd.notna(vr) and vr >= 1.8)
 
     if trend_stack and price_above and (not high_vol) and (pd.isna(rsi) or rsi >= 50):
-        return 'Trend Tank'
-    if very_wild:
-        return 'Glass Cannon'
+        return "Smooth Trend"
+
     if trend_stack and (pd.notna(rsi) and rsi >= 55) and (pd.notna(vr) and vr >= 1.1):
-        return 'Momentum Fighter'
+        return "Momentum Trend"
 
-    # Range/whipsaw proxy: price around MA50 and RSI mid
-    if pd.notna(close) and pd.notna(ma50) and abs(close - ma50) / ma50 * 100 <= 2.0 and (pd.notna(rsi) and 40 <= rsi <= 60):
-        return 'Range Rogue'
+    if very_wild:
+        return "Aggressive Trend" if trend_stack else "Volatile Range"
 
-    return 'Balanced'
+    # Range proxy: price around MA50 and RSI mid
+    if pd.notna(close) and pd.notna(ma50) and ma50 != 0 and abs(close - ma50) / ma50 * 100 <= 2.0 and (pd.notna(rsi) and 40 <= rsi <= 60):
+        return "Range / Mean-Reversion (Stable)"
+
+    return "Mixed / Choppy Trader"
 
 
 def _infer_risk_regime_quick(df: pd.DataFrame) -> str:
@@ -1881,28 +1892,36 @@ def _infer_risk_regime_quick(df: pd.DataFrame) -> str:
 
 
 def _kr_fallback_mult(setup: str, cclass: str, regime: str) -> float:
-    """k·R fallback multiplier per CharacterClass/Regime. Deterministic config."""
-    setup_k = (setup or '').strip().lower()
-    cc = (cclass or 'Balanced').strip()
-    rg = (regime or 'Normal').strip()
+    """k·R fallback multiplier per CharacterClass/Regime. Deterministic config.
 
-    # Base by class (maintains prior behavior approximately; breakout > pullback)
+    IMPORTANT:
+    - This is a fallback only; it must be stable and consistent with the new 8-class taxonomy.
+    - It does NOT use any 'Now/Opportunity' inputs.
+    """
+    setup_k = (setup or "").strip().lower()
+    cc = (cclass or "Mixed / Choppy Trader").strip()
+    rg = (regime or "Normal").strip()
+
+    # Base by class (keeps prior behavior: breakout > pullback, momentum/aggressive higher)
     base = {
-        'Trend Tank':     {'breakout': 2.4, 'pullback': 2.2},
-        'Momentum Fighter': {'breakout': 3.0, 'pullback': 2.6},
-        'Balanced':       {'breakout': 2.8, 'pullback': 2.4},
-        'Range Rogue':    {'breakout': 2.0, 'pullback': 1.7},
-        'Glass Cannon':   {'breakout': 3.2, 'pullback': 2.8},
+        "Smooth Trend": {"breakout": 2.4, "pullback": 2.2},
+        "Momentum Trend": {"breakout": 3.0, "pullback": 2.6},
+        "Aggressive Trend": {"breakout": 3.2, "pullback": 2.8},
+        "Range / Mean-Reversion (Stable)": {"breakout": 2.0, "pullback": 1.7},
+        "Volatile Range": {"breakout": 2.4, "pullback": 2.0},
+        "Mixed / Choppy Trader": {"breakout": 2.2, "pullback": 2.0},
+        "Event / Gap-Prone": {"breakout": 2.6, "pullback": 2.3},
+        "Illiquid / Noisy": {"breakout": 2.0, "pullback": 1.8},
     }
-    by_setup = base.get(cc, base['Balanced'])
-    k = by_setup.get('breakout' if 'break' in setup_k else 'pullback', 2.6)
+    by_setup = base.get(cc, base["Mixed / Choppy Trader"])
+    k = by_setup.get("breakout" if "break" in setup_k else "pullback", 2.2)
 
     # Regime adjustment (risk-aware, modest)
     adj = {
-        'Normal': 1.0,
-        'HighVol': 0.90,
-        'EventRisk': 0.85,
-        'LowLiquidity': 0.85,
+        "Normal": 1.0,
+        "HighVol": 0.90,
+        "EventRisk": 0.85,
+        "LowLiquidity": 0.85,
     }.get(rg, 1.0)
 
     return float(k * adj)
@@ -4181,31 +4200,88 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     style_axis = _tier1_style()
     risk_regime, risk_score = _tier1_risk()
 
-    # Tier-2 mapping (ordered rules)
-    if (risk_regime == "High" and (tail_risk >= 7.5 or vol_risk >= 7.5 or mdd_risk >= 7.5)):
-        cclass = "Glass Cannon"
-    elif (style_axis == "Trend" and risk_regime == "Low" and trend_integrity >= 7.0 and stability_adj >= 6.8 and tail_risk <= 5.5):
-        cclass = "Trend Tank"
-    elif (risk_regime == "Low" and reliability_adj >= 7.0 and stability_adj >= 6.5 and liq_tradability >= 6.0):
-        cclass = "Defensive Anchor"
-    elif (style_axis == "Momentum" and risk_regime == "High" and breakout_quality >= 7.2 and rr_eff >= 6.5 and tail_risk <= 7.5):
-        cclass = "Breakout Sprinter"
-    elif (style_axis == "Momentum" and risk_regime in ("Low", "Mid") and breakout_quality >= 6.5 and rr_eff >= 6.5 and trend_integrity >= 6.0):
-        cclass = "Momentum Fighter"
-    elif (style_axis == "Range" and risk_regime == "Low" and meanrev_prop >= 6.8 and liq_tradability >= 6.0):
-        cclass = "Mean-Revert Grinder"
-    elif (style_axis == "Range" and meanrev_prop >= 6.5):
-        cclass = "Range Rogue"
+    # Tier-2 mapping (8 Classes) — STRICTLY long-run (3–5y) only
+    # Modifiers (derived from long-run risks / tradability)
+    liq_cons = float(liq_tradability) if np.isfinite(liq_tradability) else 5.0
+    liq_level = float(dv_score) if np.isfinite(dv_score) else 5.0
+    tail_r = float(tail_risk) if np.isfinite(tail_risk) else 5.0
+    vol_r = float(vol_risk) if np.isfinite(vol_risk) else 5.0
+    dd_r = float(mdd_risk) if np.isfinite(mdd_risk) else 5.0
+    vov_r = float(vs_vov_risk) if np.isfinite(vs_vov_risk) else 5.0
+
+    # Optional raw gap frequency (if available)
+    gap_f = stock_traits.get("Raw", {}).get("GapFreq", np.nan)
+    try:
+        gap_f = float(gap_f)
+    except Exception:
+        gap_f = np.nan
+
+    modifiers: List[str] = []
+    if liq_cons <= 3.0 or liq_level <= 3.0:
+        modifiers.append("ILLIQ")
+    if (tail_r >= 7.5) or (np.isfinite(gap_f) and gap_f >= 0.08):
+        modifiers.append("GAP")
+    if (vol_r >= 7.2) or (dd_r >= 7.2):
+        modifiers.append("HIVOL")
+    if vov_r >= 7.0:
+        modifiers.append("CHOPVOL")
+    if (vol_r <= 3.8 and dd_r <= 5.2 and tail_r <= 6.0 and liq_tradability >= 6.0):
+        modifiers.append("DEF")
+
+    # Priority: execution risk first
+    if "ILLIQ" in modifiers:
+        cclass = "Illiquid / Noisy"
+    elif "GAP" in modifiers:
+        cclass = "Event / Gap-Prone"
+    elif style_axis == "Trend":
+        cclass = "Aggressive Trend" if ("HIVOL" in modifiers or risk_regime == "High") else "Smooth Trend"
+    elif style_axis == "Momentum":
+        cclass = "Momentum Trend"
+    elif style_axis == "Range":
+        cclass = "Volatile Range" if ("HIVOL" in modifiers or "CHOPVOL" in modifiers or risk_regime == "High") else "Range / Mean-Reversion (Stable)"
     else:
-        cclass = "Balanced"
+        cclass = "Mixed / Choppy Trader"
+
 
 # Enrich StockTraits with stable 2-tier DNA taxonomy + 15-parameter pack (for Python tagging & UI)
     try:
         stock_traits.setdefault("DNA", {})
+        # DNAConfidence / ClassLockFlag — stability proxy for the long-run DNA label (0–100)
+        try:
+            n_bars = int(len(df)) if isinstance(df, pd.DataFrame) else 0
+        except Exception:
+            n_bars = 0
+
+        vol_stability = 10.0 - float(vs_vov_risk) if np.isfinite(vs_vov_risk) else 5.0  # higher = more stable
+        liq_cons_score = float(cv_score) if np.isfinite(cv_score) else 5.0
+        liq_level_score = float(dv_score) if np.isfinite(dv_score) else 5.0
+
+        dna_confidence = 60.0
+        dna_confidence += 10.0 if n_bars >= 900 else (5.0 if n_bars >= 600 else 0.0)
+        dna_confidence += 10.0 if vol_stability >= 6.0 else 0.0
+        dna_confidence -= 15.0 if (np.isfinite(tail_risk) and float(tail_risk) >= 8.0) else 0.0
+        dna_confidence -= 10.0 if (np.isfinite(mdd_risk) and float(mdd_risk) >= 8.0) else 0.0
+        dna_confidence -= 15.0 if (liq_cons_score <= 3.0 or liq_level_score <= 3.0) else 0.0
+        dna_confidence = float(max(0.0, min(100.0, dna_confidence)))
+        class_lock = bool(dna_confidence < 50.0)
+
+
+        def _pick_primary_modifier(mods: List[str]) -> str:
+            for mm in ["ILLIQ","GAP","HIVOL","CHOPVOL","HBETA","DEF"]:
+                if mm in mods:
+                    return mm
+            return ""
+
+        primary_mod = _pick_primary_modifier(modifiers if isinstance(modifiers, list) else [])
         stock_traits["DNA"]["Tier1"] = {
             "StyleAxis": str(style_axis),
             "RiskRegime": str(risk_regime),
             "RiskScore": float(risk_score) if np.isfinite(risk_score) else np.nan,
+            # DNA confidence is a stability/coverage proxy (0–100) — strictly long-run inputs only
+            "DNAConfidence": float(dna_confidence),
+            "ClassLockFlag": bool(class_lock),
+            "Modifiers": list(modifiers) if isinstance(modifiers, list) else [],
+            "PrimaryModifier": str(primary_mod),
         }
         stock_traits["DNA"]["Params"] = {
             # Group 1: Trend Structure (higher = better)
@@ -4312,51 +4388,22 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     }
 
 def _character_blurb_fallback(ticker: str, cclass: str) -> str:
-    # Deterministic fallback (no API) — no numbers by design
-    t = (ticker or "").upper().strip()
+    """
+    Deterministic fallback when GPT narrative is disabled.
+    Must contain no numbers. Keep short, stable, and aligned with 2-tier DNA taxonomy.
+    """
+    name = (ticker or "").upper().strip() or "Cổ phiếu"
     cc = (cclass or "N/A").strip()
-    name = f"{t}" if t else "Cổ phiếu"
-    if cc == "Trend Tank":
-        return (f"{name} thuộc nhóm thiên về xu hướng và độ ổn định. Cổ phiếu thường đi theo nhịp rõ ràng, "
-                f"ưu tiên các chiến lược theo trend, gom khi điều chỉnh và giữ vị thế khi cấu trúc còn khỏe. "
-                f"Không phù hợp với kiểu lướt lát quá ngắn hoặc bắt đáy ngược trend. Hành vi thường gặp là "
-                f"bật lại tốt khi về vùng hỗ trợ động và duy trì nhịp tăng đều nếu dòng tiền không suy yếu.")
 
-    if cc == "Defensive Anchor":
-        return (f"{name} thuộc nhóm phòng thủ, ưu tiên độ bền và tính nhất quán. Giá thường vận động có kỷ luật, "
-                f"ít có các nhịp sốc và phù hợp với chiến lược tích lũy theo vùng hỗ trợ, giữ vị thế khi cấu trúc còn vững. "
-                f"Không phù hợp với kiểu đánh đòn bẩy cao hoặc săn biến động cực ngắn. Hành vi thường gặp là đi lên từ tốn, "
-                f"rung lắc vừa phải rồi tiếp tục xu hướng nếu dòng tiền không suy yếu.")
-    if cc == "Breakout Sprinter":
-        return (f"{name} thuộc nhóm thiên về bứt phá theo nhịp ngắn, khi có tín hiệu thì chạy nhanh nhưng cũng dễ đảo chiều. "
-                f"Phù hợp với trader đánh breakout có xác nhận, vào lệnh dứt khoát và chốt lời chủ động theo từng phần. "
-                f"Không phù hợp với nhà đầu tư muốn sự êm và nắm giữ dài trong giai đoạn thị trường nhiễu. Hành vi thường gặp là "
-                f"nén rồi bung mạnh, sau đó có nhịp retest hoặc rung lắc sâu nếu lực cầu không duy trì.")
-    if cc == "Mean-Revert Grinder":
-        return (f"{name} thuộc nhóm dao động trong biên nhưng kiểm soát rủi ro tương đối tốt. Cổ phiếu thường quay về vùng cân bằng "
-                f"sau các nhịp lệch khỏi biên, phù hợp với chiến lược mua gần hỗ trợ và bán gần kháng cự khi có tín hiệu đảo chiều. "
-                f"Không phù hợp với kiểu mua đuổi giữa biên hoặc kỳ vọng chạy trend dài liên tục. Hành vi thường gặp là lên–xuống có nhịp, "
-                f"cần kỷ luật điểm vào và điểm ra theo khung đã định.")
-    if cc == "Glass Cannon":
-        return (f"{name} thuộc nhóm biến động mạnh, tăng nhanh khi có hưng phấn và cũng dễ rung lắc sâu. "
-                f"Phù hợp với trader đánh momentum, phản xạ nhanh, kỷ luật stop-loss và chốt lời từng phần. "
-                f"Không phù hợp với nhà đầu tư thích sự êm và nắm giữ dài khi thị trường nhiễu. Hành vi thường gặp là "
-                f"bứt tốc mạnh rồi có các nhịp kéo–rũ rõ rệt, cần quản trị vị thế chặt.")
-    if cc == "Momentum Fighter":
-        return (f"{name} thuộc nhóm có thiên hướng tăng theo đà và hiệu quả risk/reward tốt khi vào đúng nhịp. "
-                f"Phù hợp với chiến lược mua theo xác nhận, ưu tiên các nhịp breakout hoặc pullback có tín hiệu tiếp diễn. "
-                f"Không phù hợp với kiểu bắt đáy sớm khi chưa có lực xác nhận. Hành vi thường gặp là tăng theo cụm phiên, "
-                f"nghỉ ngắn rồi tiếp tục nếu lực mua còn duy trì.")
-    if cc == "Range Rogue":
-        return (f"{name} thuộc nhóm dao động trong biên, thiếu xu hướng rõ ràng và dễ whipsaw. "
-                f"Muốn thắng cần kỹ năng trade trong range: mua khi tiệm cận hỗ trợ, bán khi chạm kháng cự, "
-                f"ưu tiên T+ và quản trị rủi ro nhanh. Không phù hợp với đánh breakout thiếu xác nhận hoặc nắm giữ theo trend. "
-                f"Hành vi thường gặp là các nhịp đảo chiều ngắn và false-break khiến người theo xu hướng dễ bị bẫy.")
-    # Balanced
-    return (f"{name} thuộc nhóm cân bằng, không quá lệch về một cực. Cổ phiếu có thể theo xu hướng khi điều kiện thuận lợi "
-            f"nhưng vẫn có giai đoạn đi ngang tích lũy. Phù hợp với trader linh hoạt: ưu tiên mua khi có tín hiệu xác nhận, "
-            f"kết hợp giữ vị thế và lướt một phần theo nhịp. Không phù hợp với kỳ vọng một nhịp tăng thẳng hoặc đòn bẩy quá cao khi tín hiệu chưa rõ. "
-            f"Hành vi thường gặp là tiến triển đều, cần kiên nhẫn chờ điểm vào có lợi thế.")
+    # Use dashboard template if available
+    lines = CLASS_TEMPLATES_DASHBOARD.get(cc) or []
+    if lines:
+        # Convert 3-line dashboard template into a compact paragraph
+        return f"{name}: {lines[0]} {lines[1]} {lines[2]}"
+
+    # Generic fallback (class unknown)
+    return (f"{name} đang được gắn nhãn DNA '{cc}'. Hãy ưu tiên bám cấu trúc giá, "
+            f"chỉ triển khai khi trade plan có điều kiện rõ ràng và tuân thủ kỷ luật quản trị rủi ro.")
 
 def get_character_blurb(ticker: str, cclass: str) -> str:
     # GPT paragraph: 100–200 words, no numbers
@@ -4509,13 +4556,35 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     if cp.get("Error"):
         st.warning(f"Character module error: {cp.get('Error')}")
 
-    # Dashboard Class Signature (Radar) — 5 metrics (mixed Core + Combat) that best describe the Class
+    # Dashboard Class Signature (Radar) — 5 long-run DNA anchors (no 'Now/Opportunity' metrics)
+    dna = (cp.get("StockTraits") or {}).get("DNA") or {}
+    params = dna.get("Params") or {}
+    groups = dna.get("Groups") or {}
+
+    def _avg(keys: List[str]) -> float:
+        vals: List[float] = []
+        for k in keys:
+            v = _safe_float(params.get(k), default=np.nan)
+            if not pd.isna(v):
+                vals.append(float(v))
+        return float(np.mean(vals)) if vals else float("nan")
+
+    trend_g = _avg(groups.get("TrendStructure", ["TrendIntegrity", "TrendPersistence", "TrendChurnControl"]))
+    vol_risk_g = _avg(groups.get("VolatilityTail", ["VolRisk", "TailGapRisk", "VolOfVolRisk"]))
+    dd_risk_g = _avg(groups.get("DrawdownRecovery", ["MaxDrawdownRisk", "RecoverySlownessRisk", "DrawdownFrequencyRisk"]))
+    liq_g = _avg(groups.get("LiquidityTradability", ["LiquidityTradability", "LiquidityLevel", "LiquidityConsistency"]))
+    beh_g = _avg(groups.get("BehaviorSetup", ["BreakoutQuality", "MeanReversionWhipsaw", "AutoCorrMomentum"]))
+
+    # Convert risk groups into positive-direction scores for the dashboard radar (higher = better control)
+    vol_stab = (10.0 - float(vol_risk_g)) if pd.notna(vol_risk_g) else np.nan
+    dd_res = (10.0 - float(dd_risk_g)) if pd.notna(dd_risk_g) else np.nan
+
     radar_stats: List[Tuple[str, float]] = [
-        ("Trend", core.get("Trend")),
-        ("Momentum", core.get("Momentum")),
-        ("Stability", core.get("Stability")),
-        ("Upside", combat.get("UpsidePower")),
-        ("Risk", combat.get("DownsideRisk")),
+        ("Trend", trend_g),
+        ("Vol-Stability", vol_stab),
+        ("DD-Resilience", dd_res),
+        ("Liquidity", liq_g),
+        ("Behavior", beh_g),
     ]
     svg = _radar_svg(radar_stats, maxv=10.0, size=220)
 
@@ -4591,79 +4660,97 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
 # ============================================================
 # CLASS TEXT TEMPLATES (STOCK DNA)
 # ============================================================
+
 # Fixed 3-paragraph templates per class to keep text stable.
 CLASS_TEMPLATES: Dict[str, List[str]] = {
-    "Trend Tank": [
-        "Cổ phiếu nhóm này thường có xu hướng khá rõ và bền, biến động hằng ngày ở mức vừa phải và ít bị cuốn theo nhiễu ngắn hạn. Giá của cổ phiếu nhóm này thường bám tốt các đường trung bình động trung – dài hạn, nhịp điều chỉnh đa số dừng lại ở vùng hỗ trợ rồi quay lại theo xu hướng chính thay vì gãy hẳn cấu trúc.",
-        "Nhà đầu tư phù hợp với nhóm này thường có tư duy trung – dài hạn, ưu tiên sự bền vững của xu hướng hơn là các cú ăn nhanh. Các chiến lược thuận xu hướng như mua từng phần tại các nhịp pullback về hỗ trợ động, giữ vị thế cho đến khi cấu trúc xu hướng bị vi phạm rõ ràng và chỉ gia tăng khi trend được xác nhận lại thường dễ chiến thắng. Ngược lại, các chiến lược giao dịch ngược xu hướng, cố gắng bắt đỉnh/bắt đáy liên tục hoặc trading quá dày trong khi xu hướng lớn vẫn còn hiệu lực thường dễ cho kết quả kém.",
-        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát vị trí giá so với MA trung – dài hạn, chuỗi đỉnh – đáy liên tiếp và khối lượng tại các nhịp điều chỉnh về vùng hỗ trợ. Việc quan sát phản ứng của giá trước tin xấu, các phiên đóng cửa tuần quanh vùng hỗ trợ chính và tín hiệu mất dần độ dốc của MA giúp nhận diện sớm thời điểm xu hướng yếu đi để chủ động giảm tỷ trọng hoặc thoát vị thế.",
+    "Smooth Trend": [
+        "Nhóm này có xu hướng dài hạn tương đối rõ và bền. Giá thường bám cấu trúc trend (đỉnh–đáy nâng dần) và tôn trọng các vùng hỗ trợ động, nên hành vi ít bị nhiễu so với nhóm biến động cao.",
+        "Nhà đầu tư phù hợp là người đánh theo xu hướng, ưu tiên mua ở nhịp điều chỉnh/pullback thay vì mua đuổi. Có thể nắm giữ trung hạn khi cấu trúc còn nguyên vẹn và chỉ gia tăng khi có xác nhận tiếp diễn.",
+        "Điểm lưu ý là tránh phá kỷ luật khi thị trường nhiễu: chỉ giữ vị thế khi trend còn hợp lệ và luôn có mức dừng lỗ theo cấu trúc.",
     ],
-    "Glass Cannon": [
-        "Cổ phiếu nhóm này thường mang lại tiềm năng tăng giá rất mạnh trong thời gian ngắn nhưng đi kèm rủi ro lớn và biến động cao. Giá của cổ phiếu nhóm này thường dao động nhanh, dễ xuất hiện các cú tăng – giảm biên độ lớn, gap và nến thân dài khi dòng tiền thay đổi hoặc xuất hiện tin tức. Nhóm này thường dao động quyết liệt tại các vùng hỗ trợ/kháng cự, khi vượt hoặc gãy vùng then chốt thì biên độ dao động sau đó thường mở rộng mạnh.",
-        "Nhà đầu tư phù hợp với nhóm này thường là người ưa mạo hiểm, chấp nhận tail risk và có kỷ luật quản trị vốn nghiêm ngặt. Các chiến lược thuận xu hướng với điểm vào được chuẩn bị sẵn tại vùng pullback rõ ràng, stoploss cụ thể, size hợp lý và sẵn sàng thoát nhanh khi điều kiện setup không còn giữ được thường dễ chiến thắng. Ngược lại, các chiến lược mua đuổi trong giai đoạn hưng phấn, bình quân giá xuống khi trend đã gãy, hoặc giữ vị thế quá lâu chỉ dựa trên kỳ vọng mà bỏ qua tín hiệu kỹ thuật thường dễ dẫn tới thua lỗ lớn.",
-        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát phản ứng giá quanh các vùng hỗ trợ/kháng cự, biên độ dao động từng phiên, khối lượng đi kèm các cú bứt phá hoặc gãy mạnh và tần suất xuất hiện gap. Việc theo dõi các pha tăng nóng không được hỗ trợ bởi khối lượng, nến đảo chiều tại vùng giá cao và tín hiệu 'cạn lực' sau tin tốt giúp quyết định thời điểm chốt lời, giảm size hoặc cắt lỗ kịp thời.",
+    "Momentum Trend": [
+        "Nhóm này thiên về động lượng: khi vào pha tăng/giảm, giá thường chạy nhanh theo hướng chính và khó vào lại nếu chậm nhịp. Breakout/continuation có xác suất tốt hơn so với việc bắt đáy.",
+        "Phù hợp với trader chủ động, theo dõi sát và chấp nhận ra/vào theo nhịp. Ưu tiên vào khi có follow-through và quản trị vị thế bằng trailing theo cấu trúc.",
+        "Cần cảnh giác khi động lượng suy yếu (thiếu follow-through, đà thu hẹp): ưu tiên chốt từng phần và không nới kỷ luật stop.",
     ],
-    "Momentum Fighter": [
-        "Cổ phiếu nhóm này thường có động lượng giá rõ rệt, khi đã chạy theo một hướng thì giá thường di chuyển dứt khoát trong một khoảng thời gian. Giá của cổ phiếu nhóm này thường phản ứng mạnh với các vùng breakout/breakdown, khi vượt đỉnh hoặc thủng đáy quan trọng thì nhịp đi tiếp thường nhanh và khó đuổi kịp. Nhóm này thường dao động theo kiểu bám đà: khi momentum còn tốt, các nhịp điều chỉnh thường nông; khi đà suy yếu, các nhịp điều chỉnh sâu và thiếu follow-through sẽ xuất hiện nhiều hơn.",
-        "Nhà đầu tư phù hợp với nhóm này thường theo phong cách chủ động, theo dõi thị trường sát sao và chấp nhận ra vào nhịp nhàng theo động lượng. Các chiến lược mua theo sức mạnh như tham gia khi giá vượt vùng breakout với khối lượng ủng hộ, dời stop theo trend và chốt lời từng phần khi tín hiệu momentum yếu dần thường dễ chiến thắng. Ngược lại, các chiến lược cố bắt đỉnh khi đà tăng còn mạnh, bán khống ngược xu hướng hoặc bắt đáy trong pha giảm tốc độ cao thường dễ thất bại vì đi ngược lại hướng dịch chuyển chính của dòng tiền.",
-        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát các tín hiệu thay đổi động lượng như biên độ nến thu hẹp sau breakout, histogram yếu dần, MACD phẳng lại hoặc bắt đầu giao cắt, và khối lượng không còn đồng pha với biến động giá. Việc quan sát phản ứng giá tại vùng breakout cũ khi bị test lại, số lần thất bại khi cố vượt một ngưỡng giá và nến đảo chiều tại vùng giá cao giúp xác định sớm thời điểm nên giảm vị thế hoặc thoát hẳn trước khi momentum gãy hẳn.",
+    "Aggressive Trend": [
+        "Nhóm này có xu hướng nhưng tải rủi ro cao: biến động lớn, tail risk/gap có thể xuất hiện khi dòng tiền đổi trạng thái. Lợi nhuận tiềm năng cao nhưng sai nhịp sẽ trả giá nhanh.",
+        "Phù hợp với trader chịu rung lắc, kỷ luật stop và quản trị size nghiêm ngặt. Chỉ nên tham gia khi plan rõ ràng và điểm vào tối ưu (không FOMO).",
+        "Ưu tiên chiến thuật hit-and-run/pyramid có điều kiện sau khi đã giảm rủi ro (free-ride). Tránh giữ vị thế quá lớn qua thời điểm nhạy cảm.",
     ],
-    "Range Rogue": [
-        "Cổ phiếu nhóm này thường dao động trong một vùng giá tương đối cố định thay vì hình thành xu hướng rõ ràng và kéo dài. Giá của cổ phiếu nhóm này thường quay lại nhiều lần giữa các vùng hỗ trợ/kháng cự quen thuộc, dễ xuất hiện phá vỡ giả, quét stop hoặc các cú đâm xuyên biên độ rồi quay đầu trở lại. Nhóm này thường dao động với mức nhiễu cao, nếu không xác định đúng vùng biên hoạt động chính thì rất dễ bị cuốn vào các chuyển động ngắn hạn thiếu ý nghĩa.",
-        "Nhà đầu tư phù hợp với nhóm này thường ưa phong cách giao dịch theo biên độ, kiên nhẫn chờ mua gần vùng hỗ trợ rõ và chốt lời gần vùng kháng cự, chấp nhận biên lợi nhuận vừa phải nhưng lặp lại nhiều lần. Các chiến lược buy low – sell high trong hộp giá, dùng stoploss khi giá đóng cửa ra khỏi vùng biên và hạn chế đòn bẩy thường dễ chiến thắng. Ngược lại, các chiến lược đuổi theo breakout/breakdown mà không có xác nhận thêm, kỳ vọng xu hướng kéo dài trong khi cấu trúc vẫn sideway hoặc liên tục vào/ra giữa vùng giữa hộp giá thường dễ thất bại.",
-        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát việc xác định và cập nhật vùng hỗ trợ/kháng cự biên trên – biên dưới, dạng nến và khối lượng mỗi lần giá chạm biên. Việc theo dõi số lần phá vỡ giả, khối lượng đi kèm các cú phá biên, và cách giá cư xử ở vùng giữa hộp giá giúp phân biệt khi nào nên tiếp tục trade trong biên, khi nào nên đứng ngoài hoặc chuẩn bị cho kịch bản chuyển sang một xu hướng mới.",
+    "Range / Mean-Reversion (Stable)": [
+        "Nhóm này vận động trong biên tương đối ổn định và hay quay về vùng cân bằng. Xác suất mua gần hỗ trợ–bán gần kháng cự tốt hơn kỳ vọng chạy trend dài liên tục.",
+        "Phù hợp với trader kỷ luật, kiên nhẫn chờ vùng biên; ưu tiên scale-in ở vùng hỗ trợ và chốt dần ở vùng kháng cự.",
+        "Rủi ro chính là phá biên: khi đóng cửa ra khỏi hộp giá, cần cắt/giảm nhanh để tránh bị kéo sang một regime mới.",
     ],
-
-"Defensive Anchor": [
-    "Đặc tính: Phòng thủ tốt, biến động thấp, thường giữ nhịp ổn định ngay cả khi thị trường nhiễu.",
-    "Phù hợp: NĐT ưu tiên bảo toàn vốn, ưa nhịp tăng chậm nhưng chắc, ít chịu stress.",
-    "Chiến thuật: Accumulate & Protect. Mua theo lớp khi về hỗ trợ, giữ vị thế khi cấu trúc còn vững.",
-],
-"Breakout Sprinter": [
-    "Đặc tính: Thiên về cú bứt phá ngắn hạn; khi chạy rất nhanh nhưng rủi ro đảo chiều cũng cao.",
-    "Phù hợp: Trader đánh breakout/sự kiện, phản xạ nhanh, chấp nhận rung lắc để đổi tốc độ.",
-    "Chiến thuật: Breakout timing. Chỉ vào khi có follow-through + Volume; chốt lời từng phần nhanh.",
-],
-"Mean-Revert Grinder": [
-    "Đặc tính: Sideway có biên nhưng kiểm soát rủi ro tốt hơn. Hay quay về mức cân bằng theo nhịp lặp lại.",
-    "Phù hợp: Trader kỷ luật, kiên nhẫn, thích đánh trong biên với tần suất vừa phải.",
-    "Chiến thuật: Mean-reversion swing. Mua gần đáy biên + tín hiệu đảo chiều; bán gần đỉnh biên.",
-],
-    "Balanced": [
-        "Cổ phiếu nhóm này thường thể hiện sự cân bằng giữa tăng trưởng và rủi ro, mức biến động trung bình và hành vi giá tương đối sạch so với các nhóm quá phòng thủ hoặc quá biến động. Giá của cổ phiếu nhóm này thường tôn trọng khá tốt các vùng hỗ trợ/kháng cự và các đường trung bình động chính, nhịp điều chỉnh hiếm khi quá sâu nhưng cũng không quá nông, tạo nên cấu trúc giá tương đối dễ theo dõi.",
-        "Nhà đầu tư phù hợp với nhóm này thường tìm kiếm sự cân đối giữa khả năng sinh lời và độ ổn định, chấp nhận biến động vừa phải để đổi lấy xác suất duy trì xu hướng tốt hơn so với nhóm biến động cao. Các chiến lược kết hợp như mua tại các nhịp điều chỉnh về vùng hỗ trợ đáng tin cậy, nắm giữ theo xu hướng trung hạn và điều chỉnh vị thế theo thay đổi về định giá hoặc chất lượng dòng tiền thường dễ chiến thắng. Ngược lại, các chiến lược sử dụng đòn bẩy như với cổ phiếu cực kỳ biến động hoặc quá thụ động mua rồi bỏ quên trong khi bối cảnh cơ bản thay đổi thường không phù hợp với nhóm này.",
-        "Đối với nhóm cổ phiếu thuộc nhóm này, cần chú ý sát diễn biến xu hướng trung hạn (độ dốc MA, chuỗi đỉnh – đáy), các mốc định giá so với lịch sử và dòng tiền so với phần còn lại của ngành. Việc theo dõi khối lượng tại các vùng hỗ trợ/kháng cự, phản ứng giá trước tin cơ bản quan trọng và sự dịch chuyển dòng tiền giữa các nhóm cổ phiếu trong cùng ngành giúp xác định thời điểm nên gia tăng, giữ nguyên hay thu hẹp vị thế.",
+    "Volatile Range": [
+        "Nhóm này vẫn có tính chất range/mean-reversion nhưng nhiễu và rung lắc mạnh hơn; dễ false-break và quét stop nếu vào giữa biên.",
+        "Phù hợp với trader chọn lọc: chỉ vào khi có xác nhận đảo chiều tại mép biên và chấp nhận tỷ trọng nhỏ hơn bình thường.",
+        "Ưu tiên chốt nhanh, không bình quân giá khi cấu trúc yếu và luôn quản trị rủi ro theo volatility.",
+    ],
+    "Mixed / Choppy Trader": [
+        "Nhóm này thiếu xu hướng rõ ràng hoặc hay đổi tính theo thời gian; tín hiệu dễ nhiễu và whipsaw cao. Edge thường chỉ xuất hiện theo từng nhịp ngắn.",
+        "Phù hợp với giao dịch chiến thuật: chỉ trade khi setup đạt chất lượng cao và có xác nhận; phần lớn thời gian nên đứng ngoài.",
+        "Kỷ luật vào/ra và size nhỏ là bắt buộc; tránh giữ vị thế dài khi cấu trúc không rõ.",
+    ],
+    "Event / Gap-Prone": [
+        "Nhóm này có rủi ro sự kiện/gap cao: giá có thể nhảy mạnh ngoài dự kiến, khiến stop dễ bị trượt. Dù có thể mang lại lợi nhuận lớn, execution risk cũng cao.",
+        "Phù hợp với trader chấp nhận rủi ro tail, ưu tiên giao dịch ngắn hạn và giảm nắm giữ qua thời điểm nhạy cảm.",
+        "Bắt buộc dùng size nhỏ, stop theo cấu trúc + buffer và chỉ tham gia khi reward đủ lớn để bù rủi ro.",
+    ],
+    "Illiquid / Noisy": [
+        "Nhóm này có rủi ro thực thi: thanh khoản thiếu ổn định, spread/độ trượt có thể làm sai lệch R:R thực tế. Tín hiệu kỹ thuật thường kém tin cậy hơn do nhiễu.",
+        "Phù hợp với nhà đầu tư rất kỷ luật và chấp nhận giải ngân nhỏ; ưu tiên lệnh giới hạn và tránh đuổi giá.",
+        "Nếu không đạt điều kiện thanh khoản tối thiểu, nên coi đây là nhóm 'NO TRADE' dù kịch bản nhìn đẹp trên giấy.",
     ],
 }
+
+
 
 # Dashboard (Character Card) short narrative per class — single source of truth for Dashboard narrative
 CLASS_TEMPLATES_DASHBOARD: Dict[str, List[str]] = {
-    "Trend Tank": [
-        "Đặc tính: Tăng trưởng bền, biến động thấp, tài chính mạnh (Bluechip). Hiếm khi sụt giảm sốc.",
-        "Phù hợp: NĐT an toàn, tích sản, thích nắm giữ trung – dài hạn, ngại biến động.",
-        "Chiến thuật: Buy & Hold. Mua khi chỉnh về hỗ trợ, nắm giữ để tận dụng lãi kép.",
+    "Smooth Trend": [
+        "Đặc tính: Trend bền, hành vi giá tương đối sạch, phù hợp nắm giữ theo cấu trúc.",
+        "Phù hợp: Trend-follow / tích lũy theo nhịp điều chỉnh, ưu tiên kỷ luật hơn tốc độ.",
+        "Chiến thuật: Pullback & trend continuation, dời stop theo cấu trúc.",
     ],
-    "Glass Cannon": [
-        "Đặc tính: Biến động cực mạnh, nhạy cảm tin tức. Thường nén chặt trước khi \"nổ\" (Breakout/Breakdown).",
-        "Phù hợp: Trader mạo hiểm, phản ứng nhanh (Sniper), chấp nhận rủi ro cao để đổi lãi lớn.",
-        "Chiến thuật: Hit & Run. Quan sát vùng nén, vào dứt khoát tại điểm nổ. Tuân thủ tuyệt đối Stop-loss.",
+    "Momentum Trend": [
+        "Đặc tính: Động lượng mạnh, chạy nhanh khi có lực, khó vào lại nếu chậm nhịp.",
+        "Phù hợp: Trader chủ động, theo dõi sát, chốt lời từng phần theo đà.",
+        "Chiến thuật: Breakout/continuation có xác nhận, trailing theo nhịp.",
     ],
-    "Momentum Fighter": [
-        "Đặc tính: Sức bật mạnh, tăng tốc nhanh (Explosive). Dễ đảo chiều gắt nếu mất đà hoặc tiền rút.",
-        "Phù hợp: Trader đánh theo đà, linh hoạt, chốt lời chủ động, không \"yêu\" cổ phiếu quá lâu.",
-        "Chiến thuật: Breakout & Follow Trend. Mua bứt phá kèm Volume. Chốt ngay khi suy yếu, không gồng lỗ.",
+    "Aggressive Trend": [
+        "Đặc tính: Trend có nhưng rủi ro cao (biến động/tail/gap), sai nhịp trả giá nhanh.",
+        "Phù hợp: Trader chịu rung lắc, size nhỏ hơn chuẩn, kỷ luật stop tuyệt đối.",
+        "Chiến thuật: Hit & Run / pyramid có điều kiện sau khi giảm rủi ro.",
     ],
-    "Range Rogue": [
-        "Đặc tính: Sideway biên độ rõ. Dao động \"Ping-pong\" lặp lại giữa Hỗ trợ - Kháng cự, khó có xu hướng lớn.",
-        "Phù hợp: Trader kiên nhẫn, kỷ luật cao. Thích đánh trong biên, không nôn nóng.",
-        "Chiến thuật: Buy Low - Sell High. Mua Hỗ trợ, Bán Kháng cự. Tránh mua đuổi ở giữa hoặc đỉnh hộp.",
+    "Range / Mean-Reversion (Stable)": [
+        "Đặc tính: Sideway ổn định, hay quay về vùng cân bằng, biên hỗ trợ/kháng cự rõ.",
+        "Phù hợp: Trader kiên nhẫn, đánh theo biên, ưu tiên xác suất hơn kỳ vọng lớn.",
+        "Chiến thuật: Buy near support – sell near resistance, scale-in/out theo vùng.",
     ],
-    "Balanced": [
-        "Đặc tính: Cân bằng Rủi ro & Lợi nhuận. Xu hướng rõ nhưng dễ chuyển trạng thái theo thị trường (Hybrid).",
-        "Phù hợp: NĐT linh hoạt, kết hợp công thủ (vừa giữ trung hạn, vừa lướt ngắn).",
-        "Chiến thuật: Swing Trading. Mua khi xác nhận xu hướng, gia tăng khi chỉnh. Quản trị rủi ro linh hoạt.",
+    "Volatile Range": [
+        "Đặc tính: Range nhưng nhiễu, dễ false-break và quét stop; rung lắc mạnh.",
+        "Phù hợp: Trader chọn lọc, chỉ vào ở mép biên và giảm tỷ trọng.",
+        "Chiến thuật: Vào khi có xác nhận đảo chiều, chốt nhanh, quản trị theo vol.",
+    ],
+    "Mixed / Choppy Trader": [
+        "Đặc tính: Không rõ trend/range, whipsaw cao; edge chỉ xuất hiện theo nhịp ngắn.",
+        "Phù hợp: Tactical trader, chấp nhận đứng ngoài phần lớn thời gian.",
+        "Chiến thuật: Trade khi setup thật rõ + có xác nhận; size nhỏ.",
+    ],
+    "Event / Gap-Prone": [
+        "Đặc tính: Rủi ro sự kiện/gap cao, stop dễ trượt; cần reward lớn để bù rủi ro.",
+        "Phù hợp: Trader mạo hiểm nhưng kỷ luật, tránh giữ qua thời điểm nhạy cảm.",
+        "Chiến thuật: Size nhỏ, stop + buffer, chỉ tham gia khi RR đủ dày.",
+    ],
+    "Illiquid / Noisy": [
+        "Đặc tính: Rủi ro thực thi (thanh khoản kém/không ổn định), tín hiệu dễ nhiễu.",
+        "Phù hợp: Chỉ dành cho người rất kỷ luật, chấp nhận giải ngân nhỏ.",
+        "Chiến thuật: Lệnh giới hạn, tránh đuổi giá; không đạt liquidity gate thì NO TRADE.",
     ],
 }
+
 
 # Mapping for bilingual playstyle tags (EN → EN + VI).
 PLAYSTYLE_TAG_TRANSLATIONS: Dict[str, str] = {
@@ -4677,53 +4764,45 @@ PLAYSTYLE_TAG_TRANSLATIONS: Dict[str, str] = {
 
 def render_character_traits(character_pack: Dict[str, Any]) -> None:
     """
-    Render only the 'Traits' part of Character Card (for Appendix E / anti-anchoring).
-    Includes: class + blurb + CORE STATS + STOCK DNA (long-run).
-    Excludes: Conviction / Weaknesses / Playstyle Tags.
+    STOCK DNA (Long-run 3–5Y) — STRICT layer.
+    Displays ONLY:
+      - Class + stable class narrative
+      - Tier-1 (StyleAxis, RiskRegime) + DNAConfidence
+      - DNA group scores (5 groups)
+      - The 15-parameter pack (inside an expander)
 
-    IMPORTANT: This function must NOT change scoring scale or underlying metrics.
-    It should display the same 0–10 scale as the baseline Character Card in v6.1.
+    Deliberately excludes legacy "CORE STATS" and any 'Now/Opportunity' metrics.
     """
     cp = character_pack or {}
-    core = cp.get("CoreStats") or {}
-    combat = cp.get("CombatStats") or {}
-    cclass = cp.get("CharacterClass") or "N/A"
+    cclass = _safe_text(cp.get("CharacterClass") or "N/A").strip()
     ticker = _safe_text(cp.get("_Ticker") or "").strip().upper()
-    headline = f"{ticker} - {cclass}" if ticker else str(cclass)
-    blurb = get_character_blurb(ticker, str(cclass))
 
-    # Prepare class label + blurb paragraphs for STOCK DNA section
+    # ---- Class narrative (stable templates) ----
     class_label = f"CLASS: {cclass}"
-    blurb_paragraphs: List[str] = []
+    st.markdown(f"**{html.escape(class_label)}**")
+    paras = CLASS_TEMPLATES.get(cclass) or []
+    if paras:
+        for para in paras:
+            st.markdown(str(para))
+    else:
+        # fallback if template is missing
+        st.markdown(get_character_blurb(ticker, cclass) or "")
 
-    class_key = str(cclass).strip()
-    if class_key in CLASS_TEMPLATES:
-        blurb_paragraphs = CLASS_TEMPLATES[class_key]
-    elif blurb:
-        blurb_paragraphs = [str(blurb)]
+    # ---- DNA pack (15 params / 5 groups) ----
+    dna = (cp.get("StockTraits") or {}).get("DNA") or {}
+    tier1 = dna.get("Tier1") or {}
+    params = dna.get("Params") or {}
+    groups = dna.get("Groups") or {}
 
+    def _avg(keys: List[str]) -> float:
+        vals: List[float] = []
+        for k in keys:
+            v = _safe_float(params.get(k), default=np.nan)
+            if not pd.isna(v):
+                vals.append(float(v))
+        return float(np.mean(vals)) if vals else float("nan")
 
-    # Baseline CORE STATS order (v6.1): Trend, Momentum, Stability, Reliability, Liquidity
-    core_order = [
-        ("Trend", core.get("Trend")),
-        ("Momentum", core.get("Momentum")),
-        ("Stability", core.get("Stability")),
-        ("Reliability", core.get("Reliability")),
-        ("Liquidity", core.get("Liquidity")),
-    ]
-
-    # Baseline COMBAT STATS order (v6.1)
-    combat_order = [
-        ("Upside Power", combat.get("UpsidePower")),
-        ("Downside Risk", combat.get("DownsideRisk")),
-        ("RR Efficiency", combat.get("RREfficiency")),
-        ("Breakout Force", combat.get("BreakoutForce")),
-        ("Support Resilience", combat.get("SupportResilience")),
-    ]
-
-    
-    def bar_0_10(label: str, value: Any) -> None:
-        """One-line bar (label + bar + value on the same row), scale 0–10."""
+    def _bar(label: str, value: Any) -> None:
         v = _safe_float(value, default=np.nan)
         if pd.isna(v):
             pct = 0.0
@@ -4732,8 +4811,6 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
             v10 = float(max(0.0, min(10.0, float(v))))
             pct = _clip(v10 / 10.0 * 100.0, 0.0, 100.0)
             v_disp = f"{v10:.1f}/10"
-
-        # Use the same row layout as "Điểm tổng hợp / Điểm tin cậy" (Current Status)
         st.markdown(
             f"""
             <div class="gc-row">
@@ -4745,41 +4822,67 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
             unsafe_allow_html=True
         )
 
-    # Section 1 in Appendix E already prints the STOCK DNA heading.
-    # Here we only show the class label + descriptive blurb.
-    st.markdown(f"**{html.escape(class_label)}**")
-    for para in blurb_paragraphs:
-        st.markdown(str(para))
+    style_axis = tier1.get("StyleAxis", "N/A")
+    risk_regime = tier1.get("RiskRegime", "N/A")
+    dna_conf = tier1.get("DNAConfidence", np.nan)
+    lock_flag = tier1.get("ClassLockFlag", False)
+    modifiers = tier1.get("Modifiers", []) or []
 
-    st.markdown('<div class="gc-sec"><div class="gc-sec-t">CORE STATS</div>', unsafe_allow_html=True)
-    for label, value in core_order:
-        bar_0_10(label, value)
-    st.markdown("</div>", unsafe_allow_html=True)
-    # STOCK DNA (LONG-RUN) — stable traits pack (15 params, 2-tier)
-    dna = (cp.get("StockTraits") or {}).get("DNA") or {}
-    tier1 = dna.get("Tier1") or {}
-    params = dna.get("Params") or {}
-    
-    def _avg(keys: List[str]) -> float:
-        vals: List[float] = []
-        for k in keys:
-            v = _safe_float(params.get(k), default=np.nan)
-            if not pd.isna(v):
-                vals.append(float(v))
-        return float(np.mean(vals)) if vals else float("nan")
-    
-    st.markdown('<div class="gc-sec"><div class="gc-sec-t">STOCK DNA (LONG-RUN)</div>', unsafe_allow_html=True)
+    conf_txt = "N/A" if pd.isna(_safe_float(dna_conf, default=np.nan)) else f"{float(dna_conf):.0f}/100"
+    mod_txt = ", ".join([str(x) for x in modifiers]) if isinstance(modifiers, list) and modifiers else "None"
+    lock_txt = "LOCKED (low confidence)" if bool(lock_flag) else "OK"
+
+    st.markdown('<div class="gc-sec"><div class="gc-sec-t">STOCK DNA (LONG-RUN 3–5Y)</div>', unsafe_allow_html=True)
     st.markdown(
-        f"<div class='gc-muted'>Tier-1: {html.escape(str(tier1.get('StyleAxis','N/A')))} | "
-        f"Risk: {html.escape(str(tier1.get('RiskRegime','N/A')))}</div>",
+        f"<div class='gc-muted'>Tier-1: Style {html.escape(str(style_axis))} | Risk {html.escape(str(risk_regime))} | "
+        f"DNAConfidence: {html.escape(conf_txt)} | {html.escape(lock_txt)}</div>",
         unsafe_allow_html=True
     )
-    bar_0_10("Trend Structure", _avg(["TrendIntegrity", "TrendPersistence", "TrendChurnControl"]))
-    bar_0_10("Volatility & Tail (Risk)", _avg(["VolRisk", "TailGapRisk", "VolOfVolRisk"]))
-    bar_0_10("Drawdown & Recovery (Risk)", _avg(["MaxDrawdownRisk", "RecoverySlownessRisk", "DrawdownFrequencyRisk"]))
-    bar_0_10("Liquidity & Tradability", _avg(["LiquidityTradability", "LiquidityLevel", "LiquidityConsistency"]))
-    bar_0_10("Behavior / Setup Bias", _avg(["BreakoutQuality", "MeanReversionWhipsaw", "AutoCorrMomentum"]))
+    st.markdown(
+        f"<div class='gc-muted'>Modifiers: {html.escape(mod_txt)}</div>",
+        unsafe_allow_html=True
+    )
+
+    # 5 groups (stable anchors)
+    _bar("Trend Structure", _avg(groups.get("TrendStructure", ["TrendIntegrity", "TrendPersistence", "TrendChurnControl"])))
+    _bar("Volatility & Tail Risk (higher = worse)", _avg(groups.get("VolatilityTail", ["VolRisk", "TailGapRisk", "VolOfVolRisk"])))
+    _bar("Drawdown & Recovery Risk (higher = worse)", _avg(groups.get("DrawdownRecovery", ["MaxDrawdownRisk", "RecoverySlownessRisk", "DrawdownFrequencyRisk"])))
+    _bar("Liquidity & Tradability", _avg(groups.get("LiquidityTradability", ["LiquidityTradability", "LiquidityLevel", "LiquidityConsistency"])))
+    _bar("Behavior / Setup Bias", _avg(groups.get("BehaviorSetup", ["BreakoutQuality", "MeanReversionWhipsaw", "AutoCorrMomentum"])))
     st.markdown("</div>", unsafe_allow_html=True)
+
+    # 15 parameters (optional detail)
+    label_map = {
+        "TrendIntegrity": "Trend Integrity",
+        "TrendPersistence": "Trend Persistence",
+        "TrendChurnControl": "Trend Churn Control",
+        "VolRisk": "Volatility Level (risk)",
+        "TailGapRisk": "Tail/Gap Risk",
+        "VolOfVolRisk": "Vol Regime Instability",
+        "MaxDrawdownRisk": "Max Drawdown Risk",
+        "RecoverySlownessRisk": "Recovery Slowness",
+        "DrawdownFrequencyRisk": "Drawdown Frequency",
+        "LiquidityTradability": "Tradability",
+        "LiquidityLevel": "Liquidity Level",
+        "LiquidityConsistency": "Liquidity Consistency",
+        "BreakoutQuality": "Breakout Quality",
+        "MeanReversionWhipsaw": "Mean-Reversion / Whipsaw",
+        "AutoCorrMomentum": "Momentum Autocorr",
+    }
+    group_labels = {
+        "TrendStructure": "Group 1 — Trend Structure",
+        "VolatilityTail": "Group 2 — Volatility & Tail",
+        "DrawdownRecovery": "Group 3 — Drawdown & Recovery",
+        "LiquidityTradability": "Group 4 — Liquidity & Tradability",
+        "BehaviorSetup": "Group 5 — Behavior / Setup Bias",
+    }
+
+    with st.expander("DNA Parameters (15)", expanded=False):
+        for gk in ["TrendStructure", "VolatilityTail", "DrawdownRecovery", "LiquidityTradability", "BehaviorSetup"]:
+            keys = groups.get(gk) or []
+            st.markdown(f"**{group_labels.get(gk, gk)}**")
+            for k in keys:
+                _bar(label_map.get(k, k), params.get(k))
 
 
 
@@ -4824,103 +4927,75 @@ def render_combat_stats_panel(character_pack: Dict[str, Any]) -> None:
 
 def render_stock_dna_insight(character_pack: Dict[str, Any]) -> None:
     """
-    STOCK DNA Insight (GAS/MSN style) — renderer-only layer.
-    Requirements:
-      - 5 lines by stat (each line should contain at most the stat score number; the Reliability/Liquidity line contains two).
-      - 1 short conclusion sentence emphasizing playstyle + stop/size discipline.
-    Reads only AnalysisPack-derived CharacterPack stats (0–10). Does not alter any scoring.
+    DNA Insight — MUST stay in the long-run layer.
+    No 'Now/Opportunity' metrics allowed here.
     """
     cp = character_pack or {}
-    core = cp.get("CoreStats") or {}
-    combat = cp.get("CombatStats") or {}
     cclass = _safe_text(cp.get("CharacterClass") or "N/A").strip()
-    ticker = _safe_text(cp.get("_Ticker") or "").strip().upper()
 
-    def _bucket(v: float) -> str:
-        if not math.isfinite(v):
-            return "na"
-        if v < 4.8:
-            return "low"
-        if v < 6.8:
-            return "mid"
-        return "high"
+    dna = (cp.get("StockTraits") or {}).get("DNA") or {}
+    tier1 = dna.get("Tier1") or {}
+    params = dna.get("Params") or {}
+    groups = dna.get("Groups") or {}
 
-    def _val(x: Any) -> float:
-        v = _safe_float(x, default=np.nan)
-        return float(v) if (isinstance(v, (int, float)) and math.isfinite(v)) else float("nan")
+    def _avg(keys: List[str]) -> float:
+        vals: List[float] = []
+        for k in keys:
+            v = _safe_float(params.get(k), default=np.nan)
+            if not pd.isna(v):
+                vals.append(float(v))
+        return float(np.mean(vals)) if vals else float("nan")
 
-    trend_v = _val(core.get("Trend"))
-    stab_v = _val(core.get("Stability"))
-    rel_v = _val(core.get("Reliability"))
-    liq_v = _val(core.get("Liquidity"))
-    rr_v = _val(combat.get("RREfficiency"))
-    sup_v = _val(combat.get("SupportResilience"))
+    trend_g = _avg(groups.get("TrendStructure", []))
+    vol_g = _avg(groups.get("VolatilityTail", []))
+    dd_g = _avg(groups.get("DrawdownRecovery", []))
+    liq_g = _avg(groups.get("LiquidityTradability", []))
+    beh_g = _avg(groups.get("BehaviorSetup", []))
 
-    # If critical stats missing, do not render (avoid ugly N/A blocks).
-    if not all(math.isfinite(x) for x in [trend_v, stab_v, rel_v, liq_v, rr_v, sup_v]):
-        return
+    style_axis = _safe_text(tier1.get("StyleAxis", "N/A"))
+    risk_regime = _safe_text(tier1.get("RiskRegime", "N/A"))
+    dna_conf = _safe_float(tier1.get("DNAConfidence", np.nan), default=np.nan)
+    modifiers = tier1.get("Modifiers", []) or []
 
-    trend_b = _bucket(trend_v)
-    stab_b = _bucket(stab_v)
-    rel_b = _bucket(rel_v)
-    liq_b = _bucket(liq_v)
-    rr_b = _bucket(rr_v)
-    sup_b = _bucket(sup_v)
+    # Interpretive tags (no extra computation beyond existing scores)
+    strengths: List[str] = []
+    cautions: List[str] = []
 
-    # Opening (optional but recommended for GAS/MSN tone)
-    playstyle_hint = "tactical" if (rr_b == "high" and sup_b == "low") else ("trend-follow" if trend_b == "high" else ("defensive" if (stab_b == "high" and sup_b != "low") else "balanced"))
-    open_line = f"DNA tổng quát: {cclass} — ưu tiên {playstyle_hint}, kỷ luật size/stop là bắt buộc."
-    st.markdown(open_line)
+    if pd.notna(trend_g) and trend_g >= 6.8:
+        strengths.append("Trend structure tương đối bền")
+    if pd.notna(liq_g) and liq_g >= 6.2:
+        strengths.append("Tính tradable/khớp lệnh khá ổn")
 
-    # Phrase bank (no extra numbers)
-    trend_text = {
-        "low": "xu hướng yếu/đứt quãng, khó “ôm” theo trend; chỉ nên canh nhịp rất rõ.",
-        "mid": "có xu hướng nhưng chưa đủ “sạch” để ôm dài thoải mái.",
-        "high": "trend tương đối sạch, dễ theo nhịp nếu giữ đúng kỷ luật cấu trúc."
-    }[trend_b]
+    if pd.notna(vol_g) and vol_g >= 6.8:
+        cautions.append("Rủi ro biến động/tail cao hơn mức trung bình")
+    if pd.notna(dd_g) and dd_g >= 6.8:
+        cautions.append("Drawdown có thể sâu hoặc hồi phục chậm")
+    if "ILLIQ" in modifiers:
+        cautions.append("Execution risk cao do thanh khoản/ổn định thanh khoản yếu")
+    if "GAP" in modifiers:
+        cautions.append("Gap/event risk nổi bật; tránh nắm giữ quá tự tin qua thời điểm nhạy cảm")
 
-    stab_text = {
-        "low": "nền rung lắc mạnh, dễ quét stop; trade cần chọn điểm vào kỹ và giảm kỳ vọng.",
-        "mid": "nền dao động vừa phải; vẫn cần chờ nhịp xác nhận trước khi tăng cam kết.",
-        "high": "nền ổn định, phù hợp triển khai theo kế hoạch rõ ràng và quản trị rủi ro chuẩn."
-    }[stab_b]
+    s_txt = "; ".join(strengths) if strengths else "Hành vi dài hạn ở mức trung tính"
+    c_txt = "; ".join(cautions) if cautions else "Không có cảnh báo DNA nổi bật"
 
-    rel_liq_text = "tín hiệu dễ nhiễu, phản ứng giá có thể thất thường; cần kỷ luật stop và tránh all-in." if (rel_b == "low" or liq_b == "low") else (
-        "tín hiệu tương đối đọc được; vẫn cần xác nhận thêm để tránh vào nhầm nhịp." if (rel_b == "mid" or liq_b == "mid") else
-        "tín hiệu mượt, phản ứng giá “đúng bài”; thuận lợi cho việc bám plan và quản trị lệnh."
-    )
+    conf_txt = "N/A" if pd.isna(dna_conf) else f"{dna_conf:.0f}/100"
 
-    rr_text = {
-        "low": "RR khó “đẹp”; ưu tiên trade phòng thủ, tránh đuổi giá.",
-        "mid": "RR vừa phải; nên tối ưu điểm vào bằng cấu trúc và xác nhận.",
-        "high": "điểm mạnh là vẫn có thể tìm được “điểm vào ăn RR” tốt nếu chọn đúng nhịp."
-    }[rr_b]
+    st.markdown("**DNA Insight (Long-run)**")
+    st.markdown(f"- Class: **{html.escape(cclass)}** | Tier-1: Style **{html.escape(style_axis)}**, Risk **{html.escape(risk_regime)}** | DNAConfidence: **{html.escape(conf_txt)}**")
+    st.markdown(f"- Strengths: {html.escape(s_txt)}")
+    st.markdown(f"- Cautions: {html.escape(c_txt)}")
 
-    sup_text = {
-        "low": "vùng hỗ trợ không đáng tin để “bắt đáy/đỡ rơi”; thủng là dễ trượt tiếp.",
-        "mid": "hỗ trợ dùng được cho quản trị rủi ro, nhưng không nên kỳ vọng “đỡ” mọi cú rung lắc.",
-        "high": "hỗ trợ đáng tin cho quản trị lệnh; phù hợp triển khai theo cấu trúc và giữ kỷ luật."
-    }[sup_b]
-
-    # 5 lines (fixed order). Each line contains only the stat number(s).
-    st.markdown(f"Trend {trend_v:.1f}/10: {trend_text}")
-    st.markdown(f"Stability {stab_v:.1f}/10: {stab_text}")
-    st.markdown(f"Reliability {rel_v:.1f}/10 & Liquidity {liq_v:.1f}/10: {rel_liq_text}")
-    st.markdown(f"RR Efficiency {rr_v:.1f}/10: {rr_text}")
-    st.markdown(f"Support Resilience {sup_v:.1f}/10: {sup_text}")
-
-    # One-sentence conclusion (no extra numbers)
-    name = ticker if ticker else "mã này"
-    if rr_b == "high" and (sup_b == "low" or rel_b == "low"):
-        concl = f"Nhận định ngắn gọn: {name} hợp đánh theo nhịp (tactical), ưu tiên setup rõ ràng và RR tốt; không phù hợp vào lớn rồi hy vọng giữ lâu—hỗ trợ gãy thì thoát nhanh, chỉ làm breakout khi có follow-through và thanh khoản xác nhận."
-    elif trend_b == "high" and rel_b != "low":
-        concl = f"Nhận định ngắn gọn: {name} hợp bám trend có kỷ luật, ưu tiên buy-the-dip theo cấu trúc; tránh đuổi giá và luôn giữ stop theo plan."
-    elif stab_b == "high" and sup_b == "high":
-        concl = f"Nhận định ngắn gọn: {name} hợp phong cách phòng thủ/giữ vị thế có kỷ luật; scale-in theo kế hoạch và tuyệt đối không phá vỡ stop."
+    # Strategy fit (high-level)
+    if style_axis == "Trend":
+        fit = "Ưu tiên chiến lược theo xu hướng: pullback/continuation; tránh bắt đáy ngược trend."
+    elif style_axis == "Range":
+        fit = "Ưu tiên chiến lược đánh biên: mua gần hỗ trợ – bán gần kháng cự; tránh mua đuổi giữa biên."
+    elif style_axis == "Momentum":
+        fit = "Ưu tiên chiến lược theo động lượng: breakout có xác nhận; quản trị vị thế chủ động."
     else:
-        concl = f"Nhận định ngắn gọn: {name} phù hợp cách tiếp cận cân bằng, chờ tín hiệu rõ rồi mới tăng cam kết; giữ kỷ luật stop và size, tránh FOMO."
-    st.markdown(concl)
+        fit = "Ưu tiên chiến thuật chọn lọc: chỉ trade khi setup thật rõ và có xác nhận."
 
+    st.markdown(f"- Fit: {html.escape(fit)}")
 
 def render_current_status_insight(master_score_total: Any, conviction_score: Any, gate_status: Optional[str] = None) -> None:
     """Current Status Insight (MasterScore + Conviction) — fixed 4-part structure with score-aware wording."""
@@ -5143,25 +5218,6 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
             return "KELLY BET: SMALL"
         return "KELLY BET: NO TRADE"
 
-    def _dna_label(class_name: str) -> str:
-        ck = (class_name or "").lower()
-        # Intent: one short Vietnamese nickname + optional class
-        if "balanced" in ck:
-            return "Ngựa chiến bền"
-        if "tank" in ck or "defensive" in ck:
-            return "Lá chắn phòng thủ"
-        if "glass" in ck:
-            return "Pháo thủ mạo hiểm"
-        if "trend" in ck:
-            return "Kỵ sĩ theo trend"
-        if "mean" in ck or "range" in ck:
-            return "Du kích theo biên"
-        if "illiquid" in ck:
-            return "Sniper thanh khoản"
-        if "chaotic" in ck or "wild" in ck:
-            return "Kẻ hỗn chiến"
-        return "Chiến binh kỷ luật"
-
     # --------- data extraction ---------
     ticker = _safe_text(ap.get("Ticker") or cp.get("_Ticker") or "").strip().upper()
     last_pack = ap.get("Last") or {}
@@ -5198,7 +5254,7 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
             break
 
     # Red flags (from CharacterPack weaknesses)
-    flags = list(cp.get("WeaknessFlags") or [])
+    flags = list(cp.get("Flags") or [])
     red_notes = []
     for f in flags:
         try:
@@ -5218,9 +5274,9 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     vol_ratio = (ap.get("ProTech") or {}).get("Volume", {}).get("Ratio")
     rr_val = rr
 
-    dot_breakout = _dot(combat.get("BreakoutForce"), good=6.5, warn=5.0)
-    dot_volume = _dot(vol_ratio, good=1.1, warn=0.9)
-    dot_rr = _dot(rr_val, good=1.8, warn=1.4)
+    dot_breakout = _dot(combat.get("BreakoutForce"), good=6.8, warn=5.5)
+    dot_volume = _dot(vol_ratio, good=1.20, warn=0.95)
+    dot_rr = _dot(rr_val, good=1.80, warn=1.30)
 
     # --- DEBUG (auto-show only when Upside Room is N/A) ---
     meta = cp.get("Meta") or {}
@@ -5228,8 +5284,6 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
         st.caption(f"[DEBUG] UpsideRoom=N/A | DenomUsed={meta.get('DenomUsed')} | ATR14={_fmt_num(meta.get('ATR14'),2)} | VolProxy={_fmt_num(meta.get('VolProxy'),2)}")
         st.caption(f"[DEBUG] Close={_fmt_num(meta.get('Close'),2)} | NR={_fmt_num(meta.get('NearestRes'),2)} | NS={_fmt_num(meta.get('NearestSup'),2)} | UpsideRaw={_fmt_num(meta.get('UpsideRaw'),2)} | DownsideRaw={_fmt_num(meta.get('DownsideRaw'),2)} | LvlSrc={meta.get('LevelCtxSource')}")
         st.caption(f"[DEBUG] UpsideNorm={_fmt_num(meta.get('UpsideNorm'),2)} | DownsideNorm={_fmt_num(meta.get('DownsideNorm'),2)} | RR={_fmt_num(meta.get('RR'),2)} | BreakoutForce={_fmt_num((combat or {}).get('BreakoutForce'),2)} | VolRatio={_fmt_num(vol_ratio,2)} | RR_plan={_fmt_num(rr_val,2)} | LvlKeys={meta.get('LevelCtxKeys')}")
-
-    dna_nick = _dna_label(class_name)
 
     # --------- render ---------
     tier_badge = _tier_label(tier)
@@ -5257,7 +5311,7 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
         if fallback:
             dash_lines = [f"Đặc tính: {fallback}"]
         else:
-            dash_lines = [f"Đặc tính: {dna_nick}"]
+            dash_lines = [f"Đặc tính: {class_name}"]
 
     def _fmt_bline_es(s: str) -> str:
         s = (s or "").strip()
@@ -5311,40 +5365,97 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
             parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.0" fill="rgba(124,58,237,0.95)" />')
         for i, (lx, ly) in enumerate(label_pts):
             lab = html.escape(str(stats[i][0]))
+            raw_v = stats[i][1]
+            val_txt = "—" if pd.isna(raw_v) else f"{vals[i]:.1f}"
             anchor = "middle"
             if lx < cx - 10:
                 anchor = "end"
             elif lx > cx + 10:
                 anchor = "start"
-            parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" font-size="12" font-weight="900" fill="rgba(255,255,255,0.85)">{lab}</text>')
+            parts.append(
+                f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" font-size="12" font-weight="900" fill="rgba(255,255,255,0.85)">'
+                f'<tspan x="{lx:.1f}" dy="0">{lab}</tspan>'
+                f'<tspan x="{lx:.1f}" dy="13" font-size="11" font-weight="850" fill="rgba(255,255,255,0.70)">{val_txt}</tspan>'
+                f'</text>'
+            )
         parts.append('</svg>')
         return "".join(parts)
 
-    sig_stats: List[Tuple[str, float]] = [
-        ("Trend", _sf(core.get("Trend"))),
-        ("Momentum", _sf(core.get("Momentum"))),
-        ("Stability", _sf(core.get("Stability"))),
-        ("Upside", _sf((combat or {}).get("UpsidePower", (combat or {}).get("UpsideRoom")))),
-        ("Risk", _sf((combat or {}).get("DownsideRisk"))),
-    ]
-    radar_svg = _radar_svg_es(sig_stats, maxv=10.0, size=180)
+    # Class Signature (DNA long-run only): 5-group anchors (0–10). No 'Now/Opportunity' metrics here.
+    dna_pack = (cp.get("StockTraits") or {}).get("DNA") or {}
+    params = dna_pack.get("Params") or {}
+    groups = dna_pack.get("Groups") or {}
 
-    sig_rows = []
-    for k, v in sig_stats:
-        sig_rows.append(f"<div class='es-sig-row'><div class='k'>{html.escape(k)}</div><div class='v'>{html.escape(_fmt_num(v,1))}</div></div>")
-    sig_rows_html = "".join(sig_rows)
+    tier1 = dna_pack.get("Tier1") or {}
+    style_axis_es = _safe_text(tier1.get("StyleAxis") or "").strip()
+    primary_mod_es = _safe_text(tier1.get("PrimaryModifier") or "").strip()
+
+    def _mod_label_es(pm: str) -> str:
+        pm = (pm or "").strip().upper()
+        if pm == "GAP":
+            return "Event/Gap-Prone"
+        if pm == "ILLIQ":
+            return "Illiquid/Noisy"
+        if pm == "HIVOL":
+            return "High-Vol"
+        if pm == "CHOPVOL":
+            return "Choppy-Vol"
+        if pm == "DEF":
+            return "Defensive"
+        if pm == "HBETA":
+            return "High-Beta"
+        return ""
+
+    mod_lab_es = _mod_label_es(primary_mod_es)
+    dna_conf_es = tier1.get("DNAConfidence")
+
+    badge_bits_es: List[str] = []
+    if style_axis_es:
+        badge_bits_es.append(f"Style: {style_axis_es}")
+    if mod_lab_es:
+        badge_bits_es.append(f"Flag: {mod_lab_es}")
+    conf_txt_es = _fmt_num(dna_conf_es, 0)
+    if conf_txt_es != "N/A":
+        badge_bits_es.append(f"DNA: {conf_txt_es}")
+
+    dna_badges_es = " | ".join(badge_bits_es) if badge_bits_es else ""
+    dna_badge_html_es = f'<div class="es-note" style="margin-top:4px;opacity:0.85;">{html.escape(dna_badges_es)}</div>' if dna_badges_es else ""
+
+
+    def _avg(keys: List[str]) -> float:
+        vals: List[float] = []
+        for k in keys:
+            v = _sf(params.get(k))
+            if not pd.isna(v):
+                vals.append(float(v))
+        return float(np.mean(vals)) if vals else float("nan")
+
+    trend_g = _avg(groups.get("TrendStructure", ["TrendIntegrity", "TrendPersistence", "TrendChurnControl"]))
+    vol_risk_g = _avg(groups.get("VolatilityTail", ["VolRisk", "TailGapRisk", "VolOfVolRisk"]))
+    dd_risk_g = _avg(groups.get("DrawdownRecovery", ["MaxDrawdownRisk", "RecoverySlownessRisk", "DrawdownFrequencyRisk"]))
+    liq_g = _avg(groups.get("LiquidityTradability", ["LiquidityTradability", "LiquidityLevel", "LiquidityConsistency"]))
+    beh_g = _avg(groups.get("BehaviorSetup", ["BreakoutQuality", "MeanReversionWhipsaw", "AutoCorrMomentum"]))
+
+    # Convert risk groups into positive-direction scores (higher = better control)
+    vol_stab = (10.0 - float(vol_risk_g)) if pd.notna(vol_risk_g) else float("nan")
+    dd_res = (10.0 - float(dd_risk_g)) if pd.notna(dd_risk_g) else float("nan")
+
+    sig_stats: List[Tuple[str, float]] = [
+        ("Trend", trend_g),
+        ("Vol-Stability", vol_stab),
+        ("DD-Resilience", dd_res),
+        ("Liquidity", liq_g),
+        ("Behavior", beh_g),
+    ]
+    radar_svg = _radar_svg_es(sig_stats, maxv=10.0, size=220)
 
     panel1 = f"""
     <div class="es-panel">
       <div class="es-pt">1) STOCK DNA</div>
-      <div class="es-note" style="font-weight:900;">{html.escape(dna_nick)} <span class="es-meta">[{html.escape(class_name)}]</span></div>
+      <div class="es-note" style="font-weight:900;">{html.escape(class_name)}</div>{dna_badge_html_es}
       <div class="es-bline-wrap">{narrative_html}</div>
       <div class="es-sig-wrap">
         <div class="es-sig-radar">{radar_svg}</div>
-        <div class="es-sig-metrics">
-          <div class="es-note" style="margin-bottom:6px;font-weight:900;">Class Signature</div>
-          {sig_rows_html}
-        </div>
       </div>
     </div>
     """
@@ -6093,19 +6204,19 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             # 2) CURRENT STATUS
             # ============================================================
             st.markdown('<div class="major-sec">CURRENT STATUS</div>', unsafe_allow_html=True)
-    
+
             # 2.1 Relative Strength vs VNINDEX
             rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
             st.markdown(f"**Relative Strength vs VNINDEX:** {_val_or_na(rel)}")
-    
+
             # 2.2 Scenario & Scores
             scenario_pack = ap.get("Scenario12") or {}
             master_pack = ap.get("MasterScore") or {}
             conviction_score = ap.get("Conviction")
-    
+
             st.markdown("**Scenario & Scores**")
             st.markdown(f"- Scenario: {_val_or_na(scenario_pack.get('Name'))}")
-    
+
             def _bar_row_cs(label: str, val: Any, maxv: float = 10.0) -> None:
                 v = _safe_float(val, default=np.nan)
                 if pd.isna(v):
@@ -6125,15 +6236,158 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                     """,
                     unsafe_allow_html=True
                 )
-    
+
             _bar_row_cs("Điểm tổng hợp", master_pack.get("Total"), 10.0)
             _bar_row_cs("Điểm tin cậy", conviction_score, 10.0)
-    
-            # Current Status Insight (MasterScore + Conviction)
+
+            # 2.3 State Capsule (Facts-only, compact)
+            st.markdown("**State Capsule (Facts)**")
+            protech = ap.get("ProTech") or {}
+            protech = protech if isinstance(protech, dict) else {}
+            ma = protech.get("MA") or {}
+            ma = ma if isinstance(ma, dict) else {}
+            rsi = protech.get("RSI") or {}
+            rsi = rsi if isinstance(rsi, dict) else {}
+            macd = protech.get("MACD") or {}
+            macd = macd if isinstance(macd, dict) else {}
+            vol = protech.get("Volume") or {}
+            vol = vol if isinstance(vol, dict) else {}
+            bias = protech.get("Bias") or {}
+            bias = bias if isinstance(bias, dict) else {}
+
+            fib_ctx = ((ap.get("Fibonacci") or {}).get("Context") or {})
+            fib_ctx = fib_ctx if isinstance(fib_ctx, dict) else {}
+
+            ma_reg = _safe_text(ma.get("Regime"))
+            rsi_zone = _safe_text(rsi.get("State"))
+            rsi_dir = _safe_text(rsi.get("Direction"))
+            macd_rel = _safe_text(macd.get("State"))
+            macd_zero = _safe_text(macd.get("ZeroLine"))
+            align = _safe_text(bias.get("Alignment"))
+
+            short_band = _safe_text(fib_ctx.get("ShortBand"))
+            long_band = _safe_text(fib_ctx.get("LongBand"))
+            fib_conflict = bool(fib_ctx.get("FiboConflictFlag"))
+
+            vol_ratio = _safe_float(vol.get("Ratio"), default=np.nan)
+
+            st.markdown(f"- MA Structure: {_val_or_na(ma_reg)}")
+            st.markdown(f"- RSI: {_val_or_na(rsi_zone)} | {_val_or_na(rsi_dir)}")
+            st.markdown(f"- MACD: {_val_or_na(macd_rel)} | ZeroLine: {_val_or_na(macd_zero)}")
+            st.markdown(f"- RSI+MACD Alignment: {_val_or_na(align)}")
+            st.markdown(f"- Fibonacci Bands (Short/Long): {_val_or_na(short_band)} / {_val_or_na(long_band)}" + (" | Conflict" if fib_conflict else ""))
+            st.markdown(f"- Volume Ratio (vs 20d): {_val_or_na(vol_ratio)}")
+
+            # 2.4 Combat Readiness (Now) — merged from legacy Combat Stats
+            st.markdown("**Combat Readiness (Now)**")
+            combat = cp.get("CombatStats") or {}
+            combat = combat if isinstance(combat, dict) else {}
+
+            def _bar_row_now(label: str, val: Any, maxv: float = 10.0) -> None:
+                v = _safe_float(val, default=np.nan)
+                if pd.isna(v):
+                    pct = 0.0
+                    v_disp = "N/A"
+                else:
+                    v = float(v)
+                    pct = _clip(v / maxv * 100.0, 0.0, 100.0)
+                    v_disp = f"{v:.1f}/{maxv:.0f}"
+                st.markdown(
+                    f"""
+                    <div class="gc-row">
+                      <div class="gc-k">{html.escape(str(label))}</div>
+                      <div class="gc-bar"><div class="gc-fill" style="width:{pct:.0f}%"></div></div>
+                      <div class="gc-v">{html.escape(str(v_disp))}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+            _bar_row_now("Upside Room", combat.get("UpsideRoom"), 10.0)
+            _bar_row_now("Upside Quality", combat.get("UpsideQuality"), 10.0)
+            _bar_row_now("Downside Safety", combat.get("DownsideRisk"), 10.0)
+            _bar_row_now("R:R Efficiency", combat.get("RREfficiency"), 10.0)
+            _bar_row_now("Breakout Force", combat.get("BreakoutForce"), 10.0)
+            _bar_row_now("Support Resilience", combat.get("SupportResilience"), 10.0)
+
+            # 2.5 Trigger Status (Plan-Gated)
+            st.markdown("**Trigger Status (Plan-Gated)**")
+            primary = ap.get("PrimarySetup") or {}
+            primary = primary if isinstance(primary, dict) else {}
+            setup_name = _safe_text(primary.get("Name")).strip()
+            rr_val = _safe_float(primary.get("RR"), default=np.nan)
+
+            plan_status = "N/A"
+            plan_tags: List[str] = []
+            for p in (ap.get("TradePlans") or []):
+                if _safe_text(p.get("Name")).strip() == setup_name and setup_name and setup_name != "N/A":
+                    plan_status = _safe_text(p.get("Status") or "N/A")
+                    plan_tags = list(p.get("ReasonTags") or [])
+                    rr_val = _safe_float(p.get("RR"), default=rr_val)
+                    break
+
+            def _status_from_val(v: Any, good: float, warn: float) -> Tuple[str, str]:
+                x = _safe_float(v, default=np.nan)
+                if pd.isna(x):
+                    return ("N/A", "#9CA3AF")
+                if x >= good:
+                    return ("PASS", "#22C55E")
+                if x >= warn:
+                    return ("WAIT", "#F59E0B")
+                return ("FAIL", "#EF4444")
+
+            def _dot(color: str) -> str:
+                return f'<span class="es-dot" style="background:{color};"></span>'
+
+            s_break, c_break = _status_from_val(combat.get("BreakoutForce"), good=6.8, warn=5.5)
+            s_vol, c_vol = _status_from_val(vol_ratio, good=1.20, warn=0.95)
+            s_rr, c_rr = _status_from_val(rr_val, good=1.80, warn=1.30)
+
+            st.markdown(
+                f"""<ul style="margin:0 0 0 16px; padding:0;">
+                      <li>{_dot(c_break)} Breakout: {s_break}</li>
+                      <li>{_dot(c_vol)} Volume: {s_vol}</li>
+                      <li>{_dot(c_rr)} R:R: {s_rr}</li>
+                      <li>{_dot("#60A5FA")} Gate: {html.escape(str(gate_status or "N/A"))} | Plan: {html.escape(str(setup_name or "N/A"))} ({html.escape(str(plan_status or "N/A"))})</li>
+                    </ul>""",
+                unsafe_allow_html=True
+            )
+
+            if plan_tags:
+                tags_show = ", ".join([t for t in plan_tags if isinstance(t, str) and t.strip()][:6])
+                if tags_show:
+                    st.caption(f"Plan tags: {tags_show}")
+
+            # 2.6 Risk Flags (from weakness flags + DNA modifiers)
+            st.markdown("**Risk Flags**")
+            flags = list(cp.get("Flags") or [])
+            risk_lines = []
+            for f in flags:
+                try:
+                    sev = int(f.get("severity", 1))
+                except Exception:
+                    sev = 1
+                if sev >= 2:
+                    note = _safe_text(f.get("note") or "").strip()
+                    code = _safe_text(f.get("code") or "Flag").strip()
+                    risk_lines.append(f"- [{code}] {note}" if note else f"- [{code}]")
+
+            dna_t1 = (((cp.get("StockTraits") or {}).get("DNA") or {}).get("Tier1") or {})
+            mods = dna_t1.get("Modifiers") if isinstance(dna_t1, dict) else []
+            if isinstance(mods, list) and mods:
+                mods_txt = ", ".join([str(x) for x in mods[:6]])
+                risk_lines.append(f"- [DNA Modifiers] {mods_txt}")
+
+            if risk_lines:
+                st.markdown("\n".join(risk_lines))
+            else:
+                st.markdown("- None")
+
+            # Current Status Insight (MasterScore + Conviction) — interpret the two scores + gate
             render_current_status_insight(master_pack.get("Total"), conviction_score, gate_status)
-    
-            # 2.3 TECHNICAL ANALYSIS (reuse A-section body)
-            st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
+
+            # 2.7 TECHNICAL SNAPSHOT (reuse A-section body: MA/Fibo/RSI/MACD/Volume/PA)
+            st.markdown('<div class="sec-title">TECHNICAL SNAPSHOT</div>', unsafe_allow_html=True)
             a_items = _extract_a_items(a_section)
             a_raw = (a_section or "").replace("\r\n", "\n")
             a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
@@ -6155,7 +6409,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                     st.markdown(a_body, unsafe_allow_html=False)
                 else:
                     st.info("N/A")
-    
+
             # ============================================================
             # 3) TRADE PLAN & R:R (CONDITIONAL)
             # ============================================================
@@ -6766,9 +7020,9 @@ def main():
 .es-mini>div{height:10px;background:linear-gradient(90deg,#2563EB 0%,#7C3AED 100%);border-radius:99px;}
 .es-bline-wrap{margin-top:6px;}
 .es-bline{font-size:13px;color:rgba(255,255,255,0.82);line-height:1.35;margin:2px 0;}
-.es-sig-wrap{display:flex;gap:12px;align-items:flex-start;margin-top:10px;}
-.es-sig-radar{flex:0 0 180px;}
-.es-radar-svg{width:180px;height:180px;display:block;}
+.es-sig-wrap{display:flex;justify-content:center;align-items:center;margin-top:10px;}
+.es-sig-radar{flex:0 0 220px;}
+.es-radar-svg{width:220px;height:220px;display:block;}
 .es-sig-metrics{flex:1;}
 .es-sig-row{display:flex;justify-content:space-between;gap:10px;font-size:14px;margin:4px 0;}
 .es-sig-row .k{color:rgba(255,255,255,0.78);font-weight:850;}
