@@ -112,7 +112,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "11.1"
+APP_VERSION = "11.8"
 APP_TITLE = "INCEPTION"
 
 class DataError(Exception):
@@ -1438,6 +1438,271 @@ def compute_level_context_features(last: pd.Series, dual_fib: Dict[str, Any]) ->
         "NearestResistance": res_pack
     }
 
+# ============================================================
+# 7C. STRUCTURE QUALITY PACK (Support/Resistance Quality-Aware)
+# ============================================================
+def compute_structure_quality_pack(
+    df: pd.DataFrame,
+    last: pd.Series,
+    dual_fib: Optional[Dict[str, Any]] = None,
+    fib_ctx: Optional[Dict[str, Any]] = None,
+    *,
+    daily_lookback: int = 60,
+    weekly_lookback_weeks: int = 78
+) -> Dict[str, Any]:
+    """
+    Computes a quality-aware Support/Resistance pack to prevent structural blind spots:
+    - Distinguishes Tactical (60–90D/daily) vs Structural (~250D/weekly) levels
+    - Distinguishes strength tiers (LIGHT/MED/HEAVY/CONFLUENCE)
+    - Provides a CeilingGate for bull-trap control (breakout over weak tactical vs structural ceiling)
+
+    Output is facts-only; GPT/renderer should only interpret.
+    """
+
+    dual_fib = dual_fib if isinstance(dual_fib, dict) else {}
+    fib_ctx = fib_ctx if isinstance(fib_ctx, dict) else {}
+
+    c = _safe_float(last.get("Close"))
+    if pd.isna(c) or c == 0:
+        return {
+            "Meta": {"Price": np.nan, "VolPct_ATRProxy": np.nan, "NearThresholdPct": np.nan, "ZoneWidthPct": np.nan},
+            "OverheadResistance": {"Nearest": {}},
+            "UnderlyingSupport": {"Nearest": {}},
+            "Gates": {"CeilingGate": {"Status": "N/A", "Reason": "Missing price", "Horizon": "N/A", "Tier": "N/A",
+                                      "NearestLevelPrice": None, "DistancePct": None}}
+        }
+
+    denom = _dynamic_vol_proxy(df, 20)
+    vol_pct = (denom / c * 100.0) if (pd.notna(denom) and pd.notna(c) and c != 0) else np.nan
+
+    near_th = float(_clip(max(1.0, 0.8 * vol_pct) if pd.notna(vol_pct) else 1.5, 1.0, 2.5))
+    zone_w = float(_clip(max(0.8, 0.6 * vol_pct) if pd.notna(vol_pct) else 1.0, 0.8, 2.0))
+
+    def _cand(type_: str, horizon: str, price: float, weight: float) -> Dict[str, Any]:
+        dist_pct = ((price - c) / c * 100.0) if (pd.notna(price) and pd.notna(c) and c != 0) else np.nan
+        return {"Type": type_, "Horizon": horizon, "Price": float(price), "Weight": float(weight), "DistPct": float(dist_pct)}
+
+    W = {
+        "MA200": 4.0,
+        "WEEKLY_SWING": 4.0,
+        "FIB_LONG_61.8": 3.5,
+        "FIB_LONG_50.0": 2.5,
+        "FIB_LONG_38.2": 2.0,
+        "MA50": 3.0,
+        "DAILY_SWING": 2.5,
+        "FIB_SHORT_61.8": 2.5,
+        "FIB_SHORT_50.0": 2.0,
+        "FIB_SHORT_38.2": 1.5,
+        "MA20": 1.5,
+        "FIB_EXT": 1.0,
+    }
+
+    candidates: List[Dict[str, Any]] = []
+
+    ma20 = _safe_float(last.get("MA20"))
+    ma50 = _safe_float(last.get("MA50"))
+    ma200 = _safe_float(last.get("MA200"))
+    if pd.notna(ma20) and ma20 > 0:
+        candidates.append(_cand("MA20", "TACTICAL", ma20, W["MA20"]))
+    if pd.notna(ma50) and ma50 > 0:
+        candidates.append(_cand("MA50", "STRUCTURAL", ma50, W["MA50"]))
+    if pd.notna(ma200) and ma200 > 0:
+        candidates.append(_cand("MA200", "STRUCTURAL", ma200, W["MA200"]))
+
+    short_lv = (dual_fib.get("auto_short", {}) or {}).get("levels", {}) or {}
+    long_lv = (dual_fib.get("fixed_long", {}) or {}).get("levels", {}) or {}
+
+    def _add_fib(levels: Dict[str, Any], prefix: str, horizon: str):
+        for k, v in (levels or {}).items():
+            lv = _safe_float(v)
+            if pd.isna(lv) or lv <= 0:
+                continue
+            kk = str(k).strip()
+            if kk in ("61.8", "61.80"):
+                typ = f"{prefix}_61.8"; w = W.get(f"FIB_{prefix}_61.8", 2.0)
+            elif kk in ("50.0", "50", "50.00"):
+                typ = f"{prefix}_50.0"; w = W.get(f"FIB_{prefix}_50.0", 1.5)
+            elif kk in ("38.2", "38.20"):
+                typ = f"{prefix}_38.2"; w = W.get(f"FIB_{prefix}_38.2", 1.2)
+            else:
+                typ = f"{prefix}_EXT"; w = W.get("FIB_EXT", 1.0)
+            # Type example: FIB_SHORT_61.8 / FIB_LONG_61.8
+            candidates.append(_cand(f"FIB_{typ}", horizon, lv, float(w)))
+
+    _add_fib(short_lv, "SHORT", "TACTICAL")
+    _add_fib(long_lv, "LONG", "STRUCTURAL")
+
+    def _extract_daily_pivots(_df: pd.DataFrame, lb: int = 60) -> Tuple[List[float], List[float]]:
+        if _df is None or not isinstance(_df, pd.DataFrame) or _df.empty:
+            return ([], [])
+        if "High" not in _df.columns or "Low" not in _df.columns:
+            return ([], [])
+        d = _df.tail(int(lb)).copy()
+        hi = d["High"]
+        lo = d["Low"]
+        piv_hi, piv_lo = [], []
+        for i in range(1, len(d) - 1):
+            h0, h1, h2 = _safe_float(hi.iloc[i-1]), _safe_float(hi.iloc[i]), _safe_float(hi.iloc[i+1])
+            l0, l1, l2 = _safe_float(lo.iloc[i-1]), _safe_float(lo.iloc[i]), _safe_float(lo.iloc[i+1])
+            if pd.notna(h1) and pd.notna(h0) and pd.notna(h2) and h1 > h0 and h1 > h2:
+                piv_hi.append(float(h1))
+            if pd.notna(l1) and pd.notna(l0) and pd.notna(l2) and l1 < l0 and l1 < l2:
+                piv_lo.append(float(l1))
+        return (piv_hi, piv_lo)
+
+    dh, dl = _extract_daily_pivots(df, daily_lookback)
+    for p in dh:
+        candidates.append(_cand("DAILY_SWING_HIGH", "TACTICAL", p, W["DAILY_SWING"]))
+    for p in dl:
+        candidates.append(_cand("DAILY_SWING_LOW", "TACTICAL", p, W["DAILY_SWING"]))
+
+    def _extract_weekly_pivots(_df: pd.DataFrame, lb_weeks: int = 78) -> Tuple[List[float], List[float]]:
+        if _df is None or not isinstance(_df, pd.DataFrame) or _df.empty:
+            return ([], [])
+        if "High" not in _df.columns or "Low" not in _df.columns:
+            return ([], [])
+        d = _df.copy()
+        if not isinstance(d.index, pd.DatetimeIndex):
+            for col in ("Date", "Datetime", "date", "datetime"):
+                if col in d.columns:
+                    try:
+                        d[col] = pd.to_datetime(d[col], errors="coerce")
+                        d = d.set_index(col)
+                        break
+                    except Exception:
+                        pass
+        if not isinstance(d.index, pd.DatetimeIndex):
+            return ([], [])
+        d = d.sort_index()
+        w = d[["High", "Low"]].resample("W").agg({"High": "max", "Low": "min"}).dropna()
+        if w.empty:
+            return ([], [])
+        w = w.tail(int(lb_weeks)).copy()
+        wh = w["High"]
+        wl = w["Low"]
+        piv_hi, piv_lo = [], []
+        for i in range(1, len(w) - 1):
+            h0, h1, h2 = _safe_float(wh.iloc[i-1]), _safe_float(wh.iloc[i]), _safe_float(wh.iloc[i+1])
+            l0, l1, l2 = _safe_float(wl.iloc[i-1]), _safe_float(wl.iloc[i]), _safe_float(wl.iloc[i+1])
+            if pd.notna(h1) and pd.notna(h0) and pd.notna(h2) and h1 > h0 and h1 > h2:
+                piv_hi.append(float(h1))
+            if pd.notna(l1) and pd.notna(l0) and pd.notna(l2) and l1 < l0 and l1 < l2:
+                piv_lo.append(float(l1))
+        return (piv_hi, piv_lo)
+
+    wh, wl = _extract_weekly_pivots(df, weekly_lookback_weeks)
+    for p in wh:
+        candidates.append(_cand("WEEKLY_SWING_HIGH", "STRUCTURAL", p, W["WEEKLY_SWING"]))
+    for p in wl:
+        candidates.append(_cand("WEEKLY_SWING_LOW", "STRUCTURAL", p, W["WEEKLY_SWING"]))
+
+    def _cluster_nearest(side: str) -> Dict[str, Any]:
+        if side == "overhead":
+            pool = [x for x in candidates if pd.notna(x.get("Price")) and x["Price"] >= c]
+            pool = sorted(pool, key=lambda x: x["Price"])
+        else:
+            pool = [x for x in candidates if pd.notna(x.get("Price")) and x["Price"] <= c]
+            pool = sorted(pool, key=lambda x: x["Price"], reverse=True)
+
+        if not pool:
+            return {}
+
+        clusters: List[List[Dict[str, Any]]] = []
+        for it in pool:
+            placed = False
+            for cl in clusters:
+                center = float(np.mean([z["Price"] for z in cl]))
+                if abs(it["Price"] - center) / c * 100.0 <= zone_w:
+                    cl.append(it)
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([it])
+
+        def _center_dist(cl: List[Dict[str, Any]]) -> float:
+            center = float(np.mean([z["Price"] for z in cl]))
+            return abs((center - c) / c * 100.0)
+
+        clusters = sorted(clusters, key=_center_dist)
+        chosen = clusters[0]
+        center = float(np.mean([z["Price"] for z in chosen]))
+        dist_pct = abs((center - c) / c * 100.0)
+
+        horizons = {str(z.get("Horizon", "N/A")).upper() for z in chosen}
+        has_struct = "STRUCTURAL" in horizons
+        has_tact = "TACTICAL" in horizons
+        horizon = "BOTH" if (has_struct and has_tact) else ("STRUCTURAL" if has_struct else "TACTICAL")
+
+        confluence_count = int(len(chosen))
+        confluence_mult = float(_clip(1.0 + 0.25 * max(0, confluence_count - 1), 1.0, 1.75))
+
+        if dist_pct <= near_th:
+            near_factor = 1.0
+        else:
+            near_factor = max(0.6, near_th / dist_pct) if dist_pct > 0 else 1.0
+
+        raw = sum(float(z.get("Weight", 0.0)) for z in chosen) * confluence_mult * float(near_factor)
+        quality = float(_clip(raw * 1.2, 0.0, 10.0))
+
+        if quality >= 8.5 or (confluence_count >= 3 and has_struct):
+            tier = "CONFLUENCE"
+        elif quality >= 6.5:
+            tier = "HEAVY"
+        elif quality >= 4.0:
+            tier = "MED"
+        else:
+            tier = "LIGHT"
+
+        low = float(min(z["Price"] for z in chosen))
+        high = float(max(z["Price"] for z in chosen))
+        comps = sorted(chosen, key=lambda x: (-float(x.get("Weight", 0.0)), abs(float(x.get("DistPct", 0.0)))))[:3]
+
+        return {
+            "Zone": {"Low": low, "High": high},
+            "Center": center,
+            "DistancePct": float(dist_pct),
+            "Horizon": horizon,
+            "Tier": tier,
+            "QualityScore": quality,
+            "ComponentsTop": comps,
+            "ConfluenceCount": confluence_count
+        }
+
+    overhead = _cluster_nearest("overhead")
+    support = _cluster_nearest("support")
+
+    gate = {"Status": "N/A", "Reason": "N/A", "Horizon": "N/A", "Tier": "N/A", "NearestLevelPrice": None, "DistancePct": None}
+    if overhead:
+        dist = _safe_float(overhead.get("DistancePct"), default=np.nan)
+        tier = str(overhead.get("Tier", "N/A")).upper()
+        hz = str(overhead.get("Horizon", "N/A")).upper()
+        gate.update({"Horizon": hz, "Tier": tier, "NearestLevelPrice": float(overhead.get("Center", np.nan)), "DistancePct": float(dist)})
+
+        if pd.isna(dist) or dist > near_th:
+            gate.update({"Status": "PASS", "Reason": "No near ceiling"})
+        else:
+            if hz in ("STRUCTURAL", "BOTH") and tier in ("HEAVY", "CONFLUENCE"):
+                status = "WAIT"
+                reason = "Structural ceiling near"
+                if hz == "BOTH" and tier == "CONFLUENCE" and dist <= 0.5 * near_th:
+                    status = "FAIL"
+                    reason = "Confluence ceiling too close"
+                gate.update({"Status": status, "Reason": reason})
+            else:
+                gate.update({"Status": "PASS", "Reason": "Ceiling manageable"})
+
+    return {
+        "Meta": {
+            "Price": float(c),
+            "VolPct_ATRProxy": float(vol_pct) if pd.notna(vol_pct) else np.nan,
+            "NearThresholdPct": float(near_th),
+            "ZoneWidthPct": float(zone_w),
+        },
+        "OverheadResistance": {"Nearest": overhead or {}},
+        "UnderlyingSupport": {"Nearest": support or {}},
+        "Gates": {"CeilingGate": gate}
+    }
+
 def compute_market_context(df_all: pd.DataFrame) -> Dict[str, Any]:
     def pack(tick: str) -> Dict[str, Any]:
         d = df_all[df_all["Ticker"].astype(str).str.upper() == tick].copy()
@@ -2598,6 +2863,51 @@ def classify_scenario(last: pd.Series) -> str:
         elif c < ma200 and ma50 < ma200: return "Downtrend – Weak Phase"
     return "Neutral / Sideways"
 
+
+# --- Scenario 12 Spec Table (Canonical) ---
+# This table is the single source of truth for Scenario12 names and intended plan semantics.
+# It must remain "NOW" only (Current Status), and must NOT leak into Stock DNA.
+SCENARIO12_SPECS: Dict[int, Dict[str, Any]] = {
+    1:  {"Name": "S1 – Uptrend + Momentum Aligned",   "TrendRegime": "Up",      "MomentumRegime": "Aligned",
+         "DefaultPlan": "Pullback", "GateHint": "Prefer pullbacks; breakout only with Volume PASS + RR PASS.",
+         "Notes": ["Trend up + momentum aligned", "Best risk-adjusted entries on pullbacks/holds above MA50."]},
+    2:  {"Name": "S2 – Uptrend + Momentum Mixed",     "TrendRegime": "Up",      "MomentumRegime": "Mixed",
+         "DefaultPlan": "Pullback", "GateHint": "Wait for momentum confirmation; avoid chasing highs.",
+         "Notes": ["Trend ok but momentum not clean", "Trade smaller; require triggers."]},
+    3:  {"Name": "S3 – Uptrend + Momentum Counter",   "TrendRegime": "Up",      "MomentumRegime": "Counter",
+         "DefaultPlan": "Pullback", "GateHint": "Treat as pullback correction; wait for MACD/RSI re-alignment.",
+         "Notes": ["Trend up but momentum counter", "Higher whipsaw risk."]},
+    4:  {"Name": "S4 – Uptrend + RSI 70+",            "TrendRegime": "Up",      "MomentumRegime": "RSI_70Plus",
+         "DefaultPlan": "Breakout", "GateHint": "Overheat risk: only breakout with strong volume; otherwise wait.",
+         "Notes": ["Late-stage push possible", "Do not FOMO near resistance."]},
+
+    5:  {"Name": "S5 – Range + Momentum Aligned",     "TrendRegime": "Neutral", "MomentumRegime": "Aligned",
+         "DefaultPlan": "Range", "GateHint": "Range trade only near edges; confirm levels.",
+         "Notes": ["Momentum aligned inside range", "Avoid entries mid-range."]},
+    6:  {"Name": "S6 – Range + Balanced/Mixed",       "TrendRegime": "Neutral", "MomentumRegime": "Mixed",
+         "DefaultPlan": "Range", "GateHint": "No edge unless clear support/resistance + RR gate.",
+         "Notes": ["Balanced/indecisive", "Prefer WAIT unless strong location."]},
+    7:  {"Name": "S7 – Range + Momentum Counter",     "TrendRegime": "Neutral", "MomentumRegime": "Counter",
+         "DefaultPlan": "Range", "GateHint": "High noise: require strict triggers and small size.",
+         "Notes": ["Counter signals in range", "False breaks likely."]},
+    8:  {"Name": "S8 – Range + RSI 70+",              "TrendRegime": "Neutral", "MomentumRegime": "RSI_70Plus",
+         "DefaultPlan": "Breakout", "GateHint": "May be breakout attempt; need follow-through + volume.",
+         "Notes": ["Potential transition from range to trend", "Demand confirmation."]},
+
+    9:  {"Name": "S9 – Downtrend + Momentum Aligned", "TrendRegime": "Down",    "MomentumRegime": "Aligned",
+         "DefaultPlan": "Avoid", "GateHint": "Avoid longs; only tactical trades with tight risk.",
+         "Notes": ["Downtrend confirmed", "Capital preservation first."]},
+    10: {"Name": "S10 – Downtrend + Momentum Mixed",  "TrendRegime": "Down",    "MomentumRegime": "Mixed",
+         "DefaultPlan": "Avoid", "GateHint": "Wait for base/structure change; do not bottom-fish.",
+         "Notes": ["Weak structure", "Watchlist only unless reversal signals."]},
+    11: {"Name": "S11 – Downtrend + Momentum Counter","TrendRegime": "Down",    "MomentumRegime": "Counter",
+         "DefaultPlan": "ReversalWatch", "GateHint": "Counter-rally risk: treat as rebound until structure flips.",
+         "Notes": ["Countertrend bounce possible", "Require MA structure repair."]},
+    12: {"Name": "S12 – Downtrend + RSI 70+",         "TrendRegime": "Down",    "MomentumRegime": "RSI_70Plus",
+         "DefaultPlan": "ReversalWatch", "GateHint": "Rare; often short squeeze. Do not assume trend reversal.",
+         "Notes": ["Short squeeze / spike risk", "Wait for confirmation before bias flip."]},
+}
+
 # --- STEP 6B (v5.4): SCENARIO 12 NEUTRAL ("Extended" -> "RSI_70Plus") ---
 def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
     c = _safe_float(last.get("Close"))
@@ -2688,7 +2998,8 @@ def classify_scenario12(last: pd.Series) -> Dict[str, Any]:
         "TrendRegime": trend,
         "MomentumRegime": mom,
         "VolumeRegime": vol_reg,
-        "Name": name_map.get((trend, mom), "Scenario – N/A"),
+        "Name": (SCENARIO12_SPECS.get(int(code), {}) or {}).get("Name") or name_map.get((trend, mom), "Scenario – N/A"),
+        "Spec": (SCENARIO12_SPECS.get(int(code), {}) or {}),
         "RulesHit": rules_hit,
         "Flags": {
             "TrendUp": (trend=="Up"),
@@ -3056,7 +3367,10 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
     rsi_ctx = compute_rsi_context_features(df)
     vol_ctx = compute_volume_context_features(df)
     lvl_ctx = compute_level_context_features(last, dual_fib)
-    
+
+    # --- STEP 7C: Structure Quality (Support/Resistance Quality-Aware) ---
+    struct_q = compute_structure_quality_pack(df, last, dual_fib=dual_fib, fib_ctx=fib_ctx)
+
     market_ctx = compute_market_context(df_all)
     stock_chg = np.nan
     if len(df) >= 2:
@@ -3173,6 +3487,12 @@ def analyze_ticker(ticker: str) -> Dict[str, Any]:
             "RR": _safe_float(best.get("RR")),
             "Confidence (Tech)": best.get("Confidence (Tech)", best.get("Probability", "N/A"))
         }
+    # Attach StructureQuality to AnalysisPack (single source of truth for flags/gates/plan anchoring)
+    try:
+        analysis_pack["StructureQuality"] = sanitize_pack(struct_q) if isinstance(struct_q, dict) else {}
+    except Exception:
+        analysis_pack["StructureQuality"] = struct_q if isinstance(struct_q, dict) else {}
+
     
     primary = pick_primary_setup_v2(rrsim)
     # Phase 5: prevent NaN leakage in PrimarySetup
@@ -3400,6 +3720,24 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
             ctx = fib.get("Context", {})
             if isinstance(ctx, dict):
                 fib_ctx = ctx
+
+    # --------------------------
+    # STRUCTURE QUALITY (quality-aware support/resistance)
+    # Prefer AnalysisPack['StructureQuality'] as single source of truth; fallback if missing.
+    # --------------------------
+    struct_q = ap.get("StructureQuality", {})
+    if not isinstance(struct_q, dict) or not struct_q:
+        try:
+            fib = ap.get("Fibonacci", {}) if isinstance(ap.get("Fibonacci", {}), dict) else {}
+            dual_fib_lite = {
+                "auto_short": fib.get("Short", {}) if isinstance(fib.get("Short", {}), dict) else {},
+                "fixed_long": fib.get("Long", {}) if isinstance(fib.get("Long", {}), dict) else {},
+            }
+            last_row = df.iloc[-1] if (df is not None and hasattr(df, "iloc") and len(df) > 0) else last
+            struct_q = compute_structure_quality_pack(df, last_row, dual_fib=dual_fib_lite, fib_ctx=fib_ctx)
+        except Exception:
+            struct_q = {}
+
 
     primary = ap.get("PrimarySetup", {})
     primary = primary if isinstance(primary, dict) else {}
@@ -3657,11 +3995,40 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
     # WEAKNESS FLAGS (severity 1–3)
     # --------------------------
     flags = []
-    def add_flag(code: str, severity: int, note: str):
-        flags.append({"code": code, "severity": int(severity), "note": note})
+    def add_flag(code: str, severity: int, note: str, meta: Optional[Dict[str, Any]] = None):
+        rec = {"code": code, "severity": int(severity), "note": note}
+        if isinstance(meta, dict) and meta:
+            rec["meta"] = meta
+        flags.append(rec)
 
-    if pd.notna(upside_n) and upside_n < 1.0:
-        add_flag("NearMajorResistance", 2, "Upside ngắn trước kháng cự gần")
+    # NearMajorResistance: quality-aware (structural vs tactical; tier-aware).
+    # Prevents false positives where a breakout clears a weak tactical level but hits a structural ceiling (e.g., MA200).
+    try:
+        ov = ((struct_q or {}).get("OverheadResistance", {}) or {}).get("Nearest", {}) or {}
+        meta_p = (struct_q or {}).get("Meta", {}) if isinstance((struct_q or {}).get("Meta", {}), dict) else {}
+        near_th = _safe_float(meta_p.get("NearThresholdPct"), default=np.nan)
+        dist = _safe_float(ov.get("DistancePct"), default=np.nan)
+        hz = _safe_text(ov.get("Horizon") or "N/A").upper()
+        tier = _safe_text(ov.get("Tier") or "N/A").upper()
+
+        comps = ov.get("ComponentsTop") if isinstance(ov.get("ComponentsTop"), list) else []
+        type_top = _safe_text((comps[0] or {}).get("Type")) if (len(comps) > 0 and isinstance(comps[0], dict)) else ""
+        type_top = type_top.strip()
+
+        is_near = (pd.notna(dist) and pd.notna(near_th) and dist <= near_th)
+        if is_near and hz in ("STRUCTURAL", "BOTH") and tier in ("HEAVY", "CONFLUENCE"):
+            sev = 3 if tier == "CONFLUENCE" else 2
+            note = "Trần cấu trúc gần – upside ngắn bị nén"
+            if type_top:
+                note = f"{note} ({type_top})"
+            add_flag("NearMajorResistance", sev, note, meta={"Horizon": hz, "Tier": tier, "TypeTop": type_top, "DistancePct": dist, "NearThPct": near_th})
+        elif is_near and hz == "TACTICAL" and tier in ("LIGHT", "MED"):
+            # Minor reminder only (does not block; reduces over-warning on weak tactical levels)
+            add_flag("NearMinorResistance", 1, "Cản ngắn hạn gần (tactical)")
+    except Exception:
+        # Legacy fallback
+        if pd.notna(upside_n) and upside_n < 1.0:
+            add_flag("NearMajorResistance", 2, "Upside ngắn trước kháng cự gần")
     if pd.notna(vol_ratio) and vol_ratio < 0.9:
         add_flag("NoVolumeConfirm", 2, "Thiếu xác nhận dòng tiền")
     if "bear" in rsi_div:
@@ -4365,6 +4732,7 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         "AdjustedStats": adjusted_stats,
         "StockTraits": stock_traits,
         "CombatStats": combat_stats,
+        "StructureQuality": struct_q,
         "Flags": flags,
         "Conviction": {"Points": points, "Tier": tier, "SizeGuidance": size_guidance},
         "ActionTags": tags,
@@ -4752,6 +5120,36 @@ CLASS_TEMPLATES_DASHBOARD: Dict[str, List[str]] = {
 }
 
 
+# ============================================================
+# CLASS POLICY HINTS (CURRENT STATUS) — DISPLAY-ONLY
+# ============================================================
+# Purpose: provide a one-line execution policy hint based on FINAL CLASS.
+# Option C1 (hint only): does NOT modify scores, triggers, or trade plan logic.
+CLASS_POLICY_HINTS: Dict[str, Dict[str, Any]] = {
+    "Smooth Trend": {"rr_min": 1.8, "size_cap": "100%", "overnight": "Normal"},
+    "Momentum Trend": {"rr_min": 2.0, "size_cap": "85%", "overnight": "Caution"},
+    "Aggressive Trend": {"rr_min": 2.2, "size_cap": "70%", "overnight": "Limit"},
+    "Range / Mean-Reversion (Stable)": {"rr_min": 1.6, "size_cap": "100%", "overnight": "Normal"},
+    "Volatile Range": {"rr_min": 2.0, "size_cap": "70%", "overnight": "Caution"},
+    "Mixed / Choppy Trader": {"rr_min": 2.2, "size_cap": "60%", "overnight": "Limit"},
+    "Event / Gap-Prone": {"rr_min": 2.5, "size_cap": "50%", "overnight": "Avoid"},
+    "Illiquid / Noisy": {"rr_min": 2.5, "size_cap": "40%", "overnight": "Caution"},
+}
+
+def get_class_policy_hint_line(final_class: str) -> str:
+    cn = _safe_text(final_class).strip()
+    p = CLASS_POLICY_HINTS.get(cn)
+    if not p:
+        return ""
+    rr = p.get("rr_min")
+    size_cap = _safe_text(p.get("size_cap")).strip()
+    overnight = _safe_text(p.get("overnight")).strip()
+    rr_txt = f"RR≥{float(rr):.1f}" if isinstance(rr, (int, float)) else ""
+    size_txt = f"Size≤{size_cap}" if size_cap else ""
+    on_txt = f"Overnight: {overnight}" if overnight else ""
+    parts = [x for x in (rr_txt, size_txt, on_txt) if x]
+    return " | ".join(parts)
+
 # Mapping for bilingual playstyle tags (EN → EN + VI).
 PLAYSTYLE_TAG_TRANSLATIONS: Dict[str, str] = {
     "Pullback-buy zone (confluence)": "Pullback-buy zone (confluence) - Vùng mua pullback có nhiều yếu tố hội tụ",
@@ -4998,7 +5396,9 @@ def render_stock_dna_insight(character_pack: Dict[str, Any]) -> None:
     st.markdown(f"- Fit: {html.escape(fit)}")
 
 def render_current_status_insight(master_score_total: Any, conviction_score: Any, gate_status: Optional[str] = None) -> None:
-    """Current Status Insight (MasterScore + Conviction) — fixed 4-part structure with score-aware wording."""
+    """Current Status Insight — concise interpretation of MasterScore & Conviction (single block).
+    Note: This is intentionally short and belongs directly under the two score bars.
+    """
     ms = _safe_float(master_score_total, default=np.nan)
     cs = _safe_float(conviction_score, default=np.nan)
     if pd.isna(ms) or pd.isna(cs) or (not math.isfinite(float(ms))) or (not math.isfinite(float(cs))):
@@ -5006,7 +5406,6 @@ def render_current_status_insight(master_score_total: Any, conviction_score: Any
     ms = float(ms)
     cs = float(cs)
 
-    # --- Buckets ---
     def _bucket(v: float) -> str:
         if v < 4.0:
             return "low"
@@ -5019,7 +5418,6 @@ def render_current_status_insight(master_score_total: Any, conviction_score: Any
     ms_b = _bucket(ms)
     cs_b = _bucket(cs)
 
-    # --- Section 1: meaning ---
     ms_meaning = {
         "low": ("Chất lượng cơ hội hiện tại kém hấp dẫn.",
                 "Thường phản ánh: xu hướng/structure xấu hoặc R:R không đáng để mạo hiểm."),
@@ -5033,109 +5431,22 @@ def render_current_status_insight(master_score_total: Any, conviction_score: Any
 
     cs_meaning = {
         "low": ("‘Độ chắc chắn của nhận định’ thấp (tín hiệu còn nhiễu / dễ bị đảo).",
-                "chỉ quan sát; tránh hành động lớn vì xác suất sai cao."),
+                "Chỉ quan sát; tránh hành động lớn vì xác suất sai cao."),
         "mid": ("‘Độ chắc chắn của nhận định’ trung tính (đủ để theo dõi nghiêm túc).",
                 "Có tín hiệu hợp lý nhưng chưa đủ đồng thuận để trade mạnh."),
         "good": ("‘Độ chắc chắn của nhận định’ khá tốt (đồng thuận tăng).",
-                 "có thể triển khai có kỷ luật; ưu tiên plan rõ ràng, tránh FOMO."),
+                 "Có thể triển khai có kỷ luật; ưu tiên plan rõ ràng, tránh FOMO."),
         "high": ("‘Độ chắc chắn của nhận định’ cao (đồng thuận mạnh, ít nhiễu).",
                  "Phù hợp triển khai theo kế hoạch; tập trung quản trị rủi ro thay vì do dự."),
     }[cs_b]
 
-    # --- Section 2: action conclusion (prefer gate_status if provided to avoid inconsistency) ---
-    gs = (gate_status or "").upper().strip()
-    if gs in ("ACTIVE", "WATCH", "LOCK"):
-        action = gs
-    else:
-        # fallback by MS/CS only
-        if ms >= 7.5 and cs >= 7.0:
-            action = "ACTIVE"
-        elif ms < 5.0 and cs < 5.0:
-            action = "LOCK"
-        else:
-            action = "WATCH"
-
-    action_text = {
-        "ACTIVE": "ACTIVE / có thể triển khai",
-        "WATCH": "WATCH / chờ xác nhận",
-        "LOCK": "LOCK / tránh vào mới",
-    }[action]
-
-    ms_short = {"low": "kém hấp dẫn", "mid": "trung tính", "good": "khá hấp dẫn", "high": "rất hấp dẫn"}[ms_b]
-    cs_short = {"low": "thấp", "mid": "trung bình", "good": "khá cao", "high": "rất cao"}[cs_b]
-
-    # --- Section 3: execution (keep it practical, avoid extra numbers) ---
-    if action == "ACTIVE":
-        exec_no_pos = "Bám Trade Plan. Có thể vào theo kịch bản ưu tiên; ưu tiên vào theo nhịp/pullback thay vì đuổi giá."
-        exec_have_pos = "Giữ kỷ luật stop theo plan. Có thể gia tăng theo đúng điều kiện pyramid (chỉ khi có follow-through/volume xác nhận)."
-        plan_note = "Nếu có trade plan: xem như ‘kế hoạch triển khai’, nhưng vẫn ưu tiên vào đúng nhịp để tối ưu R:R."
-    elif action == "LOCK":
-        exec_no_pos = "Không vào lệnh mới. Chỉ quan sát cho đến khi cấu trúc/đồng thuận cải thiện rõ ràng."
-        exec_have_pos = "Ưu tiên bảo toàn: siết kỷ luật stop/giảm rủi ro nếu có dấu hiệu mất cấu trúc."
-        plan_note = "Nếu có trade plan: chỉ giữ vai trò tham chiếu; hiện chưa đủ điều kiện để triển khai."
-    else:  # WATCH
-        exec_no_pos = "Không vào lệnh theo cảm tính. Chỉ vào khi Trade Plan chuyển sang điều kiện rõ ràng hơn (plan Active + xác nhận volume/structure)."
-        exec_have_pos = "Giữ kỷ luật stop, tránh tăng thêm vị thế."
-        plan_note = "Nếu có trade plan: chỉ xem như ‘kế hoạch theo dõi’, không commit size lớn."
-
-    # --- Section 4: what to see next (avoid nonsensical 'MS -> >6' when MS already high) ---
-    if ms_b == "low":
-        improve_line = f"Thông thường, để từ {ms:.1f} → >6, bạn sẽ cần ít nhất 2/3 tín hiệu sau:"
-        b1 = "Giá reclaim lại cấu trúc/MA quan trọng (đừng bắt đáy khi chưa reclaim)"
-        b2 = "Volume xác nhận: nhịp tăng có lực, nhịp lùi không bị xả mạnh"
-        b3 = "RSI/MACD chuyển từ ‘lưỡng lự’ sang ‘ủng hộ’ (momentum quay lại)"
-        warn = ""
-    elif ms_b == "mid":
-        improve_line = f"Thông thường, để nâng {ms:.1f} lên >6, bạn sẽ cần ít nhất 2/3 tín hiệu sau:"
-        b1 = "Giá giữ được vùng hỗ trợ/MA then chốt và bắt đầu tạo higher-low rõ ràng"
-        b2 = "Volume xác nhận: breakout/pullback không bị kiệt lực"
-        b3 = "RSI/MACD cải thiện: cross/độ dốc thuận lợi, histogram mở rộng"
-        warn = ""
-    elif ms_b == "good":
-        improve_line = f"Thông thường, để chuyển từ ‘khá’ ({ms:.1f}) sang ‘ưu tiên triển khai’, bạn sẽ cần ít nhất 1 tín hiệu sau:"
-        b1 = "Break/reclaim vùng kháng cự gần nhất và giữ được sau breakout (không false break)"
-        b2 = "Follow-through volume: tăng có lực đi kèm thanh khoản, pullback không xả"
-        b3 = "Momentum xác nhận: RSI giữ vững vùng bullish, MACD/histogram tiếp tục ủng hộ"
-        warn = ""
-    else:
-        improve_line = f"Với điểm cao ({ms:.1f}), mục tiêu là GIỮ lợi thế và tránh tụt điểm. Theo dõi 3 nhóm tín hiệu sau:"
-        b1 = "Giữ được cấu trúc/MA hỗ trợ: mất cấu trúc là tín hiệu giảm điểm nhanh nhất"
-        b2 = "Volume không ‘kiệt’ ở vùng breakout: nếu thanh khoản hụt, ưu thế sẽ mỏng dần"
-        b3 = "Momentum không suy yếu: histogram co lại liên tiếp hoặc phân kỳ giảm là cảnh báo"
-        warn = "\n\nCờ tụt điểm: thủng MA/structure + volume xả, hoặc momentum đảo chiều rõ."
-    section4_title = "4) Tín hiệu cần theo dõi để GIỮ lợi thế" if ms_b == "high" else "4) Tín hiệu cần thấy để điểm cải thiện"
-    block = f"""1) Điểm tổng hợp {ms:.1f}/10
+    block = f"""Điểm tổng hợp {ms:.1f}/10
 {ms_meaning[0]}
 {ms_meaning[1]}
 
 Điểm tin cậy {cs:.1f}/10
 {cs_meaning[0]}
-{cs_meaning[1]}
-
-2) Kết hợp 2 điểm → kết luận hành động
-Cơ hội {ms_short} ({ms:.1f}) + độ tin cậy {cs_short} ({cs:.1f}) ⇒ Trạng thái tiềm năng:
-
-{action_text}
-
-{plan_note}
-Ưu tiên kỷ luật và chờ market ‘trả đúng giá’ theo plan.
-
-3) Nếu bạn chưa có vị thế:
-
-{exec_no_pos}
-
-Nếu bạn đang có vị thế:
-
-{exec_have_pos}
-
-{section4_title}
-{improve_line}
-
-{b1}
-
-{b2}
-
-{b3}{warn}"""
+{cs_meaning[1]}"""
     st.markdown(block)
 
 def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dict[str, Any], gate_status: str) -> None:
@@ -5460,24 +5771,217 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     </div>
     """
 
-    upside_room = (combat or {}).get("UpsideRoom", (combat or {}).get("UpsidePower"))
-    upside_quality = (combat or {}).get("UpsideQuality")
-    up_pct = _bar_pct_10(upside_room)
-    uq_pct = _bar_pct_10(upside_quality)
+    # ---------------------------
+    # Panel 2 — CURRENT STATUS (Dashboard)
+    #   Goal: answer in seconds: state → scores → triggers → next step → risks
+    # ---------------------------
+    protech = ap.get("ProTech") or {}
+    protech = protech if isinstance(protech, dict) else {}
+    ma = protech.get("MA") or {}
+    ma = ma if isinstance(ma, dict) else {}
+    volp = protech.get("Volume") or {}
+    volp = volp if isinstance(volp, dict) else {}
+    bias = protech.get("Bias") or {}
+    bias = bias if isinstance(bias, dict) else {}
+
+    ma_reg = _safe_text(ma.get("Regime") or "N/A").strip()
+    vol_reg = _safe_text(volp.get("Regime") or "N/A").strip()
+
+    # Location tag: prioritize explicit risk flags; fallback to MA200 positioning
+    flags_list = list(cp.get("Flags") or [])
+    has_near_res = any(isinstance(f, dict) and _safe_text(f.get("code")).strip() == "NearMajorResistance" for f in flags_list)
+    has_near_sup = any(isinstance(f, dict) and _safe_text(f.get("code")).strip() == "NearMajorSupport" for f in flags_list)
+    loc_tag = "Neutral"
+    if has_near_res:
+        loc_tag = "Near Resistance"
+    elif has_near_sup:
+        loc_tag = "Near Support"
+    else:
+        ma_struct = ma.get("Structure") or {}
+        ma_struct = ma_struct if isinstance(ma_struct, dict) else {}
+        above_200 = ma_struct.get("PriceAboveMA200")
+        if above_200 is True:
+            loc_tag = "Above MA200"
+        elif above_200 is False:
+            loc_tag = "Below MA200"
+
+    # State label: prefer setup intent; fallback to MA regime
+    sn_l = (setup_name or "").lower()
+    state_label = "Neutral"
+    if "breakout" in sn_l:
+        state_label = "Breakout Attempt"
+    elif "pullback" in sn_l:
+        state_label = "Pullback"
+    else:
+        if ma_reg == "Close>=MA50>=MA200":
+            state_label = "Uptrend"
+        elif ma_reg == "Close<MA50<MA200":
+            state_label = "Downtrend"
+        elif ma_reg == "MixedStructure":
+            state_label = "Mixed/Choppy"
+
+    reg_tag = f"Vol: {vol_reg}" if (vol_reg and vol_reg != "N/A") else ""
+    state_capsule_line = " | ".join([x for x in [state_label, loc_tag, reg_tag] if x])
+
+    # Score bars (0–10)
+    ms_pct = _bar_pct_10(master_total)
+    cs_pct = _bar_pct_10(conviction)
+
+    # One-line score interpretation (keep extremely short for dashboard)
+    def _bucket(v: float) -> str:
+        if v < 4.0:
+            return "low"
+        if v < 6.0:
+            return "mid"
+        if v < 8.0:
+            return "good"
+        return "high"
+
+    insight_line_es = ""
+    ms_v = _safe_float(master_total, default=np.nan)
+    cs_v = _safe_float(conviction, default=np.nan)
+    if pd.notna(ms_v) and pd.notna(cs_v):
+        ms_b = _bucket(float(ms_v))
+        cs_b = _bucket(float(cs_v))
+        if ms_b in ("low",):
+            insight_line_es = "Cơ hội kém hấp dẫn; ưu tiên quan sát và chờ cấu trúc/điểm vào tốt hơn."
+        elif ms_b == "mid" and cs_b in ("good", "high"):
+            insight_line_es = "Cơ hội trung tính nhưng độ tin cậy khá tốt; ưu tiên plan kỷ luật, tránh FOMO."
+        elif ms_b in ("good", "high") and cs_b in ("low", "mid"):
+            insight_line_es = "Cơ hội khá hấp dẫn nhưng độ tin cậy chưa cao; chỉ triển khai chọn lọc và chờ trigger đồng pha."
+        elif ms_b in ("good", "high") and cs_b in ("good", "high"):
+            insight_line_es = "Cơ hội hấp dẫn và độ tin cậy cao; có thể triển khai theo plan, tập trung quản trị rủi ro."
+        else:
+            insight_line_es = "Theo dõi nghiêm túc; ưu tiên đúng nhịp/điều kiện thay vì vào vội."
+    if (gate_status or "").strip().upper() not in ("", "N/A", "ACTIVE") and insight_line_es:
+        insight_line_es = f"{insight_line_es} (Gate: {(gate_status or '').strip().upper()})"
+
+    policy_hint_es = get_class_policy_hint_line(class_name)
+
+    # Trigger status (Plan-Gated) — use PASS/WAIT/FAIL text, not just dots
+    def _status(v: Any, good: float, warn: float) -> str:
+        x = _safe_float(v, default=np.nan)
+        if pd.isna(x):
+            return "N/A"
+        if float(x) >= good:
+            return "PASS"
+        if float(x) >= warn:
+            return "WAIT"
+        return "FAIL"
+
+    # Plan status + RR (prefer TradePlans to stay consistent with detail)
+    plan_status_es = "N/A"
+    rr_plan = rr_val
+    for p in (ap.get("TradePlans") or []):
+        if _safe_text(p.get("Name") or "").strip() == setup_name and setup_name and setup_name != "N/A":
+            plan_status_es = _safe_text(p.get("Status") or "N/A").strip()
+            rr_plan = _safe_float(p.get("RR"), default=rr_plan)
+            break
+
+    st_break = _status((combat or {}).get("BreakoutForce"), good=6.8, warn=5.5)
+    st_vol = _status(vol_ratio, good=1.20, warn=0.95)
+    st_rr = _status(rr_plan, good=1.80, warn=1.30)
+
+    # Structure (Ceiling) Gate: quality-aware resistance ceiling control
+    sq = {}
+    try:
+        sq = (character_pack or {}).get("StructureQuality", {}) or (analysis_pack or {}).get("StructureQuality", {})
+    except Exception:
+        sq = {}
+    cg = ((sq or {}).get("Gates", {}) or {}).get("CeilingGate", {}) if isinstance((sq or {}).get("Gates", {}), dict) else {}
+    st_struct = _safe_text(cg.get("Status") or "N/A").strip().upper()
+    if st_struct not in ("PASS", "WAIT", "FAIL"):
+        st_struct = "N/A"
+
+    def _dot_from_status(s: str) -> str:
+        s = (s or "").upper()
+        if s == "PASS":
+            return "g"
+        if s == "WAIT":
+            return "y"
+        if s == "FAIL":
+            return "r"
+        return "y"
+
+    dot_b2 = _dot_from_status(st_break)
+    dot_v2 = _dot_from_status(st_vol)
+    dot_r2 = _dot_from_status(st_rr)
+    dot_s2 = _dot_from_status(st_struct)
+
+    gate_line = f"Gate: {(gate_status or 'N/A').strip().upper()} | Plan: {setup_name} ({plan_status_es or 'N/A'})"
+
+    # One Next Step (single line)
+    next_step = "Theo dõi và chờ thêm dữ liệu."
+    if st_struct in ("FAIL", "WAIT"):
+        _ov = ((sq or {}).get("OverheadResistance", {}) or {}).get("Nearest", {}) or {}
+        _comps = _ov.get("ComponentsTop") if isinstance(_ov.get("ComponentsTop"), list) else []
+        _t = _safe_text(((_comps[0] or {}).get("Type")) if (len(_comps) > 0 and isinstance(_comps[0], dict)) else "").strip()
+        next_step = "Chờ vượt trần cấu trúc trước khi tăng xác suất vào lệnh."
+        if _t:
+            next_step = f"Chờ vượt trần cấu trúc ({_t}) trước khi tăng xác suất vào lệnh."
+    elif st_break in ("FAIL", "WAIT"):
+        next_step = "Chờ breakout xác nhận/follow-through; tránh vào sớm khi lực chưa rõ."
+    elif st_vol in ("FAIL", "WAIT"):
+        next_step = "Chờ volume xác nhận (≥ 1.2×20D) để giảm false-break."
+    elif st_rr in ("FAIL", "WAIT"):
+        next_step = "Chờ điểm vào tốt hơn để RR ≥ 1.8 (hoặc giảm risk/stop hợp lý)."
+    else:
+        next_step = "Có thể triển khai theo plan; ưu tiên kỷ luật stop, tránh FOMO."
+
+    # Risk flags (top 2, severity>=2)
+    risk_lines: List[str] = []
+    for f in flags_list:
+        if not isinstance(f, dict):
+            continue
+        try:
+            sev = int(f.get("severity", 0))
+        except Exception:
+            sev = 0
+        if sev < 2:
+            continue
+        code = _safe_text(f.get("code") or "").strip()
+        note = _safe_text(f.get("note") or "").strip()
+        if code and note:
+            risk_lines.append(f"[{code}] {note}")
+        elif code:
+            risk_lines.append(f"[{code}]")
+        elif note:
+            risk_lines.append(note)
+        if len(risk_lines) >= 2:
+            break
+    if not risk_lines:
+        risk_lines = ["None"]
+
     panel2 = f"""
-    <div class="es-panel">
-      <div class="es-pt">2) CURRENT STATUS</div>
-      <div class="es-metric"><div class="k">Upside Room</div><div class="v">{html.escape(_fmt_num(upside_room))}</div></div>
-      <div class="es-mini"><div style="width:{up_pct:.0f}%"></div></div>
-      <div class="es-metric" style="margin-top:6px;"><div class="k">Upside Quality</div><div class="v">{html.escape(_fmt_num(upside_quality))}</div></div>
-      <div class="es-mini"><div style="width:{uq_pct:.0f}%"></div></div>
-      <div class="es-note" style="margin-top:8px;font-weight:900;">Trigger Status</div>
-      <div class="es-note"><span class="es-dot {dot_breakout}"></span>Breakout</div>
-      <div class="es-note"><span class="es-dot {dot_volume}"></span>Volume</div>
-      <div class="es-note"><span class="es-dot {dot_rr}"></span>R:R</div>
-      <div class="es-note" style="margin-top:10px;">Gợi ý: Ưu tiên trigger xanh đồng pha; trigger đỏ = siết rủi ro hoặc chờ xác nhận.</div>
+    <div class=\"es-panel\">
+      <div class=\"es-pt\">2) CURRENT STATUS</div>
+
+      <div class=\"es-note\" style=\"font-weight:950;\">{html.escape(state_capsule_line)}</div>
+
+      <div class=\"es-metric\"><div class=\"k\">Điểm tổng hợp</div><div class=\"v\">{html.escape(_fmt_num(master_total,1))}</div></div>
+      <div class=\"es-mini\"><div style=\"width:{ms_pct:.0f}%\"></div></div>
+
+      <div class=\"es-metric\" style=\"margin-top:6px;\"><div class=\"k\">Điểm tin cậy</div><div class=\"v\">{html.escape(_fmt_num(conviction,1))}</div></div>
+      <div class=\"es-mini\"><div style=\"width:{cs_pct:.0f}%\"></div></div>
+
+      {f'<div class="es-note" style="margin-top:8px;">{html.escape(insight_line_es)}</div>' if insight_line_es else ''}
+
+      {f'<div class="es-note" style="margin-top:6px;"><b>Policy:</b> {html.escape(policy_hint_es)}</div>' if policy_hint_es else ''}
+
+      <div class=\"es-note\" style=\"margin-top:10px;font-weight:950;\">Trigger Status (Plan-Gated)</div>
+      <div class=\"es-note\"><span class=\"es-dot {dot_b2}\"></span>Breakout: <b>{html.escape(st_break)}</b></div>
+      <div class=\"es-note\"><span class=\"es-dot {dot_v2}\"></span>Volume: <b>{html.escape(st_vol)}</b></div>
+      <div class=\"es-note\"><span class=\"es-dot {dot_r2}\"></span>R:R: <b>{html.escape(st_rr)}</b></div>
+      <div class=\"es-note\"><span class=\"es-dot {dot_s2}\"></span>Structure: <b>{html.escape(st_struct)}</b></div>
+
+      <div class=\"es-note\" style=\"margin-top:8px;\"><b>{html.escape(gate_line)}</b></div>
+      <div class=\"es-note\" style=\"margin-top:6px;\">Next step: {html.escape(next_step)}</div>
+
+      <div class=\"es-note\" style=\"margin-top:10px;font-weight:950;\">Risk Flags</div>
+      <ul class=\"es-bul\">{''.join([f'<li>{html.escape(x)}</li>' for x in risk_lines])}</ul>
     </div>
     """
+
 
     def _delta_pct(entry_x: Any, level_x: Any) -> Any:
         e = _safe_float(entry_x)
@@ -6214,7 +6718,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             master_pack = ap.get("MasterScore") or {}
             conviction_score = ap.get("Conviction")
 
-            st.markdown("**Scenario & Scores**")
+            st.markdown("**State Capsule (Scenario & Scores)**")
             st.markdown(f"- Scenario: {_val_or_na(scenario_pack.get('Name'))}")
 
             def _bar_row_cs(label: str, val: Any, maxv: float = 10.0) -> None:
@@ -6240,8 +6744,17 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             _bar_row_cs("Điểm tổng hợp", master_pack.get("Total"), 10.0)
             _bar_row_cs("Điểm tin cậy", conviction_score, 10.0)
 
+            # Score interpretation (single block) — place directly under the two bars
+            render_current_status_insight(master_pack.get("Total"), conviction_score, gate_status)
+
+            # Class Policy Hint (display-only)
+            _final_class = _safe_text(cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "").strip()
+            _policy_hint = get_class_policy_hint_line(_final_class)
+            if _policy_hint:
+                st.markdown(f"**Policy:** {_policy_hint}")
+
             # 2.3 State Capsule (Facts-only, compact)
-            st.markdown("**State Capsule (Facts)**")
+            st.markdown("**Structure Summary (MA/Fibo/RSI/MACD/Volume)**")
             protech = ap.get("ProTech") or {}
             protech = protech if isinstance(protech, dict) else {}
             ma = protech.get("MA") or {}
@@ -6278,7 +6791,34 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             st.markdown(f"- Fibonacci Bands (Short/Long): {_val_or_na(short_band)} / {_val_or_na(long_band)}" + (" | Conflict" if fib_conflict else ""))
             st.markdown(f"- Volume Ratio (vs 20d): {_val_or_na(vol_ratio)}")
 
-            # 2.4 Combat Readiness (Now) — merged from legacy Combat Stats
+            # 2.4 TECHNICAL SNAPSHOT (details)
+            # 2.4 TECHNICAL SNAPSHOT (detail) (reuse A-section body: MA/Fibo/RSI/MACD/Volume/PA)
+            st.markdown('<div class="sec-title">TECHNICAL SNAPSHOT</div>', unsafe_allow_html=True)
+            a_items = _extract_a_items(a_section)
+            a_raw = (a_section or "").replace("\r\n", "\n")
+            a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
+            if a_items:
+                for i, body in enumerate(a_items, start=1):
+                    if not body.strip():
+                        continue
+                    st.markdown(
+                        f"""
+                        <div class="incept-card">
+                          <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
+                          <div>{body}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                if a_body:
+                    st.markdown(a_body, unsafe_allow_html=False)
+                else:
+                    st.info("N/A")
+
+
+
+            # 2.5 Combat Readiness (Now) — merged from legacy Combat Stats
             st.markdown("**Combat Readiness (Now)**")
             combat = cp.get("CombatStats") or {}
             combat = combat if isinstance(combat, dict) else {}
@@ -6310,7 +6850,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             _bar_row_now("Breakout Force", combat.get("BreakoutForce"), 10.0)
             _bar_row_now("Support Resilience", combat.get("SupportResilience"), 10.0)
 
-            # 2.5 Trigger Status (Plan-Gated)
+            # 2.6 Trigger Status (Plan-Gated)
             st.markdown("**Trigger Status (Plan-Gated)**")
             primary = ap.get("PrimarySetup") or {}
             primary = primary if isinstance(primary, dict) else {}
@@ -6343,11 +6883,23 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             s_vol, c_vol = _status_from_val(vol_ratio, good=1.20, warn=0.95)
             s_rr, c_rr = _status_from_val(rr_val, good=1.80, warn=1.30)
 
+            # Structure (Ceiling) Gate
+            sq = ap.get("StructureQuality", {}) if isinstance(ap, dict) else {}
+            cg = ((sq or {}).get("Gates", {}) or {}).get("CeilingGate", {}) if isinstance((sq or {}).get("Gates", {}), dict) else {}
+            s_struct = _safe_text(cg.get("Status") or "N/A").strip().upper()
+            if s_struct not in ("PASS", "WAIT", "FAIL"):
+                s_struct = "N/A"
+            c_struct = "#9CA3AF"
+            if s_struct == "PASS": c_struct = "#22C55E"
+            elif s_struct == "WAIT": c_struct = "#F59E0B"
+            elif s_struct == "FAIL": c_struct = "#EF4444"
+
             st.markdown(
                 f"""<ul style="margin:0 0 0 16px; padding:0;">
                       <li>{_dot(c_break)} Breakout: {s_break}</li>
                       <li>{_dot(c_vol)} Volume: {s_vol}</li>
                       <li>{_dot(c_rr)} R:R: {s_rr}</li>
+                      <li>{_dot(c_struct)} Structure: {s_struct}</li>
                       <li>{_dot("#60A5FA")} Gate: {html.escape(str(gate_status or "N/A"))} | Plan: {html.escape(str(setup_name or "N/A"))} ({html.escape(str(plan_status or "N/A"))})</li>
                     </ul>""",
                 unsafe_allow_html=True
@@ -6358,7 +6910,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                 if tags_show:
                     st.caption(f"Plan tags: {tags_show}")
 
-            # 2.6 Risk Flags (from weakness flags + DNA modifiers)
+            # 2.7 Risk Flags (from weakness flags + DNA modifiers)
             st.markdown("**Risk Flags**")
             flags = list(cp.get("Flags") or [])
             risk_lines = []
@@ -6382,33 +6934,6 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                 st.markdown("\n".join(risk_lines))
             else:
                 st.markdown("- None")
-
-            # Current Status Insight (MasterScore + Conviction) — interpret the two scores + gate
-            render_current_status_insight(master_pack.get("Total"), conviction_score, gate_status)
-
-            # 2.7 TECHNICAL SNAPSHOT (reuse A-section body: MA/Fibo/RSI/MACD/Volume/PA)
-            st.markdown('<div class="sec-title">TECHNICAL SNAPSHOT</div>', unsafe_allow_html=True)
-            a_items = _extract_a_items(a_section)
-            a_raw = (a_section or "").replace("\r\n", "\n")
-            a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
-            if a_items:
-                for i, body in enumerate(a_items, start=1):
-                    if not body.strip():
-                        continue
-                    st.markdown(
-                        f"""
-                        <div class="incept-card">
-                          <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
-                          <div>{body}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-            else:
-                if a_body:
-                    st.markdown(a_body, unsafe_allow_html=False)
-                else:
-                    st.info("N/A")
 
             # ============================================================
             # 3) TRADE PLAN & R:R (CONDITIONAL)
@@ -6446,6 +6971,139 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
     # ============================================================
     # 11. GPT-4o STRATEGIC INSIGHT GENERATION
     # ============================================================
+
+
+# ------------------------------------------------------------
+# Deterministic Report A–D (Facts-only fallback)
+# - Used when OPENAI_API_KEY is missing OR GPT call fails.
+# - Ensures A–D sections always exist so UI split/render stays stable.
+# ------------------------------------------------------------
+
+def _deterministic_report_ad(data: Dict[str, Any], note: str = "") -> str:
+    ap = data.get("AnalysisPack", {}) or {}
+    ap = ap if isinstance(ap, dict) else {}
+
+    protech = ap.get("ProTech") or {}
+    protech = protech if isinstance(protech, dict) else {}
+
+    ma = protech.get("MA") or {}
+    ma = ma if isinstance(ma, dict) else {}
+    rsi = protech.get("RSI") or {}
+    rsi = rsi if isinstance(rsi, dict) else {}
+    macd = protech.get("MACD") or {}
+    macd = macd if isinstance(macd, dict) else {}
+    vol = protech.get("Volume") or {}
+    vol = vol if isinstance(vol, dict) else {}
+    pa = protech.get("PriceAction") or {}
+    pa = pa if isinstance(pa, dict) else {}
+    bias = protech.get("Bias") or {}
+    bias = bias if isinstance(bias, dict) else {}
+
+    fib_ctx = ((ap.get("Fibonacci") or {}).get("Context") or {})
+    fib_ctx = fib_ctx if isinstance(fib_ctx, dict) else {}
+
+    master = ap.get("MasterScore") or {}
+    master = master if isinstance(master, dict) else {}
+    conv_pack = ap.get("ConvictionPack") or {}
+    conv_pack = conv_pack if isinstance(conv_pack, dict) else {}
+
+    primary = ap.get("PrimarySetup") or {}
+    primary = primary if isinstance(primary, dict) else {}
+
+    # --- Facts / labels ---
+    ma_reg = _val_or_na(ma.get("Regime"))
+    rsi_state = _val_or_na(rsi.get("State"))
+    rsi_dir = _val_or_na(rsi.get("Direction"))
+    rsi_div = _safe_text(rsi.get("Divergence")).strip()
+
+    macd_state = _val_or_na(macd.get("State"))
+    macd_zero = _val_or_na(macd.get("ZeroLine"))
+    macd_hist = _safe_text(macd.get("HistState")).strip()
+
+    align = _val_or_na(bias.get("Alignment"))
+
+    short_band = _val_or_na(fib_ctx.get("ShortBand"))
+    long_band = _val_or_na(fib_ctx.get("LongBand"))
+    fib_conflict = bool(fib_ctx.get("FiboConflictFlag"))
+
+    vol_ratio = _safe_float(vol.get("Ratio"), default=np.nan)
+    vol_ratio_txt = _val_or_na(vol_ratio)
+    vol_regime = _safe_text(vol.get("Regime")).strip()
+
+    pa_patterns = pa.get("Patterns")
+    if isinstance(pa_patterns, list):
+        pa_pat_txt = ", ".join([_safe_text(x).strip() for x in pa_patterns if _safe_text(x).strip()][:2])
+    else:
+        pa_pat_txt = _safe_text(pa.get("Pattern")).strip()
+
+    scenario12 = ap.get("Scenario12") or {}
+    scenario12 = scenario12 if isinstance(scenario12, dict) else {}
+    sc_name = _val_or_na(scenario12.get("Name"))
+
+    ms_total = _safe_float(master.get("Total"), default=np.nan)
+    ms_txt = _val_or_na(ms_total)
+    conv_score = _safe_float(conv_pack.get("Score"), default=np.nan)
+    conv_txt = _val_or_na(conv_score)
+
+    # --- Trade plan (facts-only) ---
+    setup_name = _safe_text(primary.get("Name")).strip() or "N/A"
+    rr = _safe_float(primary.get("RR"), default=np.nan)
+    rr_txt = _val_or_na(rr)
+
+    plan_status = "N/A"
+    plan_tags = []
+    for p in (ap.get("TradePlans") or []):
+        if not isinstance(p, dict):
+            continue
+        if _safe_text(p.get("Name")).strip() == setup_name and setup_name != "N/A":
+            plan_status = _val_or_na(p.get("Status"))
+            plan_tags = list(p.get("ReasonTags") or [])
+            rr2 = _safe_float(p.get("RR"), default=np.nan)
+            if pd.notna(rr2):
+                rr_txt = _val_or_na(rr2)
+            break
+
+    tags_preview = ", ".join([str(x) for x in plan_tags[:6]]) if plan_tags else "N/A"
+
+    # D (strict copy) - do not compute
+    risk = _val_or_na(primary.get("RiskPct"))
+    reward = _val_or_na(primary.get("RewardPct"))
+    must_rr = _val_or_na(primary.get("RR"))
+    must_conf = _val_or_na(primary.get("Confidence (Tech)", primary.get("Probability")))
+
+    # Build sections (use 1–2 numbers per sentence max)
+    lines = []
+    if note:
+        lines.append(note.strip())
+        lines.append("")
+
+    lines += [
+        "A. Kỹ thuật",
+        f"1. MA: {ma_reg}.",
+        f"2. RSI: {rsi_state} | {rsi_dir}." + (f" Divergence: {_safe_text(rsi_div)}." if rsi_div else ""),
+        f"3. MACD: {macd_state} | ZeroLine: {macd_zero}." + (f" Hist: {_safe_text(macd_hist)}." if macd_hist else ""),
+        f"4. RSI+MACD alignment: {align}.",
+        f"5. Fibonacci bands (Short/Long): {short_band} / {long_band}." + (" Conflict flagged." if fib_conflict else ""),
+        f"6. Volume: Ratio {vol_ratio_txt}." + (f" Regime: {_safe_text(vol_regime)}." if vol_regime else ""),
+        f"7. Scenario12: {sc_name}.",
+        f"8. Master/Conviction: {ms_txt} | {conv_txt}.",
+        "",
+        "B. Cơ bản",
+        "(Chỉ hiển thị khi có dữ liệu cơ bản trong pack.)",
+        "",
+        "C. TRADE PLAN",
+        f"Primary setup: {setup_name} | Status: {plan_status} | RR: {rr_txt}.",
+        f"Plan tags: {tags_preview}.",
+        "",
+        "D. Rủi ro vs lợi nhuận",
+        f"Risk%: {risk}",
+        f"Reward%: {reward}",
+        f"RR: {must_rr}",
+        f"Confidence (Tech): {must_conf}",
+    ]
+
+    return "\n".join(lines).strip() + "\n"
+
 def generate_insight_report(data: Dict[str, Any]) -> str:
     if "Error" in data: return f"❌ {data['Error']}"
     tick = data["Ticker"]
@@ -6574,7 +7232,10 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
     Dữ liệu (AnalysisPack JSON):
     {pack_json}
     """
-    # GPT narrative is optional. If no API key is configured, skip GPT gracefully.
+
+    # GPT narrative is optional.
+    # If OPENAI_API_KEY is missing or GPT call fails, fall back to deterministic A–D
+    # to keep UI rendering stable (TECHNICAL SNAPSHOT expects A-section items).
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         try:
@@ -6583,12 +7244,18 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
             api_key = None
 
     if not api_key:
-        content = "⚠️ GPT narrative disabled: OPENAI_API_KEY not set. Report A–D uses deterministic output only."
+        content = _deterministic_report_ad(
+            data,
+            note="⚠️ GPT narrative disabled: OPENAI_API_KEY not set. Using deterministic A–D (facts-only).",
+        )
     else:
         try:
             content = call_gpt_with_guard(prompt, analysis_pack, max_retry=2)
         except Exception as e:
-            content = f"⚠️ Lỗi khi gọi GPT: {e}"
+            content = _deterministic_report_ad(
+                data,
+                note=f"⚠️ Lỗi khi gọi GPT: {e}. Using deterministic A–D (facts-only).",
+            )
     return f"{header_html}\n\n{content}"
 
 # ============================================================
