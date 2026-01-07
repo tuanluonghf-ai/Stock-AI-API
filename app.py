@@ -112,8 +112,19 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "11.9"
+APP_VERSION = "13.1"
 APP_TITLE = "INCEPTION"
+
+# ------------------------------------------------------------
+# Playstyle tag translations (UI-only).
+# Keep minimal and safe: unknown tags fall back to raw text.
+PLAYSTYLE_TAG_TRANSLATIONS = {
+    "Pullback-buy zone (confluence)": "Vùng pullback mua (hội tụ)",
+    "Breakout attempt (needs follow-through)": "Nỗ lực breakout (cần follow-through)",
+    "Wait for volume confirmation": "Chờ xác nhận dòng tiền",
+    "Tight risk control near resistance": "Siết rủi ro gần kháng cự",
+    "Use LongStructure_ShortTactical rule": "Ưu tiên cấu trúc dài hạn; tactical dùng để vào lệnh",
+}
 
 class DataError(Exception):
     """Raised when required local data files cannot be loaded."""
@@ -160,68 +171,8 @@ _require_path(REPO_ROOT / "inception" / "modules" / "base.py",
 # Phase 3: modular execution (registry) + DataHub (infra)
 from inception.infra.datahub import DataHub, DataError as HubDataError
 from inception.modules.base import run_modules
-# ============================================================
-# LOCAL MODULE REGISTRY OVERRIDE (v6.1)
-# - Ensures Phase 4 can run as a single-file app without relying
-#   on external `inception.modules.*` versions that may be stale.
-# - Prevents pandas Series/DataFrame from leaking into UI boolean contexts.
-# ============================================================
-def _json_sanitize(obj: Any):
-    """Recursively convert pandas/numpy objects into JSON-safe scalars."""
-    if isinstance(obj, (pd.Series, pd.Index, pd.DataFrame)):
-        return _as_scalar(obj)
-    if isinstance(obj, (np.generic,)):
-        return obj.item()
-    if isinstance(obj, dict):
-        return {str(k): _json_sanitize(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_json_sanitize(v) for v in obj]
-    return obj
-
-
-def run_modules(analysis_pack: Dict[str, Any], enabled: List[str], ctx: Dict[str, Any]) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
-    """Minimal module runner (single-file). Returns (modules_out, errors)."""
-    modules_out: Dict[str, Dict[str, Any]] = {}
-    errors: List[str] = []
-
-    enabled_set = set([str(x).strip().lower() for x in (enabled or [])])
-
-    # --- Report A–D (GPT narrative) ---
-    if "report_ad" in enabled_set:
-        try:
-            base_result = ctx.get("result") if isinstance(ctx, dict) else None
-            if isinstance(base_result, dict):
-                modules_out["report_ad"] = {"report": str(generate_insight_report(base_result))}
-            else:
-                modules_out["report_ad"] = {"report": ""}
-        except Exception as e:
-            errors.append(f"report_ad: {e}")
-            modules_out["report_ad"] = {"report": "", "Error": str(e)}
-
-    # --- Character ---
-    if "character" in enabled_set:
-        try:
-            df_used = ctx.get("df") if isinstance(ctx, dict) else None
-            if df_used is None or not hasattr(df_used, "columns"):
-                raise ValueError("Missing df in ctx for character module")
-            cp = compute_character_pack(df_used, analysis_pack or {})
-            if not isinstance(cp, dict):
-                raise ValueError("CharacterPack must be a dict")
-            cp = _json_sanitize(cp)
-            modules_out["character"] = cp
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            errors.append(f"character: {e}")
-            # Include traceback for fast diagnosis on localhost
-            modules_out["character"] = {"Error": str(e), "Traceback": tb}
-
-    return modules_out, errors
-
-import inception.modules.report_ad  # registers report_ad
-import inception.modules.character  # registers character
-
-
+from inception.modules import load_default_modules
+load_default_modules()
 
 # ------------------------------
 # JSON safe-serialization helpers
@@ -4014,14 +3965,15 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         comps = ov.get("ComponentsTop") if isinstance(ov.get("ComponentsTop"), list) else []
         type_top = _safe_text((comps[0] or {}).get("Type")) if (len(comps) > 0 and isinstance(comps[0], dict)) else ""
         type_top = type_top.strip()
+        type_pretty = _pretty_level_label(type_top, side="overhead") if type_top else ""
 
         is_near = (pd.notna(dist) and pd.notna(near_th) and dist <= near_th)
         if is_near and hz in ("STRUCTURAL", "BOTH") and tier in ("HEAVY", "CONFLUENCE"):
             sev = 3 if tier == "CONFLUENCE" else 2
             note = "Trần cấu trúc gần – upside ngắn bị nén"
-            if type_top:
-                note = f"{note} ({type_top})"
-            add_flag("NearMajorResistance", sev, note, meta={"Horizon": hz, "Tier": tier, "TypeTop": type_top, "DistancePct": dist, "NearThPct": near_th})
+            if type_pretty:
+                note = f"{note} ({type_pretty})"
+            add_flag("NearMajorResistance", sev, note, meta={"Horizon": hz, "Tier": tier, "TypeTop": type_top, "TypeLabel": type_pretty, "DistancePct": dist, "NearThPct": near_th})
         elif is_near and hz == "TACTICAL" and tier in ("LIGHT", "MED"):
             # Minor reminder only (does not block; reduces over-warning on weak tactical levels)
             add_flag("NearMinorResistance", 1, "Cản ngắn hạn gần (tactical)")
@@ -4739,6 +4691,21 @@ def compute_character_pack(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> D
         # Attach to AnalysisPack for single-source-of-truth rendering (safe mutation)
         if isinstance(analysis_pack, dict):
             analysis_pack["TradePlanPack"] = trade_plan_pack
+            # DecisionPack (portfolio-ready; long-only)
+            try:
+                decision_pack = compute_decision_pack_v1(analysis_pack, trade_plan_pack) or {}
+                if isinstance(analysis_pack, dict):
+                    analysis_pack["DecisionPack"] = decision_pack
+                    # PositionManagerPack (portfolio-ready; long-only; sizing-lite)
+                    try:
+                        position_manager_pack = compute_position_manager_pack_v1(analysis_pack, trade_plan_pack, decision_pack) or {}
+                        if isinstance(analysis_pack, dict):
+                            analysis_pack["PositionManagerPack"] = position_manager_pack
+                    except Exception:
+                        position_manager_pack = {}
+            except Exception:
+                decision_pack = {}
+
     except Exception:
         trade_plan_pack = {}
 
@@ -5166,327 +5133,581 @@ def get_class_policy_hint_line(final_class: str) -> str:
     on_txt = f"Overnight: {overnight}" if overnight else ""
     parts = [x for x in (rr_txt, size_txt, on_txt) if x]
     return " | ".join(parts)
+
+
+# ============================================================
+# LEVEL LABEL PRETTY PRINTER (UI-ONLY)
+# ============================================================
+def _pretty_level_label(level_type: str, side: str = "overhead") -> str:
+    """
+    Convert internal level type codes into human-friendly labels.
+    side: "overhead" (resistance above price) or "support" (support below price)
+    NOTE: This is UI-only; it does not change any logic.
+    """
+    t = _safe_text(level_type).strip().upper()
+    s = _safe_text(side).strip().lower()
+
+    if not t:
+        return ""
+
+    # Moving averages
+    if t == "MA200": return "MA200 (structural)"
+    if t == "MA50": return "MA50 (structural-lite)"
+    if t == "MA20": return "MA20 (tactical)"
+
+    # Weekly/Daily pivots:
+    # A prior LOW can become resistance after breakdown; a prior HIGH can become support after reclaim.
+    if t == "WEEKLY_SWING_LOW":
+        return "Weekly pivot (prior LOW — now resistance)" if s == "overhead" else "Weekly pivot (prior LOW)"
+    if t == "WEEKLY_SWING_HIGH":
+        return "Weekly pivot (prior HIGH)" if s == "support" else "Weekly pivot (prior HIGH — resistance)"
+    if t == "DAILY_SWING_LOW":
+        return "Daily pivot (prior LOW — now resistance)" if s == "overhead" else "Daily pivot (prior LOW)"
+    if t == "DAILY_SWING_HIGH":
+        return "Daily pivot (prior HIGH)" if s == "support" else "Daily pivot (prior HIGH — resistance)"
+
+    # Fibonacci (keep concise)
+    if t.startswith("FIB_"):
+        tt = t.replace("FIB_FIB_", "FIB_")
+        tt = tt.replace("FIB_SHORT_", "Fib short ").replace("FIB_LONG_", "Fib long ")
+        tt = tt.replace("_", " ")
+        return tt
+
+    return t
 # ============================================================
 # 8. TRADE PLAN PACK (v1) — Scenario-driven + Gate-driven blueprint
 # ============================================================
+# ============================================================
+# 8. TRADE PLAN PACK (v1) — Scenario-driven + Gate-driven blueprint (LONG-ONLY, Portfolio-ready)
+# ============================================================
 def compute_trade_plan_pack_v1(analysis_pack: Dict[str, Any], character_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Builds a standardized TradePlanPack (Primary + Alternative) using ONLY Python facts.
+    """Builds a standardized TradePlanPack (Primary + Optional Defensive Alternative) using ONLY Python facts.
 
-    Design intent:
-      - Blueprint: 'how to execute IF allowed' (Decision Layer decides action/size)
-      - Scenario-driven: uses Scenario12.Spec.DefaultPlan as the starting intent
-      - Gate-driven: exposes PASS/WAIT/FAIL for Trigger/Volume/RR/Execution/Structure
-      - Dynamic levels: Entry zone / Stop / TP are computed upstream (TradePlans); this pack standardizes output.
+    Long-only design:
+      - FLAT mode: plan describes *new buy* blueprint.
+      - HOLDING mode: plan describes *capital/profit protection* blueprint (no short-sale).
+      - Decision Layer/Portfolio decides action/size; this pack is the execution playbook.
     """
     ap = analysis_pack or {}
     cp = character_ctx or {}
 
+    # --- Position mode (Portfolio-ready) ---
+    pos = ap.get("PositionStatePack") or {}
+    pos = pos if isinstance(pos, dict) else {}
+    mode = _safe_text(pos.get("mode") or "FLAT").strip().upper()
+    if mode not in ("FLAT", "HOLDING"):
+        mode = "FLAT"
+    is_holding = bool(pos.get("is_holding")) if mode == "HOLDING" else False
+
+    # --- Scenario intent (facts-only) ---
     scen = ap.get("Scenario12") or {}
     spec = (scen.get("Spec") or {}) if isinstance(scen, dict) else {}
     default_plan = _safe_text(spec.get("DefaultPlan") or "").strip() or "Pullback"
     scen_name = _safe_text((scen.get("Name") if isinstance(scen, dict) else None) or "N/A").strip()
 
-    # Final class (for policy hint + RR minimum guidance)
-    cclass = _safe_text(cp.get("CharacterClass") or cp.get("ClassName") or cp.get("Class") or "N/A").strip()
-    pol = CLASS_POLICY_HINTS.get(cclass) or {}
-    rr_min = _safe_float(pol.get("rr_min"), default=1.8)
-    policy_hint_line = get_class_policy_hint_line(cclass)
+    def _normalize_plan(p: str) -> str:
+        s = (p or "").strip().lower()
+        if "break" in s:
+            return "BREAKOUT"
+        if "range" in s:
+            return "RANGE_EDGE"
+        if "reclaim" in s:
+            return "RECLAIM"
+        if "avoid" in s or "invalid" in s:
+            return "DEFENSIVE"
+        return "PULLBACK"
 
-    # Structure quality (ceiling gate)
-    sq = cp.get("StructureQuality") if isinstance(cp, dict) else None
-    if not isinstance(sq, dict):
-        sq = ap.get("StructureQuality") if isinstance(ap, dict) else {}
+    setup_type = _normalize_plan(default_plan)
+
+    # --- Class policy hint (display only; does NOT decide action/size) ---
+    final_class = _safe_text(cp.get("CharacterClass") or ap.get("CharacterClass") or "").strip()
+    policy_hint_line = get_class_policy_hint_line(final_class) if final_class else ""
+
+    # RR-min for gating (soft policy; long-only)
+    rr_min = 1.5
+    try:
+        pol = CLASS_POLICY_HINTS.get(final_class or "", {}) if isinstance(CLASS_POLICY_HINTS, dict) else {}
+        rr_min = float(pol.get("RRMin", rr_min)) if isinstance(pol, dict) else rr_min
+    except Exception:
+        rr_min = 1.5
+
+    # --- Pull upstream computed setup levels (single source of truth) ---
+    primary_setup = ap.get("PrimarySetup") or {}
+    primary_setup = primary_setup if isinstance(primary_setup, dict) else {}
+    entry = _safe_float(primary_setup.get("Entry"), default=np.nan)
+    stop = _safe_float(primary_setup.get("Stop"), default=np.nan)
+    tp1 = _safe_float(primary_setup.get("TP1"), default=np.nan)
+    tp2 = _safe_float(primary_setup.get("TP2"), default=np.nan)
+    rr_act = _safe_float(primary_setup.get("RR"), default=np.nan)
+    setup_name = _safe_text(primary_setup.get("Name") or "").strip() or "Primary"
+
+    # If TP2 missing but TP1 exists, compute a conservative extension (facts-only, deterministic)
+    try:
+        if pd.isna(tp2) and pd.notna(tp1) and pd.notna(entry):
+            tp2 = float(entry) + 1.6 * (float(tp1) - float(entry))
+    except Exception:
+        pass
+
+    # Entry zone: small buffer around entry based on vol proxy (if available)
+    vol_pct = _safe_float((ap.get("VolPct") or ap.get("VolPct_ATRProxy")), default=np.nan)
+    if not pd.notna(vol_pct):
+        vol_pct = 1.2
+    bufpct = max(0.003, min(0.012, 0.006 * (float(vol_pct) / 1.5)))  # 0.3%–1.2%
+    try:
+        if pd.notna(entry):
+            lo = float(entry) * (1.0 - bufpct)
+            hi = float(entry) * (1.0 + bufpct)
+        else:
+            lo, hi = np.nan, np.nan
+    except Exception:
+        lo, hi = np.nan, np.nan
+
+    # --- Gates (PASS/WAIT/FAIL) ---
+    combat = (cp.get("CombatStats") or ap.get("CombatStats") or {})
+    combat = combat if isinstance(combat, dict) else {}
+    breakout_force = _safe_float(combat.get("BreakoutForce"), default=np.nan)
+
+    protech = ap.get("ProTech") or {}
+    protech = protech if isinstance(protech, dict) else {}
+    vol = protech.get("Volume") or {}
+    vol = vol if isinstance(vol, dict) else {}
+    vol_ratio = _safe_float(vol.get("Ratio"), default=np.nan)
+
+    sq = (cp.get("StructureQuality") or ap.get("StructureQuality") or ap.get("StructureQualityPack") or {})
     sq = sq if isinstance(sq, dict) else {}
     cg = ((sq.get("Gates") or {}).get("CeilingGate") or {}) if isinstance((sq.get("Gates") or {}), dict) else {}
     st_struct = _safe_text(cg.get("Status") or "N/A").strip().upper()
     if st_struct not in ("PASS", "WAIT", "FAIL"):
         st_struct = "N/A"
 
-    # Execution gate (from Flags) — do not over-engineer; keep deterministic.
-    flags = cp.get("Flags") if isinstance(cp, dict) else []
-    flags = flags if isinstance(flags, list) else []
-    sev2 = []
-    for f in flags:
-        if not isinstance(f, dict):
-            continue
-        try:
-            if int(f.get("severity", 0)) >= 2:
-                sev2.append(f)
-        except Exception:
-            continue
-    exec_codes = { _safe_text(f.get("code") or "").strip() for f in sev2 if isinstance(f, dict) }
-    exec_status = "PASS"
-    exec_reason = ""
-    # Liquidity/volatility risks => WAIT by default (can still plan, but execution needs care)
-    if "LiquidityLow" in exec_codes:
-        exec_status = "WAIT"; exec_reason = "Liquidity low"
-    if "VolShockRisk" in exec_codes:
-        exec_status = "WAIT"; exec_reason = exec_reason or "Vol shock risk"
-    if "GapRisk" in exec_codes or "EventRisk" in exec_codes:
-        exec_status = "WAIT"; exec_reason = exec_reason or "Gap/event risk"
+    # Execution gate derived from global gate (ACTIVE/WATCH/LOCK)
+    gate_status, _meta = _trade_plan_gate(ap, cp)
+    gs = _safe_text(gate_status).strip().upper()
+    if gs == "LOCK":
+        st_exec = "FAIL"
+    elif gs == "ACTIVE":
+        st_exec = "PASS"
+    else:
+        st_exec = "WAIT"
 
-    # Combat stats (for trigger gate)
-    combat = cp.get("CombatStats") if isinstance(cp, dict) else {}
-    combat = combat if isinstance(combat, dict) else {}
-    bf = _safe_float(combat.get("BreakoutForce"), default=np.nan)
-    sr = _safe_float(combat.get("SupportResilience"), default=np.nan)
-
-    protech = ap.get("ProTech") if isinstance(ap, dict) else {}
-    protech = protech if isinstance(protech, dict) else {}
-    vol_ratio = _safe_float(((protech.get("Volume") or {}).get("Ratio")), default=np.nan)
-
-    # --- helper gates ---
     def _trig_status(ptype: str) -> str:
-        if (ptype or "").lower().startswith("break"):
-            if pd.isna(bf): return "N/A"
-            if float(bf) >= 6.8: return "PASS"
-            if float(bf) >= 5.5: return "WAIT"
-            return "FAIL"
-        # Pullback / Range / Reversal: use SupportResilience
-        if pd.isna(sr): return "N/A"
-        if float(sr) >= 6.5: return "PASS"
-        if float(sr) >= 5.2: return "WAIT"
-        return "FAIL"
+        if not pd.notna(breakout_force):
+            return "WAIT"
+        # Breakout needs higher breakout force
+        if ptype == "BREAKOUT":
+            return "PASS" if breakout_force >= 7 else ("WAIT" if breakout_force >= 5 else "FAIL")
+        # Pullback/reclaim: allow moderate force
+        return "PASS" if breakout_force >= 6 else ("WAIT" if breakout_force >= 4 else "FAIL")
 
     def _vol_status(ptype: str) -> str:
-        if pd.isna(vol_ratio): return "N/A"
-        v = float(vol_ratio)
-        if (ptype or "").lower().startswith("break"):
-            if v >= 1.20: return "PASS"
-            if v >= 0.95: return "WAIT"
-            return "FAIL"
-        # Pullback can work with lower volume; still require not-too-dry tape
-        if v >= 1.00: return "PASS"
-        if v >= 0.80: return "WAIT"
-        return "FAIL"
+        if not pd.notna(vol_ratio):
+            return "WAIT"
+        # Breakout needs stronger volume confirmation
+        if ptype == "BREAKOUT":
+            return "PASS" if vol_ratio >= 1.25 else ("WAIT" if vol_ratio >= 1.05 else "FAIL")
+        return "PASS" if vol_ratio >= 1.10 else ("WAIT" if vol_ratio >= 0.95 else "FAIL")
 
-    def _rr_status(rr_val: Any) -> str:
-        rv = _safe_float(rr_val, default=np.nan)
-        if pd.isna(rv): return "N/A"
-        if float(rv) >= float(rr_min): return "PASS"
-        if float(rv) >= float(max(1.30, float(rr_min) - 0.30)): return "WAIT"
-        return "FAIL"
+    def _rr_status(rr: float) -> str:
+        if not pd.notna(rr):
+            return "WAIT"
+        return "PASS" if rr >= rr_min else ("WAIT" if rr >= (rr_min - 0.25) else "FAIL")
 
-    def _plan_state(gates: Dict[str, str]) -> str:
-        gs = [gates.get(k, "N/A") for k in ("trigger", "volume", "rr", "exec", "structure")]
-        if any(x == "FAIL" for x in gs):
+    gates = {
+        "trigger": _trig_status(setup_type),
+        "volume": _vol_status(setup_type),
+        "rr": _rr_status(rr_act),
+        "structure": st_struct if st_struct != "N/A" else "WAIT",
+        "exec": st_exec,
+    }
+
+    def _state_flat(g: Dict[str, str]) -> str:
+        # Any FAIL blocks new buy plan
+        if any(str(v).upper() == "FAIL" for v in g.values()):
             return "INVALID"
-        if any(x in ("WAIT", "N/A") for x in gs):
+        # Any WAIT => watch
+        if any(str(v).upper() == "WAIT" for v in g.values()):
             return "WATCH"
         return "ACTIVE"
 
-    # Entry-zone buffer (pct): derived from StructureQuality.Meta.ZoneWidthPct when available
-    def _buffer_pct() -> float:
-        try:
-            zw = _safe_float(((sq.get("Meta") or {}).get("ZoneWidthPct")), default=np.nan)
-        except Exception:
-            zw = np.nan
-        if pd.notna(zw):
-            return float(_clip(float(zw) * 0.50, 0.40, 1.50))
-        return 0.60
+    def _state_holding(g: Dict[str, str]) -> str:
+        # For HOLDING, Structure FAIL => defensive action needed (active management)
+        if str(g.get("structure", "")).upper() == "FAIL":
+            return "ACTIVE"
+        if str(g.get("structure", "")).upper() == "WAIT":
+            # Decision layer will decide TRIM vs HOLD depending on PnL; keep plan as ACTIVE blueprint.
+            return "ACTIVE"
+        # Otherwise: monitor & trail
+        return "WATCH"
 
-    bufpct = _buffer_pct() / 100.0
+    plan_state = _state_holding(gates) if is_holding else _state_flat(gates)
 
-    def _candidate_levels_for_tp2() -> List[float]:
-        out: List[float] = []
-        last = ap.get("Last") if isinstance(ap, dict) else {}
-        last = last if isinstance(last, dict) else {}
-        for k in ("MA20", "MA50", "MA200"):
-            v = _safe_float(last.get(k), default=np.nan)
-            if pd.notna(v) and float(v) > 0:
-                out.append(float(v))
-
-        fib = ap.get("Fibonacci") if isinstance(ap, dict) else {}
-        fib = fib if isinstance(fib, dict) else {}
-        for side in ("Short", "Long"):
-            lv = ((fib.get(side) or {}).get("levels") or {}) if isinstance(fib.get(side), dict) else {}
-            for _, lvv in (lv or {}).items():
-                vv = _safe_float(lvv, default=np.nan)
-                if pd.notna(vv) and float(vv) > 0:
-                    out.append(float(vv))
-
-        # StructureQuality overhead center (if any)
-        try:
-            ov = ((sq.get("OverheadResistance") or {}).get("Nearest") or {}) if isinstance(sq.get("OverheadResistance"), dict) else {}
-            cen = _safe_float(ov.get("Center"), default=np.nan)
-            if pd.notna(cen):
-                out.append(float(cen))
-        except Exception:
-            pass
-
-        # de-dup
-        uniq: List[float] = []
-        seen = set()
-        for v in out:
-            key = round(float(v), 6)
-            if key in seen:
-                continue
-            seen.add(key)
-            uniq.append(float(v))
-        return uniq
-
-    lv_tp2 = _candidate_levels_for_tp2()
-
-    def _next_level_above(x: Any) -> float:
-        xv = _safe_float(x, default=np.nan)
-        if pd.isna(xv):
-            return float("nan")
-        cands = [v for v in lv_tp2 if v > float(xv)]
-        return float(min(cands)) if cands else float("nan")
-
-    def _rules(ptype: str) -> List[str]:
-        ptl = (ptype or "").lower()
+    # Long-only playbook rules (short bullets; renderer can show 3–5)
+    def _entry_rules(ptype: str) -> List[str]:
         base: List[str] = []
-        if "break" in ptl:
-            base.append("Chỉ kích hoạt khi có phiên xác nhận (follow-through), tránh vào trước khi lực phá vỡ rõ.")
-            base.append("Nếu breakout không giữ được trên vùng entry trong 1–2 phiên, ưu tiên giảm rủi ro/thoát nhanh.")
-        else:
-            base.append("Ưu tiên canh hồi về vùng hỗ trợ/MA/Fib để tối ưu điểm vào; tránh đuổi giá khi chưa hồi.")
-            base.append("Nếu phá hỗ trợ trong ngày và không kéo lại, ưu tiên giảm rủi ro thay vì ‘hy vọng’.")
-
-        # Universal risk control
+        if ptype == "BREAKOUT":
+            base.append("Mua mới chỉ khi Breakout + Volume cùng PASS; tránh mua khi Volume FAIL.")
+            base.append("Nếu phía trên có trần cấu trúc (Structure=WAIT), ưu tiên kịch bản RECLAIM thay vì đuổi giá.")
+        elif ptype in ("PULLBACK", "RANGE_EDGE"):
+            base.append("Ưu tiên mua ở vùng hồi về hỗ trợ/MA/Fib; tránh mua sát kháng cự cấu trúc.")
+            base.append("Chỉ triển khai khi RR đủ và stop được neo vào cấu trúc rõ ràng.")
+        else:  # RECLAIM
+            base.append("Chờ reclaim mốc cấu trúc phía trên (đóng cửa/giữ được) rồi mới mua mới.")
+            base.append("Volume cần tối thiểu WAIT→PASS để tránh bull-trap.")
         base.append("Không dời stop xuống; chỉ dời stop lên theo cấu trúc khi giá đi đúng hướng.")
-        base.append("Chia chốt lời 2 phần: TP1 để giảm rủi ro, TP2 để tối đa hóa khi có xu hướng.")
-        # Class-aware overnight hint (display only)
         if policy_hint_line:
             base.append(f"Policy hint: {policy_hint_line}.")
         return base[:5]
 
-    def _invalidation(ptype: str, entry: float, stop: float) -> str:
-        ptl = (ptype or "").lower()
-        if pd.isna(stop):
-            return "Invalidation: missing stop."
-        if "break" in ptl:
-            return "Invalidation: đóng cửa dưới Stop hoặc breakout thất bại (mất lại vùng entry)." if pd.notna(entry) else "Invalidation: đóng cửa dưới Stop."
-        return "Invalidation: đóng cửa dưới Stop hoặc breakdown khỏi vùng hỗ trợ."
+    def _holding_rules() -> List[str]:
+        base: List[str] = []
+        base.append("Ưu tiên bảo toàn vốn/lợi nhuận: dời stop lên theo cấu trúc khi có lợi thế.")
+        base.append("Nếu Structure=WAIT (đụng trần cấu trúc), cân nhắc chốt một phần khi đã có lãi; giữ phần còn lại nếu reclaim thành công.")
+        base.append("Nếu Structure=FAIL hoặc mất mốc hỗ trợ chính, ưu tiên giảm rủi ro/thoát vị thế theo stop.")
+        base.append("Không averaging-down khi cấu trúc xấu; chỉ tăng khi reclaim + volume xác nhận.")
+        if policy_hint_line:
+            base.append(f"Policy hint: {policy_hint_line}.")
+        return base[:5]
 
-    def _notes_short(ptype: str, gates: Dict[str, str]) -> str:
-        g = gates or {}
-        if g.get("structure") in ("WAIT", "FAIL"):
-            return "Lưu ý: có ‘trần cấu trúc’ gần; ưu tiên chờ vượt/giải phóng trước khi tăng xác suất."
-        if g.get("volume") in ("WAIT", "FAIL") and (ptype or "").lower().startswith("break"):
-            return "Lưu ý: thiếu xác nhận volume; breakout dễ false-break."
-        if g.get("rr") in ("WAIT", "FAIL"):
-            return "Lưu ý: R:R chưa đạt ngưỡng; cần tối ưu entry/stop."
-        return "Plan hợp lệ về mặt cấu trúc; ưu tiên kỷ luật stop và tránh FOMO."
+    invalidation = "Invalidation: thiếu stop." if pd.isna(stop) else "Invalidation: thủng stop/đóng cửa dưới vùng cấu trúc neo stop."
 
-    # --- plan selection (scenario-driven) ---
-    plans = ap.get("TradePlans") if isinstance(ap, dict) else []
-    plans = plans if isinstance(plans, list) else []
-    by_name = { _safe_text(p.get("Name") or "").strip().lower(): p for p in plans if isinstance(p, dict) }
+    plan_primary = {
+        "type": setup_type,
+        "state": plan_state,
+        "gates": gates,
+        "entry_zone": {"Low": float(lo) if pd.notna(lo) else np.nan, "High": float(hi) if pd.notna(hi) else np.nan},
+        "stop": float(stop) if pd.notna(stop) else np.nan,
+        "tp1": float(tp1) if pd.notna(tp1) else np.nan,
+        "tp2": float(tp2) if pd.notna(tp2) else np.nan,
+        "rr_actual": float(rr_act) if pd.notna(rr_act) else np.nan,
+        "rr_min": float(rr_min),
+        "management_rules": _holding_rules() if is_holding else _entry_rules(setup_type),
+        "invalidation": invalidation,
+        "notes_short": f"Scenario: {scen_name} | Setup: {setup_name}",
+    }
 
-    def _pick(name: str) -> Optional[Dict[str, Any]]:
-        return by_name.get(_safe_text(name).strip().lower())
-
-    dp = default_plan.lower()
-    if dp.startswith("break"):
-        primary_name = "Breakout"; primary_type = "Breakout"
-    elif dp.startswith("pull"):
-        primary_name = "Pullback"; primary_type = "Pullback"
-    elif dp.startswith("range"):
-        primary_name = "Pullback"; primary_type = "Range"
-    elif dp.startswith("reversal"):
-        primary_name = "Pullback"; primary_type = "Reversal"
-    elif dp.startswith("avoid"):
-        primary_name = ""; primary_type = "Avoid"
-    else:
-        primary_name = "Pullback"; primary_type = "Pullback"
-
-    primary_plan = _pick(primary_name) if primary_name else None
-    alt_name = "Breakout" if primary_name.lower() == "pullback" else "Pullback"
-    alt_plan = _pick(alt_name)
-
-    def _build_plan(p: Optional[Dict[str, Any]], ptype: str, *, force_watch: bool = False) -> Optional[Dict[str, Any]]:
-        if not isinstance(p, dict):
-            return None
-        entry = _safe_float(p.get("Entry"), default=np.nan)
-        stop = _safe_float(p.get("Stop"), default=np.nan)
-        tp1 = _safe_float(p.get("TP"), default=np.nan)
-        rr_act = _safe_float(p.get("RR"), default=np.nan)
-
-        # Entry zone
-        low = high = np.nan
-        if pd.notna(entry) and float(entry) > 0:
-            if (ptype or "").lower().startswith("break"):
-                low = float(entry)
-                high = float(entry) * (1.0 + float(bufpct))
-            else:
-                low = float(entry) * (1.0 - float(bufpct))
-                high = float(entry)
-
-        # TP2: prefer next known level; fallback to extension from TP1
-        tp2 = _next_level_above(tp1) if pd.notna(tp1) else np.nan
-        if pd.isna(tp2) and pd.notna(entry) and pd.notna(tp1):
-            tp2 = float(entry) + 1.6 * (float(tp1) - float(entry))
-
-        gates = {
-            "trigger": _trig_status(ptype),
-            "volume": _vol_status(ptype),
-            "rr": _rr_status(rr_act),
-            "exec": exec_status,
-            "structure": st_struct,
-        }
-        state = _plan_state(gates)
-        if force_watch and state == "ACTIVE":
-            state = "WATCH"
-        if dp.startswith("avoid"):
-            state = "INVALID"
-
-        return {
-            "type": ptype,
-            "state": state,
-            "gates": gates,
-            "entry_zone": {"Low": float(low) if pd.notna(low) else np.nan, "High": float(high) if pd.notna(high) else np.nan},
+    # Optional defensive alternative for FLAT when structure WAIT/FAIL
+    plan_alt = None
+    if not is_holding and str(gates.get("structure", "")).upper() in ("WAIT", "FAIL"):
+        alt_g = dict(gates)
+        alt_g["trigger"] = "WAIT"
+        alt_g["rr"] = "WAIT" if alt_g.get("rr") == "FAIL" else alt_g.get("rr")
+        plan_alt = {
+            "type": "RECLAIM",
+            "state": "WATCH",
+            "gates": alt_g,
+            "entry_zone": {"Low": float(lo) if pd.notna(lo) else np.nan, "High": float(hi) if pd.notna(hi) else np.nan},
             "stop": float(stop) if pd.notna(stop) else np.nan,
             "tp1": float(tp1) if pd.notna(tp1) else np.nan,
             "tp2": float(tp2) if pd.notna(tp2) else np.nan,
             "rr_actual": float(rr_act) if pd.notna(rr_act) else np.nan,
-            "rr_min": float(rr_min) if pd.notna(rr_min) else np.nan,
-            "management_rules": _rules(ptype),
-            "invalidation": _invalidation(ptype, entry, stop),
-            "notes_short": _notes_short(ptype, gates),
+            "rr_min": float(rr_min),
+            "management_rules": _entry_rules("RECLAIM"),
+            "invalidation": invalidation,
+            "notes_short": "Alt plan: wait for reclaim structural level; avoid bull-trap.",
         }
 
-    # Range/Reversal default is WATCH unless gates are exceptionally clean.
-    force_watch = primary_type in ("Range", "Reversal")
-    plan_primary = _build_plan(primary_plan, primary_type if primary_type != "Avoid" else "Pullback", force_watch=force_watch) if primary_plan else None
-    plan_alt = _build_plan(alt_plan, alt_name, force_watch=True) if alt_plan else None
+    explain = "Plan bám Scenario + Gates; StructureGate được ưu tiên để tránh bull-trap trước trần cấu trúc."
+    if is_holding:
+        explain = "HOLDING mode: ưu tiên bảo toàn vốn/lợi nhuận; quyết định TRIM/EXIT do Decision Layer dựa trên PnL & gates."
 
-    explain = ""
-    if dp.startswith("avoid"):
-        explain = "Scenario hiện nghiêng về tránh giao dịch; chỉ chuẩn bị plan và chờ reset cấu trúc."
-    elif force_watch:
-        explain = "Scenario ưu tiên quan sát/chờ xác nhận; plan được dựng sẵn để phản ứng nhanh khi điều kiện hội tụ."
+    out = {
+        "schema": "TradePlanPack.v1",
+        "mode": "HOLDING" if is_holding else "FLAT",
+        "policy_hint_line": policy_hint_line,
+        "plan_primary": plan_primary,
+        "plan_alt": plan_alt,
+        "explain": explain,
+    }
+    return out
+
+
+# ============================================================
+# 9. DECISION PACK (v1) — Long-only, Portfolio-ready (No sizing)
+# ============================================================
+def compute_decision_pack_v1(analysis_pack: Dict[str, Any], trade_plan_pack: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Compute a long-only DecisionPack without sizing (Portfolio-ready).
+
+    Decision policy (User confirmed option B):
+      - HOLDING + Structure=WAIT: TRIM if in profit; else HOLD.
+    """
+    ap = analysis_pack or {}
+    tpp = trade_plan_pack or (ap.get("TradePlanPack") or {})
+    tpp = tpp if isinstance(tpp, dict) else {}
+
+    pos = ap.get("PositionStatePack") or {}
+    pos = pos if isinstance(pos, dict) else {}
+    mode = _safe_text(pos.get("mode") or tpp.get("mode") or "FLAT").strip().upper()
+    if mode not in ("FLAT", "HOLDING"):
+        mode = "FLAT"
+    is_holding = bool(pos.get("is_holding")) if mode == "HOLDING" else False
+
+    in_profit = pos.get("in_profit", None)
+    pnl_pct = pos.get("pnl_pct", None)
+
+    pp = tpp.get("plan_primary") or {}
+    pp = pp if isinstance(pp, dict) else {}
+    gates = pp.get("gates") or {}
+    gates = gates if isinstance(gates, dict) else {}
+
+    structure = _safe_text(gates.get("structure") or "").strip().upper()
+    if structure not in ("PASS", "WAIT", "FAIL"):
+        structure = "WAIT"
+    rr = _safe_text(gates.get("rr") or "").strip().upper()
+    trig = _safe_text(gates.get("trigger") or "").strip().upper()
+    vol = _safe_text(gates.get("volume") or "").strip().upper()
+
+    constraints: List[str] = []
+    if structure in ("WAIT", "FAIL"):
+        constraints.append("No add while StructureGate is WAIT/FAIL; prioritize reclaim/confirm.")
+    if vol == "FAIL":
+        constraints.append("Volume not confirmed; avoid aggressive buys/adds.")
+    if rr == "FAIL":
+        constraints.append("R:R below policy minimum; wait for better location or confirmation.")
+    if trig == "FAIL":
+        constraints.append("Trigger weak; avoid chasing; require clearer setup.")
+
+    # Default decision
+    action = "WAIT"
+    urgency = "MED"
+    rationale = "Theo dõi thêm tín hiệu xác nhận trước khi hành động."
+
+    if not is_holding:
+        # FLAT: only BUY when plan is ACTIVE and no FAIL gates
+        state = _safe_text(pp.get("state") or "").strip().upper()
+        if state == "ACTIVE" and not any(_safe_text(v).upper() == "FAIL" for v in gates.values()):
+            action = "BUY"
+            urgency = "HIGH"
+            rationale = "Các điều kiện chính đã PASS/đủ xác nhận; có thể triển khai kế hoạch mua mới."
+        else:
+            action = "WAIT"
+            urgency = "LOW" if any(_safe_text(v).upper() == "FAIL" for v in gates.values()) else "MED"
+            rationale = "Chưa đủ điều kiện cho mua mới; ưu tiên chờ thêm xác nhận (đặc biệt là Structure/Volume)."
     else:
-        explain = "Plan được chọn theo Scenario hiện tại và được kiểm soát bởi các gate (trigger/volume/RR/structure)."
+        # HOLDING: protect capital/profits (User choice B)
+        if structure == "FAIL":
+            action = "EXIT"
+            urgency = "HIGH"
+            rationale = "Cấu trúc bị phá vỡ (Structure FAIL) → ưu tiên thoát/giảm mạnh để bảo toàn vốn."
+        elif structure == "WAIT":
+            if in_profit is True:
+                action = "TRIM"
+                urgency = "MED"
+                rationale = "Đụng trần cấu trúc gần (Structure WAIT) trong khi đang có lãi → chốt một phần để bảo toàn lợi nhuận."
+            else:
+                action = "HOLD"
+                urgency = "MED"
+                rationale = "Structure WAIT nhưng chưa có lợi nhuận rõ ràng → giữ và quản trị rủi ro theo stop/cấu trúc."
+        else:
+            action = "HOLD"
+            urgency = "LOW"
+            rationale = "Cấu trúc ổn (Structure PASS) → ưu tiên giữ và dời stop theo cấu trúc."
 
+    # Keep constraints concise
+    constraints = constraints[:3]
 
     return {
-        "schema": "TradePlanPack.v1",
-        "plan_primary": plan_primary or {},
-        "plan_alt": plan_alt or {},
-        "policy_hint_line": policy_hint_line,
-        "explain": explain,
-        "exec_gate_reason": exec_reason,
-        "inputs": {
-            "DefaultPlan": default_plan,
-            "RRminPolicy": float(rr_min) if pd.notna(rr_min) else np.nan,
-            "BufferPct": float(_buffer_pct()),
-            "CeilingGate": st_struct,
-        }
+        "schema": "DecisionPack.v1",
+        "mode": "HOLDING" if is_holding else "FLAT",
+        "action": action,
+        "urgency": urgency,
+        "rationale": rationale,
+        "constraints": constraints,
+        "in_profit": in_profit,
+        "pnl_pct": pnl_pct,
     }
 
 
+def compute_position_manager_pack_v1(
+    analysis_pack: Dict[str, Any],
+    trade_plan_pack: Optional[Dict[str, Any]] = None,
+    decision_pack: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Compute a PositionManagerPack for a single asset (Portfolio-ready, long-only).
 
-# Mapping for bilingual playstyle tags (EN → EN + VI).
-PLAYSTYLE_TAG_TRANSLATIONS: Dict[str, str] = {
-    "Pullback-buy zone (confluence)": "Pullback-buy zone (confluence) - Vùng mua pullback có nhiều yếu tố hội tụ",
-    "Breakout attempt (needs follow-through)": "Breakout attempt (needs follow-through) - Nỗ lực breakout, cần phiên xác nhận tiếp theo",
-    "Wait for volume confirmation": "Wait for volume confirmation - Chờ xác nhận khối lượng thanh khoản",
-    "Tight risk control near resistance": "Tight risk control near resistance - Siết chặt quản trị rủi ro gần vùng kháng cự",
-    "Use LongStructure_ShortTactical rule": "Use LongStructure_ShortTactical rule - Áp dụng quy tắc cấu trúc dài hạn, tác chiến ngắn hạn",
-}
+    Philosophy:
+      - TradePlanPack = blueprint (no sizing decision).
+      - DecisionPack  = action intent (BUY/HOLD/TRIM/EXIT/WAIT), still no final sizing.
+      - PositionManagerPack = execution guidance ("sizing-lite"), safe to be overridden by Portfolio module.
 
+    Notes:
+      - Designed for markets without short-sale.
+      - Uses StructureQualityPack to avoid "mù chất lượng cản/hỗ trợ".
+    """
+    ap = analysis_pack or {}
+    tpp = trade_plan_pack or (ap.get("TradePlanPack") or {})
+    tpp = tpp if isinstance(tpp, dict) else {}
+    dp = decision_pack or (ap.get("DecisionPack") or {})
+    dp = dp if isinstance(dp, dict) else {}
+    pos = ap.get("PositionStatePack") or {}
+    pos = pos if isinstance(pos, dict) else {}
+
+    mode = _safe_text(pos.get("mode") or tpp.get("mode") or dp.get("mode") or "FLAT").strip().upper()
+    if mode not in ("FLAT", "HOLDING"):
+        mode = "FLAT"
+    is_holding = bool(pos.get("is_holding")) if mode == "HOLDING" else False
+
+    action = _safe_text(dp.get("action") or "WAIT").strip().upper()
+    urgency = _safe_text(dp.get("urgency") or "MED").strip().upper()
+    rationale = _safe_text(dp.get("rationale") or "").strip()
+    constraints = dp.get("constraints") or []
+    constraints = constraints if isinstance(constraints, list) else []
+
+    # Policy cap (display-only but useful for portfolio-ready guidance)
+    final_class = _safe_text(ap.get("CharacterClass") or "").strip()
+    pol = CLASS_POLICY_HINTS.get(final_class) if isinstance(CLASS_POLICY_HINTS, dict) else None
+    size_cap_txt = _safe_text((pol or {}).get("size_cap") or "").strip() if isinstance(pol, dict) else ""
+    rr_min_hint = None
+    try:
+        rr_min_hint = float((pol or {}).get("rr_min")) if isinstance(pol, dict) and (pol or {}).get("rr_min") is not None else None
+    except Exception:
+        rr_min_hint = None
+
+    def _pct_to_float(p: str) -> Optional[float]:
+        s = _safe_text(p).strip().replace(" ", "")
+        if not s:
+            return None
+        if s.endswith("%"):
+            try:
+                return float(s[:-1]) / 100.0
+            except Exception:
+                return None
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+    size_cap_frac = _pct_to_float(size_cap_txt)  # e.g. "70%" -> 0.70
+    size_cap_pct_nav = (size_cap_frac * 100.0) if isinstance(size_cap_frac, float) else None
+
+    # Position state
+    current_price = _safe_float(pos.get("current_price"), default=np.nan)
+    avg_cost = _safe_float(pos.get("avg_cost"), default=np.nan)
+    position_size_pct_nav = _safe_float(pos.get("position_size_pct_nav"), default=np.nan)
+    risk_budget_pct_nav = _safe_float(pos.get("risk_budget_pct_nav_per_trade"), default=np.nan)
+
+    in_profit = pos.get("in_profit", None)
+    pnl_pct = pos.get("pnl_pct", None)
+
+    # Trade plan levels (single source of truth)
+    pp = tpp.get("plan_primary") or {}
+    pp = pp if isinstance(pp, dict) else {}
+    stop_plan = _safe_float(pp.get("stop"), default=np.nan)
+    entry_zone = pp.get("entry_zone") or {}
+    entry_zone = entry_zone if isinstance(entry_zone, dict) else {}
+
+    # Structure quality (for trim / trailing stop)
+    sq = ap.get("StructureQuality") or ap.get("StructureQualityPack") or {}
+    sq = sq if isinstance(sq, dict) else {}
+    oh = (sq.get("OverheadResistance") or {}) if isinstance(sq.get("OverheadResistance") or {}, dict) else {}
+    us = (sq.get("UnderlyingSupport") or {}) if isinstance(sq.get("UnderlyingSupport") or {}, dict) else {}
+    oh_n = (oh.get("Nearest") or {}) if isinstance(oh.get("Nearest") or {}, dict) else {}
+    us_n = (us.get("Nearest") or {}) if isinstance(us.get("Nearest") or {}, dict) else {}
+
+    oh_tier = _safe_text(oh_n.get("Tier") or "").strip().upper()
+    us_tier = _safe_text(us_n.get("Tier") or "").strip().upper()
+    if oh_tier not in ("LIGHT", "MED", "HEAVY", "CONFLUENCE"):
+        oh_tier = ""
+    if us_tier not in ("LIGHT", "MED", "HEAVY", "CONFLUENCE"):
+        us_tier = ""
+
+    oh_zone = oh_n.get("Zone") or {}
+    oh_zone = oh_zone if isinstance(oh_zone, dict) else {}
+    us_zone = us_n.get("Zone") or {}
+    us_zone = us_zone if isinstance(us_zone, dict) else {}
+
+    # Vol proxy for dynamic buffer (percent)
+    vol_pct = _safe_float((sq.get("Meta") or {}).get("VolPct_ATRProxy"), default=np.nan)
+    if not pd.notna(vol_pct):
+        vol_pct = _safe_float(ap.get("VolPct") or ap.get("VolPct_ATRProxy"), default=np.nan)
+    if not pd.notna(vol_pct):
+        vol_pct = 1.2
+
+    base_buf = max(0.003, min(0.012, 0.006 * (float(vol_pct) / 1.5)))  # 0.3%–1.2%
+    tier_premium = {"": 0.0, "LIGHT": 0.0, "MED": 0.002, "HEAVY": 0.004, "CONFLUENCE": 0.006}
+
+    # Suggested trim sizing (percent of current position), used only when HOLDING/TRIM
+    trim_pct_of_position = None
+    if action == "TRIM":
+        if oh_tier in ("CONFLUENCE",):
+            trim_pct_of_position = 0.50
+        elif oh_tier in ("HEAVY",):
+            trim_pct_of_position = 0.35
+        else:
+            trim_pct_of_position = 0.25
+
+    # Suggested protective stop (trailing by structure + buffer) — only tighten when in profit
+    stop_suggest = stop_plan if pd.notna(stop_plan) else np.nan
+    stop_anchor_label = ""
+    try:
+        zl = _safe_float(us_zone.get("Low"), default=np.nan)
+        if pd.notna(zl):
+            buf = base_buf + tier_premium.get(us_tier, 0.0)
+            stop_candidate = float(zl) * (1.0 - float(buf))
+            stop_anchor_label = "UnderlyingSupport"
+            if (in_profit is True) or (action in ("TRIM", "HOLD")):
+                if pd.notna(stop_suggest):
+                    stop_suggest = max(float(stop_suggest), float(stop_candidate))
+                else:
+                    stop_suggest = float(stop_candidate)
+    except Exception:
+        pass
+
+    # Orders (advisory only; portfolio module may override)
+    orders: List[Dict[str, Any]] = []
+    if action == "BUY" and not is_holding:
+        orders.append({
+            "type": "BUY",
+            "style": "starter",
+            "entry_zone": entry_zone,
+            "note": "Start small; add only after follow-through/reclaim (if applicable).",
+        })
+    if action == "TRIM" and is_holding and isinstance(trim_pct_of_position, float):
+        orders.append({
+            "type": "TRIM",
+            "pct_of_position": float(trim_pct_of_position),
+            "near_zone": oh_zone,
+            "note": "Protect profit near overhead resistance (tier-aware).",
+        })
+    if action == "EXIT" and is_holding:
+        orders.append({
+            "type": "EXIT",
+            "note": "Structure failed; reduce risk aggressively per stop/invalidation.",
+        })
+
+    # Compact guidance text (UI/portfolio)
+    guidance_parts: List[str] = []
+    if is_holding:
+        if action == "TRIM" and isinstance(trim_pct_of_position, float):
+            guidance_parts.append(f"Trim ~{int(round(trim_pct_of_position*100))}% vị thế gần vùng cản phía trên.")
+        if pd.notna(stop_suggest):
+            guidance_parts.append("Tighten stop theo cấu trúc; không nới stop xuống.")
+    else:
+        if action == "BUY":
+            guidance_parts.append("Mua mới theo entry zone; ưu tiên starter size và add sau xác nhận.")
+        else:
+            guidance_parts.append("Chưa đủ điều kiện mua mới; ưu tiên quan sát theo gates.")
+
+    # Keep constraints concise
+    constraints = constraints[:3]
+
+    return {
+        "schema": "PositionManagerPack.v1",
+        "mode": "HOLDING" if is_holding else "FLAT",
+        "action": action,
+        "urgency": urgency,
+        "guidance": " ".join([g for g in guidance_parts if g])[:240],
+        "trim_pct_of_position": trim_pct_of_position,
+        "stop_suggest": float(stop_suggest) if pd.notna(stop_suggest) else np.nan,
+        "stop_anchor": stop_anchor_label,
+        "size_cap_pct_nav": float(size_cap_pct_nav) if isinstance(size_cap_pct_nav, (int, float)) else None,
+        "risk_budget_pct_nav": float(risk_budget_pct_nav) if pd.notna(risk_budget_pct_nav) else None,
+        "position_size_pct_nav": float(position_size_pct_nav) if pd.notna(position_size_pct_nav) else None,
+        "pnl_pct": pnl_pct,
+        "rationale": rationale,
+        "constraints": constraints,
+        "orders": orders,
+        "rr_min_hint": rr_min_hint,
+    }
 
 def render_character_traits(character_pack: Dict[str, Any]) -> None:
     """
@@ -5777,6 +5998,271 @@ def render_current_status_insight(master_score_total: Any, conviction_score: Any
 {cs_meaning[1]}"""
     st.markdown(block)
 
+# ============================================================
+# 10. DASHBOARD SUMMARY PACK (v1) — Single source of truth for Executive Snapshot
+# ============================================================
+def compute_dashboard_summary_pack_v1(
+    analysis_pack: Dict[str, Any],
+    character_pack: Dict[str, Any],
+    gate_status: str = "",
+) -> Dict[str, Any]:
+    """Compute a compact DashboardSummaryPack for Executive Snapshot rendering.
+
+    Purpose:
+      - Avoid Dashboard vs Detail drift by reading Python pre-digested packs (TradePlan/Decision/PositionManager).
+      - Eliminate renderer-side branching errors (e.g., missing locals) by producing one stable summary contract.
+
+    IMPORTANT:
+      - This is a *summary pack* only. It must NOT change engine scoring, gating thresholds, or trade-plan math.
+    """
+    ap = analysis_pack or {}
+    cp = character_pack or {}
+
+    # --- core inputs ---
+    primary = ap.get("PrimarySetup") or {}
+    primary = primary if isinstance(primary, dict) else {}
+    setup_name = _safe_text(primary.get("Name") or "N/A").strip()
+
+    master_total = (ap.get("MasterScore") or {}).get("Total", np.nan)
+    conviction = ap.get("Conviction", np.nan)
+
+    class_name = _safe_text(cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "N/A").strip()
+    policy_hint = get_class_policy_hint_line(class_name)
+
+    # ProTech (Now)
+    protech = ap.get("ProTech") or {}
+    protech = protech if isinstance(protech, dict) else {}
+    ma = protech.get("MA") or {}
+    ma = ma if isinstance(ma, dict) else {}
+    volp = protech.get("Volume") or {}
+    volp = volp if isinstance(volp, dict) else {}
+
+    ma_reg = _safe_text(ma.get("Regime") or "N/A").strip()
+    vol_reg = _safe_text(volp.get("Regime") or "N/A").strip()
+    vol_ratio = (protech.get("Volume") or {}).get("Ratio")
+
+    # Flags
+    flags_list = list(cp.get("Flags") or [])
+    has_near_res = any(isinstance(f, dict) and _safe_text(f.get("code")).strip() == "NearMajorResistance" for f in flags_list)
+    has_near_sup = any(isinstance(f, dict) and _safe_text(f.get("code")).strip() == "NearMajorSupport" for f in flags_list)
+
+    # Location tag (quick)
+    loc_tag = "Neutral"
+    if has_near_res:
+        loc_tag = "Near Resistance"
+    elif has_near_sup:
+        loc_tag = "Near Support"
+    else:
+        ma_struct = ma.get("Structure") or {}
+        ma_struct = ma_struct if isinstance(ma_struct, dict) else {}
+        above_200 = ma_struct.get("PriceAboveMA200")
+        if above_200 is True:
+            loc_tag = "Above MA200"
+        elif above_200 is False:
+            loc_tag = "Below MA200"
+
+    # State label (setup intent first)
+    sn_l = (setup_name or "").lower()
+    state_label = "Neutral"
+    if "breakout" in sn_l:
+        state_label = "Breakout Attempt"
+    elif "pullback" in sn_l:
+        state_label = "Pullback"
+    else:
+        if ma_reg == "Close>=MA50>=MA200":
+            state_label = "Uptrend"
+        elif ma_reg == "Close<MA50<MA200":
+            state_label = "Downtrend"
+        elif ma_reg == "MixedStructure":
+            state_label = "Mixed/Choppy"
+
+    reg_tag = f"Vol: {vol_reg}" if (vol_reg and vol_reg != "N/A") else ""
+    state_capsule_line = " | ".join([x for x in [state_label, loc_tag, reg_tag] if x])
+
+    # One-line score interpretation (dashboard-short)
+    def _bucket(v: float) -> str:
+        if v < 4.0:
+            return "low"
+        if v < 6.0:
+            return "mid"
+        if v < 8.0:
+            return "good"
+        return "high"
+
+    insight_line = ""
+    ms_v = _safe_float(master_total, default=np.nan)
+    cs_v = _safe_float(conviction, default=np.nan)
+    if pd.notna(ms_v) and pd.notna(cs_v):
+        ms_b = _bucket(float(ms_v))
+        cs_b = _bucket(float(cs_v))
+        if ms_b in ("low",):
+            insight_line = "Cơ hội kém hấp dẫn; ưu tiên quan sát và chờ cấu trúc/điểm vào tốt hơn."
+        elif ms_b == "mid" and cs_b in ("good", "high"):
+            insight_line = "Cơ hội trung tính nhưng độ tin cậy khá tốt; ưu tiên plan kỷ luật, tránh FOMO."
+        elif ms_b in ("good", "high") and cs_b in ("low", "mid"):
+            insight_line = "Cơ hội khá hấp dẫn nhưng độ tin cậy chưa cao; chỉ triển khai chọn lọc và chờ trigger đồng pha."
+        elif ms_b in ("good", "high") and cs_b in ("good", "high"):
+            insight_line = "Cơ hội hấp dẫn và độ tin cậy cao; có thể triển khai theo plan, tập trung quản trị rủi ro."
+        else:
+            insight_line = "Theo dõi nghiêm túc; ưu tiên đúng nhịp/điều kiện thay vì vào vội."
+    gtxt = (gate_status or "").strip().upper()
+    if gtxt not in ("", "N/A", "ACTIVE") and insight_line:
+        insight_line = f"{insight_line} (Gate: {gtxt})"
+
+    # --- resolve gates (prefer TradePlanPack.v1) ---
+    def _status(v: Any, good: float, warn: float) -> str:
+        x = _safe_float(v, default=np.nan)
+        if pd.isna(x):
+            return "N/A"
+        if float(x) >= good:
+            return "PASS"
+        if float(x) >= warn:
+            return "WAIT"
+        return "FAIL"
+
+    plan_status = "N/A"
+    rr_plan = _safe_float(primary.get("RR"), default=np.nan)
+
+    st_break = st_vol = st_rr = st_struct = "N/A"
+
+    # StructureQuality (needed for next-step labels & ceiling gate)
+    sq: Dict[str, Any] = {}
+    try:
+        sq = (
+            (cp or {}).get("StructureQuality")
+            or (ap or {}).get("StructureQuality")
+            or (ap or {}).get("StructureQualityPack")
+            or {}
+        )
+    except Exception:
+        sq = {}
+    sq = sq if isinstance(sq, dict) else {}
+
+    tpp = ap.get("TradePlanPack") or {}
+    tpp = tpp if isinstance(tpp, dict) else {}
+    if _safe_text(tpp.get("schema") or "").strip() == "TradePlanPack.v1":
+        pp = tpp.get("plan_primary") or {}
+        pp = pp if isinstance(pp, dict) else {}
+        gpack = pp.get("gates") or {}
+        gpack = gpack if isinstance(gpack, dict) else {}
+        plan_status = _safe_text(pp.get("state") or "N/A").strip().upper()
+        rr_plan = _safe_float(pp.get("rr_actual"), default=rr_plan)
+        st_break = _safe_text(gpack.get("trigger") or "N/A").strip().upper()
+        st_vol = _safe_text(gpack.get("volume") or "N/A").strip().upper()
+        st_rr = _safe_text(gpack.get("rr") or "N/A").strip().upper()
+        st_struct = _safe_text(gpack.get("structure") or "N/A").strip().upper()
+    else:
+        # legacy fallback: derive statuses from metrics and structure ceiling gate
+        combat = cp.get("CombatStats") or {}
+        combat = combat if isinstance(combat, dict) else {}
+        st_break = _status(combat.get("BreakoutForce"), good=6.8, warn=5.5)
+        st_vol = _status(vol_ratio, good=1.20, warn=0.95)
+        st_rr = _status(rr_plan, good=1.80, warn=1.30)
+        cg = ((sq.get("Gates") or {}).get("CeilingGate") or {}) if isinstance((sq.get("Gates") or {}), dict) else {}
+        st_struct = _safe_text(cg.get("Status") or "N/A").strip().upper()
+
+    def _norm_st(s: str) -> str:
+        s = (s or "").strip().upper()
+        return s if s in ("PASS", "WAIT", "FAIL") else "N/A"
+
+    st_break = _norm_st(st_break)
+    st_vol = _norm_st(st_vol)
+    st_rr = _norm_st(st_rr)
+    st_struct = _norm_st(st_struct)
+
+    gate_line = f"Gate: {gtxt or 'N/A'} | Plan: {setup_name} ({plan_status or 'N/A'})"
+
+    # Next step (single line, long-only language)
+    next_step = "Theo dõi và chờ thêm dữ liệu."
+    if st_struct in ("FAIL", "WAIT"):
+        _ov = ((sq or {}).get("OverheadResistance", {}) or {}).get("Nearest", {}) or {}
+        _comps = _ov.get("ComponentsTop") if isinstance(_ov.get("ComponentsTop"), list) else []
+        _t = _safe_text(((_comps[0] or {}).get("Type")) if (len(_comps) > 0 and isinstance(_comps[0], dict)) else "").strip()
+        _t_pretty = _pretty_level_label(_t, side="overhead") if _t else ""
+        next_step = "Chờ reclaim mốc cấu trúc phía trên trước khi tăng xác suất vào lệnh."
+        if _t_pretty:
+            next_step = f"Chờ reclaim mốc cấu trúc phía trên ({_t_pretty}) trước khi tăng xác suất vào lệnh."
+    elif st_break in ("FAIL", "WAIT"):
+        next_step = "Chờ breakout xác nhận/follow-through; tránh vào sớm khi lực chưa rõ."
+    elif st_vol in ("FAIL", "WAIT"):
+        next_step = "Chờ volume xác nhận (≥ 1.2×20D) để giảm false-break."
+    elif st_rr in ("FAIL", "WAIT"):
+        next_step = "Chờ điểm vào tốt hơn để RR ≥ 1.8 (hoặc giảm risk/stop hợp lý)."
+    else:
+        next_step = "Có thể triển khai theo plan; ưu tiên kỷ luật stop, tránh FOMO."
+
+    # Risk flags (top 2, severity>=2)
+    risk_lines: List[str] = []
+    for f in flags_list:
+        if not isinstance(f, dict):
+            continue
+        try:
+            sev = int(f.get("severity", 0))
+        except Exception:
+            sev = 0
+        if sev < 2:
+            continue
+        code = _safe_text(f.get("code") or "").strip()
+        note = _safe_text(f.get("note") or "").strip()
+        if code and note:
+            risk_lines.append(f"[{code}] {note}")
+        elif code:
+            risk_lines.append(f"[{code}]")
+        elif note:
+            risk_lines.append(note)
+        if len(risk_lines) >= 2:
+            break
+    if not risk_lines:
+        risk_lines = ["None"]
+
+    # Decision/Position (summary values only; renderer formats)
+    decision_summary: Dict[str, Any] = {}
+    try:
+        dp = ap.get("DecisionPack") or {}
+        pmp = ap.get("PositionManagerPack") or {}
+        posp = ap.get("PositionStatePack") or {}
+        dp = dp if isinstance(dp, dict) else {}
+        pmp = pmp if isinstance(pmp, dict) else {}
+        posp = posp if isinstance(posp, dict) else {}
+
+        if _safe_text(dp.get("schema") or "").strip() == "DecisionPack.v1":
+            decision_summary = {
+                "mode": _safe_text(dp.get("mode") or posp.get("mode") or "N/A").strip().upper(),
+                "action": _safe_text(dp.get("action") or "N/A").strip().upper(),
+                "urgency": _safe_text(dp.get("urgency") or "").strip().upper(),
+                "constraint0": _safe_text((dp.get("constraints") or [""])[0] if isinstance(dp.get("constraints"), list) and dp.get("constraints") else "").strip(),
+                "position_size_pct_nav": _safe_float(pmp.get("position_size_pct_nav"), default=_safe_float(posp.get("position_size_pct_nav"), default=np.nan)),
+                "pnl_pct": _safe_float(dp.get("pnl_pct"), default=np.nan),
+                "trim_pct_of_position": _safe_float(pmp.get("trim_pct_of_position"), default=np.nan),
+                "stop_suggest": _safe_float(pmp.get("stop_suggest"), default=np.nan),
+            }
+    except Exception:
+        decision_summary = {}
+
+    out = {
+        "schema": "DashboardSummaryPack.v1",
+        "CurrentStatusCard": {
+            "state_capsule_line": state_capsule_line,
+            "master_total": master_total,
+            "conviction": conviction,
+            "insight_line": insight_line,
+            "policy_hint_line": policy_hint,
+            "gate_line": gate_line,
+            "next_step": next_step,
+            "plan_status": plan_status,
+            "triggers": {
+                "breakout": st_break,
+                "volume": st_vol,
+                "rr": st_rr,
+                "structure": st_struct,
+            },
+            "risk_flags": risk_lines,
+            "decision": decision_summary,
+        }
+    }
+    return out
+
+
 def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dict[str, Any], gate_status: str) -> None:
     """Executive Snapshot — dashboard-style summary card.
 
@@ -5880,17 +6366,30 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
 
     # Primary setup (already computed by Python)
     primary = ap.get("PrimarySetup") or {}
+    primary = primary if isinstance(primary, dict) else {}
     setup_name = _safe_text(primary.get("Name") or "N/A").strip()
 
-    # Try to find matching plan for TP
-    entry = stop = tp = rr = None
-    for p in (ap.get("TradePlans") or []):
-        if _safe_text(p.get("Name") or "").strip() == setup_name:
-            entry = p.get("Entry")
-            stop = p.get("Stop")
-            tp = p.get("TP")
-            rr = p.get("RR")
-            break
+    # Prefer TradePlanPack (single source of truth for plan/state/levels). Fallback to legacy TradePlans.
+    tpp = ap.get("TradePlanPack") or {}
+    tpp = tpp if isinstance(tpp, dict) else {}
+    pp = {}
+    if _safe_text(tpp.get("schema") or "").strip() == "TradePlanPack.v1":
+        pp = tpp.get("plan_primary") or {}
+        pp = pp if isinstance(pp, dict) else {}
+
+    # Levels for dashboard (keep it compact): Entry from PrimarySetup; Stop/Target/RR from TradePlanPack if available
+    entry = primary.get("Entry")
+    stop = (pp.get("stop") if isinstance(pp, dict) and pp else primary.get("Stop"))
+    tp = (pp.get("tp1") if isinstance(pp, dict) and pp else (primary.get("TP1") if primary.get("TP1") is not None else primary.get("TP")))
+    rr = (pp.get("rr_actual") if isinstance(pp, dict) and pp else primary.get("RR"))
+
+    plan_state_es = _safe_text(pp.get("state") or "").strip().upper() if isinstance(pp, dict) and pp else ""
+    plan_type_es = _safe_text(pp.get("type") or "").strip().upper() if isinstance(pp, dict) and pp else ""
+
+    # Ensure dashboard setup label reflects the actual TradePlan primary type (avoid mismatch vs legacy PrimarySetup)
+    if plan_type_es and plan_type_es != "N/A":
+        setup_name = plan_type_es
+
 
     # Red flags (from CharacterPack weaknesses)
     flags = list(cp.get("Flags") or [])
@@ -6099,127 +6598,46 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     </div>
     """
 
-    # ---------------------------
+        # ---------------------------
     # Panel 2 — CURRENT STATUS (Dashboard)
-    #   Goal: answer in seconds: state → scores → triggers → next step → risks
+    #   DashboardSummaryPack.v1 = single source of truth for what Dashboard displays.
     # ---------------------------
-    protech = ap.get("ProTech") or {}
-    protech = protech if isinstance(protech, dict) else {}
-    ma = protech.get("MA") or {}
-    ma = ma if isinstance(ma, dict) else {}
-    volp = protech.get("Volume") or {}
-    volp = volp if isinstance(volp, dict) else {}
-    bias = protech.get("Bias") or {}
-    bias = bias if isinstance(bias, dict) else {}
-
-    ma_reg = _safe_text(ma.get("Regime") or "N/A").strip()
-    vol_reg = _safe_text(volp.get("Regime") or "N/A").strip()
-
-    # Location tag: prioritize explicit risk flags; fallback to MA200 positioning
-    flags_list = list(cp.get("Flags") or [])
-    has_near_res = any(isinstance(f, dict) and _safe_text(f.get("code")).strip() == "NearMajorResistance" for f in flags_list)
-    has_near_sup = any(isinstance(f, dict) and _safe_text(f.get("code")).strip() == "NearMajorSupport" for f in flags_list)
-    loc_tag = "Neutral"
-    if has_near_res:
-        loc_tag = "Near Resistance"
-    elif has_near_sup:
-        loc_tag = "Near Support"
-    else:
-        ma_struct = ma.get("Structure") or {}
-        ma_struct = ma_struct if isinstance(ma_struct, dict) else {}
-        above_200 = ma_struct.get("PriceAboveMA200")
-        if above_200 is True:
-            loc_tag = "Above MA200"
-        elif above_200 is False:
-            loc_tag = "Below MA200"
-
-    # State label: prefer setup intent; fallback to MA regime
-    sn_l = (setup_name or "").lower()
-    state_label = "Neutral"
-    if "breakout" in sn_l:
-        state_label = "Breakout Attempt"
-    elif "pullback" in sn_l:
-        state_label = "Pullback"
-    else:
-        if ma_reg == "Close>=MA50>=MA200":
-            state_label = "Uptrend"
-        elif ma_reg == "Close<MA50<MA200":
-            state_label = "Downtrend"
-        elif ma_reg == "MixedStructure":
-            state_label = "Mixed/Choppy"
-
-    reg_tag = f"Vol: {vol_reg}" if (vol_reg and vol_reg != "N/A") else ""
-    state_capsule_line = " | ".join([x for x in [state_label, loc_tag, reg_tag] if x])
-
-    # Score bars (0–10)
-    ms_pct = _bar_pct_10(master_total)
-    cs_pct = _bar_pct_10(conviction)
-
-    # One-line score interpretation (keep extremely short for dashboard)
-    def _bucket(v: float) -> str:
-        if v < 4.0:
-            return "low"
-        if v < 6.0:
-            return "mid"
-        if v < 8.0:
-            return "good"
-        return "high"
-
-    insight_line_es = ""
-    ms_v = _safe_float(master_total, default=np.nan)
-    cs_v = _safe_float(conviction, default=np.nan)
-    if pd.notna(ms_v) and pd.notna(cs_v):
-        ms_b = _bucket(float(ms_v))
-        cs_b = _bucket(float(cs_v))
-        if ms_b in ("low",):
-            insight_line_es = "Cơ hội kém hấp dẫn; ưu tiên quan sát và chờ cấu trúc/điểm vào tốt hơn."
-        elif ms_b == "mid" and cs_b in ("good", "high"):
-            insight_line_es = "Cơ hội trung tính nhưng độ tin cậy khá tốt; ưu tiên plan kỷ luật, tránh FOMO."
-        elif ms_b in ("good", "high") and cs_b in ("low", "mid"):
-            insight_line_es = "Cơ hội khá hấp dẫn nhưng độ tin cậy chưa cao; chỉ triển khai chọn lọc và chờ trigger đồng pha."
-        elif ms_b in ("good", "high") and cs_b in ("good", "high"):
-            insight_line_es = "Cơ hội hấp dẫn và độ tin cậy cao; có thể triển khai theo plan, tập trung quản trị rủi ro."
-        else:
-            insight_line_es = "Theo dõi nghiêm túc; ưu tiên đúng nhịp/điều kiện thay vì vào vội."
-    if (gate_status or "").strip().upper() not in ("", "N/A", "ACTIVE") and insight_line_es:
-        insight_line_es = f"{insight_line_es} (Gate: {(gate_status or '').strip().upper()})"
-
-    policy_hint_es = get_class_policy_hint_line(class_name)
-
-    # Trigger status (Plan-Gated) — use PASS/WAIT/FAIL text, not just dots
-    def _status(v: Any, good: float, warn: float) -> str:
-        x = _safe_float(v, default=np.nan)
-        if pd.isna(x):
-            return "N/A"
-        if float(x) >= good:
-            return "PASS"
-        if float(x) >= warn:
-            return "WAIT"
-        return "FAIL"
-
-    # Plan status + RR (prefer TradePlans to stay consistent with detail)
-    plan_status_es = "N/A"
-    rr_plan = rr_val
-    for p in (ap.get("TradePlans") or []):
-        if _safe_text(p.get("Name") or "").strip() == setup_name and setup_name and setup_name != "N/A":
-            plan_status_es = _safe_text(p.get("Status") or "N/A").strip()
-            rr_plan = _safe_float(p.get("RR"), default=rr_plan)
-            break
-
-    st_break = _status((combat or {}).get("BreakoutForce"), good=6.8, warn=5.5)
-    st_vol = _status(vol_ratio, good=1.20, warn=0.95)
-    st_rr = _status(rr_plan, good=1.80, warn=1.30)
-
-    # Structure (Ceiling) Gate: quality-aware resistance ceiling control
-    sq = {}
+    dsp = compute_dashboard_summary_pack_v1(ap, cp, gate_status=gate_status)
     try:
-        sq = (character_pack or {}).get("StructureQuality", {}) or (analysis_pack or {}).get("StructureQuality", {})
+        ap["DashboardSummaryPack"] = dsp
     except Exception:
-        sq = {}
-    cg = ((sq or {}).get("Gates", {}) or {}).get("CeilingGate", {}) if isinstance((sq or {}).get("Gates", {}), dict) else {}
-    st_struct = _safe_text(cg.get("Status") or "N/A").strip().upper()
-    if st_struct not in ("PASS", "WAIT", "FAIL"):
-        st_struct = "N/A"
+        pass
+
+    card2 = dsp.get("CurrentStatusCard") if isinstance(dsp, dict) else {}
+    card2 = card2 if isinstance(card2, dict) else {}
+
+    state_capsule_line = _safe_text(card2.get("state_capsule_line") or "N/A").strip()
+
+    master_total_d = card2.get("master_total", master_total)
+    conviction_d = card2.get("conviction", conviction)
+
+    ms_pct = _bar_pct_10(master_total_d)
+    cs_pct = _bar_pct_10(conviction_d)
+
+    insight_line_es = _safe_text(card2.get("insight_line") or "").strip()
+    policy_hint_es = _safe_text(card2.get("policy_hint_line") or "").strip()
+
+    triggers2 = card2.get("triggers") if isinstance(card2.get("triggers"), dict) else {}
+    st_break = _safe_text((triggers2 or {}).get("breakout") or "N/A").strip().upper()
+    st_vol = _safe_text((triggers2 or {}).get("volume") or "N/A").strip().upper()
+    st_rr = _safe_text((triggers2 or {}).get("rr") or "N/A").strip().upper()
+    st_struct = _safe_text((triggers2 or {}).get("structure") or "N/A").strip().upper()
+
+    def _norm_st(s: str) -> str:
+        s = (s or "").strip().upper()
+        if s in ("PASS", "WAIT", "FAIL"):
+            return s
+        return "N/A"
+
+    st_break = _norm_st(st_break)
+    st_vol = _norm_st(st_vol)
+    st_rr = _norm_st(st_rr)
+    st_struct = _norm_st(st_struct)
 
     def _dot_from_status(s: str) -> str:
         s = (s or "").upper()
@@ -6236,49 +6654,82 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     dot_r2 = _dot_from_status(st_rr)
     dot_s2 = _dot_from_status(st_struct)
 
-    gate_line = f"Gate: {(gate_status or 'N/A').strip().upper()} | Plan: {setup_name} ({plan_status_es or 'N/A'})"
+    gate_line = _safe_text(card2.get("gate_line") or "").strip()
+    next_step = _safe_text(card2.get("next_step") or "Theo dõi và chờ thêm dữ liệu.").strip()
 
-    # One Next Step (single line)
-    next_step = "Theo dõi và chờ thêm dữ liệu."
-    if st_struct in ("FAIL", "WAIT"):
-        _ov = ((sq or {}).get("OverheadResistance", {}) or {}).get("Nearest", {}) or {}
-        _comps = _ov.get("ComponentsTop") if isinstance(_ov.get("ComponentsTop"), list) else []
-        _t = _safe_text(((_comps[0] or {}).get("Type")) if (len(_comps) > 0 and isinstance(_comps[0], dict)) else "").strip()
-        next_step = "Chờ vượt trần cấu trúc trước khi tăng xác suất vào lệnh."
-        if _t:
-            next_step = f"Chờ vượt trần cấu trúc ({_t}) trước khi tăng xác suất vào lệnh."
-    elif st_break in ("FAIL", "WAIT"):
-        next_step = "Chờ breakout xác nhận/follow-through; tránh vào sớm khi lực chưa rõ."
-    elif st_vol in ("FAIL", "WAIT"):
-        next_step = "Chờ volume xác nhận (≥ 1.2×20D) để giảm false-break."
-    elif st_rr in ("FAIL", "WAIT"):
-        next_step = "Chờ điểm vào tốt hơn để RR ≥ 1.8 (hoặc giảm risk/stop hợp lý)."
-    else:
-        next_step = "Có thể triển khai theo plan; ưu tiên kỷ luật stop, tránh FOMO."
+    risk_lines = card2.get("risk_flags") if isinstance(card2.get("risk_flags"), list) else []
+    risk_lines = [str(x) for x in risk_lines if x is not None]
 
-    # Risk flags (top 2, severity>=2)
-    risk_lines: List[str] = []
-    for f in flags_list:
-        if not isinstance(f, dict):
-            continue
-        try:
-            sev = int(f.get("severity", 0))
-        except Exception:
-            sev = 0
-        if sev < 2:
-            continue
-        code = _safe_text(f.get("code") or "").strip()
-        note = _safe_text(f.get("note") or "").strip()
-        if code and note:
-            risk_lines.append(f"[{code}] {note}")
-        elif code:
-            risk_lines.append(f"[{code}]")
-        elif note:
-            risk_lines.append(note)
-        if len(risk_lines) >= 2:
-            break
+    def _vn_clean_flag_line(t: str) -> str:
+        tt = _safe_text(t).strip()
+        tt = re.sub(r"^\[[^\]]+\]\s*", "", tt)  # drop [Code]
+        tt = tt.replace("Weekly pivot (prior LOW — now resistance)", "Pivot tuần (đáy trước — nay thành kháng cự)")
+        tt = tt.replace("Weekly pivot (prior LOW - now resistance)", "Pivot tuần (đáy trước — nay thành kháng cự)")
+        return tt
+
+    risk_lines = [_vn_clean_flag_line(x) for x in risk_lines if _safe_text(x).strip()]
     if not risk_lines:
-        risk_lines = ["None"]
+        risk_lines = ["Không có"]
+
+    # Decision & Position (dashboard capsule) — single source of truth
+    decision_block_html = ""
+    try:
+        dsum = card2.get("decision") if isinstance(card2.get("decision"), dict) else {}
+        mode_d = _safe_text(dsum.get("mode") or "N/A").strip().upper()
+        action_d = _safe_text(dsum.get("action") or "N/A").strip().upper()
+        urg_d = _safe_text(dsum.get("urgency") or "").strip().upper()
+        cons0 = _safe_text(dsum.get("constraint0") or "").strip()
+        cons0_vn = cons0
+        try:
+            _map = {
+                "No add while StructureGate is WAIT/FAIL; prioritize reclaim/confirm.": "Không gia tăng khi StructureGate WAIT/FAIL; ưu tiên lấy lại mốc/xác nhận.",
+                "Volume not confirmed; avoid aggressive buys/adds.": "Chưa có xác nhận dòng tiền; tránh mua/gia tăng mạnh.",
+            }
+            for k, v in _map.items():
+                if cons0_vn:
+                    cons0_vn = cons0_vn.replace(k, v)
+        except Exception:
+            cons0_vn = cons0
+
+
+        pos_sz = _safe_float(dsum.get("position_size_pct_nav"), default=np.nan)
+        pnl_f = _safe_float(dsum.get("pnl_pct"), default=np.nan)
+        trim_pct = _safe_float(dsum.get("trim_pct_of_position"), default=np.nan)
+        stop_sug = _safe_float(dsum.get("stop_suggest"), default=np.nan)
+
+        if action_d and action_d != "N/A":
+            lines: List[str] = []
+            lines.append(
+                f"<div class='es-note'><b>Mode:</b> {html.escape(mode_d)} | <b>Action:</b> {html.escape(action_d)}{(' ('+html.escape(urg_d)+')') if urg_d else ''}</div>"
+            )
+
+            if mode_d == "HOLDING":
+                parts: List[str] = []
+                if pd.notna(pos_sz):
+                    parts.append(f"Position: {pos_sz:.0f}% NAV")
+                if pd.notna(pnl_f):
+                    parts.append(f"PnL: {pnl_f:+.1f}%")
+                if parts:
+                    lines.append(f"<div class='es-note'>{html.escape(' | '.join(parts))}</div>")
+
+                if action_d == "TRIM" and pd.notna(trim_pct):
+                    lines.append(f"<div class='es-note'>Trim guide: ~{int(round(float(trim_pct)*100))}% vị thế</div>")
+
+                if pd.notna(stop_sug):
+                    lines.append(f"<div class='es-note'>Protect stop: {html.escape(_fmt_px(stop_sug))}</div>")
+            else:
+                if pd.notna(stop_sug) and action_d == "BUY":
+                    lines.append(f"<div class='es-note'>Protect stop: {html.escape(_fmt_px(stop_sug))}</div>")
+
+            if cons0_vn:
+                lines.append(f"<div class='es-note' style='opacity:0.88;'>Constraint: {html.escape(cons0_vn)}</div>")
+
+            decision_block_html = (
+                "<div class='es-note' style='margin-top:10px;font-weight:950;'>Decision &amp; Position</div>"
+                + "".join(lines)
+            )
+    except Exception:
+        decision_block_html = ""
 
     panel2 = f"""
     <div class=\"es-panel\">
@@ -6286,10 +6737,10 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
 
       <div class=\"es-note\" style=\"font-weight:950;\">{html.escape(state_capsule_line)}</div>
 
-      <div class=\"es-metric\"><div class=\"k\">Điểm tổng hợp</div><div class=\"v\">{html.escape(_fmt_num(master_total,1))}</div></div>
+      <div class=\"es-metric\"><div class=\"k\">Điểm tổng hợp</div><div class=\"v\">{html.escape(_fmt_num(master_total_d,1))}</div></div>
       <div class=\"es-mini\"><div style=\"width:{ms_pct:.0f}%\"></div></div>
 
-      <div class=\"es-metric\" style=\"margin-top:6px;\"><div class=\"k\">Điểm tin cậy</div><div class=\"v\">{html.escape(_fmt_num(conviction,1))}</div></div>
+      <div class=\"es-metric\" style=\"margin-top:6px;\"><div class=\"k\">Điểm tin cậy</div><div class=\"v\">{html.escape(_fmt_num(conviction_d,1))}</div></div>
       <div class=\"es-mini\"><div style=\"width:{cs_pct:.0f}%\"></div></div>
 
       {f'<div class="es-note" style="margin-top:8px;">{html.escape(insight_line_es)}</div>' if insight_line_es else ''}
@@ -6310,7 +6761,6 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     </div>
     """
 
-
     def _delta_pct(entry_x: Any, level_x: Any) -> Any:
         e = _safe_float(entry_x)
         l = _safe_float(level_x)
@@ -6323,17 +6773,76 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     stop_str = _fmt_px(stop) if pd.isna(stop_delta) else f"{_fmt_px(stop)} ({_fmt_pct(stop_delta)})"
     tp_str = _fmt_px(tp) if pd.isna(tp_delta) else f"{_fmt_px(tp)} ({_fmt_pct(tp_delta)})"
 
+    # --- Dashboard panel #3: Decision first, then Trade Plan (mode-aware), then Scenario ---
+    blockers: List[str] = []
+    if st_break in ("FAIL", "WAIT"):
+        blockers.append(f"Breakout {st_break}")
+    if st_vol in ("FAIL", "WAIT"):
+        blockers.append(f"Volume {st_vol}")
+    if st_rr in ("FAIL", "WAIT"):
+        blockers.append(f"R:R {st_rr}")
+    if st_struct in ("FAIL", "WAIT"):
+        blockers.append(f"Structure {st_struct}")
+    blockers_line = ", ".join(blockers) if blockers else "Không có"
+
+    mode_for_plan = "FLAT"
+    action_for_plan = "N/A"
+    try:
+        dsum2 = card2.get("decision") if isinstance(card2.get("decision"), dict) else {}
+        mode_for_plan = _safe_text(dsum2.get("mode") or "FLAT").strip().upper()
+        action_for_plan = _safe_text(dsum2.get("action") or "N/A").strip().upper()
+    except Exception:
+        pass
+
+    # Build a compact, non-conflicting plan block (blueprint, not commands)
+    # Plan intent line depends on the actual primary plan type (avoid showing "Breakout" while primary is Pullback/Reclaim)
+    _pt = _safe_text(plan_type_es or "").strip().upper()
+    if _pt == "PULLBACK":
+        _plan_intent_flat = "Mua mới theo PULLBACK: ưu tiên hồi về hỗ trợ; chỉ mua khi Structure PASS và Volume không FAIL; R:R đủ."
+        _plan_intent_hold = "Gia tăng theo PULLBACK: ưu tiên hồi về hỗ trợ; chỉ gia tăng khi Structure PASS và Volume không FAIL; R:R đủ."
+    elif _pt == "RECLAIM":
+        _plan_intent_flat = "Mua mới theo RECLAIM: chỉ mua khi reclaim mốc cấu trúc và giữ được; Volume ≥ WAIT; R:R đủ."
+        _plan_intent_hold = "Gia tăng theo RECLAIM: chỉ gia tăng khi reclaim mốc cấu trúc và giữ được; Volume ≥ WAIT; R:R đủ."
+    else:
+        _plan_intent_flat = "Mua mới chỉ khi đủ điều kiện: Breakout PASS + Volume PASS + Structure PASS + R:R PASS."
+        _plan_intent_hold = "Gia tăng chỉ khi đủ điều kiện: Breakout PASS + Volume PASS + Structure PASS + R:R PASS."
+
+    plan_lines: List[str] = []
+    if mode_for_plan == "HOLDING":
+        plan_lines.append("<div class='es-note' style='margin-top:10px;font-weight:950;'>TRADE PLAN (Đang nắm giữ)</div>")
+        parts: List[str] = []
+        if pd.notna(pnl_f):
+            parts.append(f"PnL: {pnl_f:+.1f}%")
+        if pd.notna(stop_sug):
+            parts.append(f"Stop bảo vệ: {_fmt_px(stop_sug)}")
+        if action_for_plan == "TRIM" and pd.notna(trim_pct):
+            parts.append(f"Gợi ý chốt: ~{int(round(float(trim_pct)*100))}% vị thế")
+        if parts:
+            plan_lines.append(f"<div class='es-note'>{html.escape(' | '.join(parts))}</div>")
+        plan_lines.append(f"<div class='es-note' style='opacity:0.9;'>{html.escape(_plan_intent_hold)}</div>")
+    else:
+        plan_lines.append("<div class='es-note' style='margin-top:10px;font-weight:950;'>TRADE PLAN (Mua mới)</div>")
+        plan_lines.append(f"<div class='es-note' style='opacity:0.9;'>{html.escape(_plan_intent_flat)}</div>")
+        if pd.notna(entry) and pd.notna(stop) and pd.notna(tp):
+            plan_lines.append(f"<div class='es-note'>Mốc tham chiếu: Entry/Stop/Target: {_fmt_px(entry)} / {_fmt_px(stop)} / {_fmt_px(tp)}</div>")
+
+    plan_block_html = "".join(plan_lines)
+
     panel3 = f"""
     <div class="es-panel">
       <div class="es-pt">3) SCENARIO</div>
-      <div class="es-note"><b>Kịch bản chính:</b> {html.escape(scenario_name)}</div>
+
+      {decision_block_html}
+
+      {plan_block_html}
+
+      <div class="es-note" style="margin-top:10px;"><b>Kịch bản chính:</b> {html.escape(scenario_name)}</div>
       <ul class="es-bul">
         <li>Setup: {html.escape(setup_name)}</li>
         <li>Entry/Stop: {html.escape(_fmt_px(entry))} / {html.escape(stop_str)}</li>
         <li>Target: {html.escape(tp_str)} (RR {html.escape(_fmt_num(rr,1))})</li>
       </ul>
-      <div class="es-note" style="margin-top:8px;font-weight:900;">Red Flags</div>
-      <ul class="es-bul">{''.join([f'<li>{html.escape(x)}</li>' for x in red_notes])}</ul>
+      <div class="es-note" style="margin-top:6px;opacity:0.9;"><b>Key blockers:</b> {html.escape(blockers_line)}</div>
     </div>
     """
 
@@ -6853,6 +7362,81 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
     """
     cp = character_pack or {}
     ap = analysis_pack or {}
+
+    # ------------------------------------------------------------
+    # DecisionPack.v1 (Portfolio-ready; Long-only) — render if available
+    # ------------------------------------------------------------
+    dp = ap.get("DecisionPack") or {}
+    dp = dp if isinstance(dp, dict) else {}
+    if _safe_text(dp.get("schema") or "").strip() == "DecisionPack.v1":
+        act = _safe_text(dp.get("action") or "N/A").strip().upper()
+        urg = _safe_text(dp.get("urgency") or "MED").strip().upper()
+        rat = _safe_text(dp.get("rationale") or "").strip()
+        cons = dp.get("constraints") or []
+        cons = cons if isinstance(cons, list) else []
+
+        sev_cls = "low"
+        if urg == "HIGH":
+            sev_cls = "high"
+        elif urg == "MED":
+            sev_cls = "med"
+
+        pnl_txt = ""
+        try:
+            pnl = dp.get("pnl_pct", None)
+            if isinstance(pnl, (int, float)) and pnl == pnl:
+                pnl_txt = f"{pnl:+.1f}%"
+        except Exception:
+            pnl_txt = ""
+
+        st.markdown(
+            f"""
+            <div class="dl-card {sev_cls}">
+              <div class="dl-k">Action</div>
+              <div class="dl-v" style="font-size:20px;font-weight:800;">{html.escape(act)} <span class="dl-sub" style="font-size:14px;">({html.escape(urg)})</span></div>
+              {f'<div class="dl-sub">PnL: {html.escape(pnl_txt)}</div>' if pnl_txt else ''}
+              {f'<div class="dl-sub" style="margin-top:6px;">{html.escape(rat)}</div>' if rat else ''}
+              {(''.join([f'<div class="dl-flag" style="margin-top:6px;"><span class="dl-code">{html.escape(str(x))}</span></div>' for x in cons[:2]])) if cons else ''}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+    # ------------------------------------------------------------
+    # PositionManagerPack.v1 (Portfolio-ready; Long-only) — render if available
+    # ------------------------------------------------------------
+    pmp = ap.get("PositionManagerPack") or {}
+    pmp = pmp if isinstance(pmp, dict) else {}
+    if _safe_text(pmp.get("schema") or "").strip() == "PositionManagerPack.v1":
+        pm_act = _safe_text(pmp.get("action") or "N/A").strip().upper()
+        pm_guid = _safe_text(pmp.get("guidance") or "").strip()
+        pm_trim = pmp.get("trim_pct_of_position", None)
+        pm_stop = _safe_float(pmp.get("stop_suggest"), default=np.nan)
+        pm_cap = pmp.get("size_cap_pct_nav", None)
+        pm_pos = pmp.get("position_size_pct_nav", None)
+
+        extra_lines = []
+        if isinstance(pm_cap, (int, float)) and pm_cap == pm_cap:
+            extra_lines.append(f"Policy cap: {pm_cap:.0f}% NAV")
+        if isinstance(pm_pos, (int, float)) and pm_pos == pm_pos:
+            extra_lines.append(f"Current size: {pm_pos:.0f}% NAV")
+        if isinstance(pm_trim, (int, float)) and pm_trim == pm_trim:
+            extra_lines.append(f"Trim: ~{pm_trim*100:.0f}% position")
+        if pd.notna(pm_stop):
+            extra_lines.append(f"Stop (suggest): {pm_stop:.2f}")
+
+        st.markdown(
+            f"""
+            <div class="dl-card med">
+              <div class="dl-k">Position Manager</div>
+              <div class="dl-v" style="font-size:18px;font-weight:800;">{html.escape(pm_act)}</div>
+              {f'<div class="dl-sub" style="margin-top:6px;">{html.escape(pm_guid)}</div>' if pm_guid else ''}
+              {f'<div class="dl-sub" style="margin-top:6px;">{html.escape(" | ".join(extra_lines))}</div>' if extra_lines else ''}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     def _humanize(s: Any) -> str:
         s0 = _safe_text(s).strip()
@@ -7374,7 +7958,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             if c_section:
                 c_raw = c_section.replace("\r\n", "\n")
                 c_body_clean = re.sub(r"(?m)^C\..*\n?", "", c_raw).strip()
-            render_trade_plan_conditional(analysis_pack, character_pack, gate_status, c_body_clean)
+            render_trade_plan_conditional(analysis_pack, cp, gate_status, c_body_clean)
             # ============================================================
             # 4) DECISION LAYER (CONVICTION, WEAKNESSES, PLAYSTYLE TAGS)
             # ============================================================
@@ -8588,7 +9172,39 @@ div[data-testid="stExpander"] > details > summary:hover{opacity:0.98;}
     st.divider()
     with st.sidebar:
         user_key = st.text_input("Client Code", type="password", placeholder="Client Code")
-        ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB").upper()
+        ticker_input = st.text_input("Mã Cổ Phiếu:", value="VCB", key="ticker_input").upper()
+
+        # Reset holding-mode inputs when switching ticker to avoid carrying stale avg_cost/PnL into a new symbol
+        _prev_ticker = st.session_state.get("__last_ticker")
+        if _prev_ticker is None:
+            st.session_state["__last_ticker"] = ticker_input
+        elif _safe_text(_prev_ticker).strip().upper() != ticker_input:
+            st.session_state["position_mode_radio"] = "Mua mới (FLAT)"
+            st.session_state["avg_cost_inp"] = 0.0
+            st.session_state["position_size_pct_inp"] = 0.0
+            st.session_state["risk_budget_pct_inp"] = 1.0
+            st.session_state["holding_horizon_inp"] = "Swing"
+            st.session_state["timeframe_inp"] = "D"
+            st.session_state["__last_ticker"] = ticker_input
+
+        # ------------------------------
+        # Position Mode (Portfolio-ready; Long-only)
+        # ------------------------------
+        _pm_label = st.radio(
+            "Tình trạng vị thế",
+            ["Mua mới (FLAT)", "Đang nắm giữ (HOLDING)"],
+            index=0,
+            key="position_mode_radio"
+        )
+        position_mode = "HOLDING" if str(_pm_label).startswith("Đang") else "FLAT"
+
+        with st.expander("Thông tin vị thế (tuỳ chọn)", expanded=(position_mode == "HOLDING")):
+            avg_cost = st.number_input("Giá vốn (avg cost)", min_value=0.0, value=0.0, step=0.1, key="avg_cost_inp")
+            position_size_pct = st.number_input("Tỷ trọng đang nắm (% NAV)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="position_size_pct_inp")
+            risk_budget_pct = st.number_input("Ngân sách rủi ro (% NAV / trade)", min_value=0.0, max_value=5.0, value=1.0, step=0.1, key="risk_budget_pct_inp")
+            holding_horizon = st.selectbox("Holding horizon", ["Swing", "Position"], index=0, key="holding_horizon_inp")
+            timeframe = st.selectbox("Timeframe", ["D", "W"], index=0, key="timeframe_inp")
+
         run_btn = st.button("Phân tích", type="primary", use_container_width=True)
 
         # Mặc định sử dụng layout Appendix E (Character-style); bỏ lựa chọn chế độ hiển thị
@@ -8611,12 +9227,68 @@ div[data-testid="stExpander"] > details > summary:hover{opacity:0.98;}
                     ap_base = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
                     df_used = result.get("_DF", None) if isinstance(result, dict) else None
 
+
+                    # ------------------------------
+                    # PositionStatePack (Portfolio-ready; Long-only)
+                    # ------------------------------
+                    current_price = None
+                    try:
+                        if isinstance(df_used, pd.DataFrame) and len(df_used) > 0:
+                            col_close = None
+                            for c in ["Close", "close", "Adj Close", "adj_close", "Last", "last"]:
+                                if c in df_used.columns:
+                                    col_close = c
+                                    break
+                            if col_close:
+                                current_price = float(df_used[col_close].iloc[-1])
+                    except Exception:
+                        current_price = None
+
+                    avg_cost_f = None
+                    try:
+                        avg_cost_f = float(avg_cost) if float(avg_cost) > 0 else None
+                    except Exception:
+                        avg_cost_f = None
+
+                    # In FLAT mode, ignore holding inputs entirely (do not compute/show PnL)
+                    if position_mode != "HOLDING":
+                        avg_cost_f = None
+                        position_size_pct = 0.0
+
+                    pnl_pct = None
+                    in_profit = None
+                    try:
+                        if position_mode == "HOLDING" and avg_cost_f and current_price and avg_cost_f > 0:
+                            pnl_pct = (float(current_price) / float(avg_cost_f) - 1.0) * 100.0
+                            # Treat as "in profit" only if above a small noise buffer
+                            in_profit = float(current_price) > float(avg_cost_f) * 1.002
+                    except Exception:
+                        pnl_pct = None
+                        in_profit = None
+                    position_state_pack = {
+                        "schema": "PositionStatePack.v1",
+                        "ticker": ticker_input,
+                        "mode": position_mode,
+                        "is_holding": (position_mode == "HOLDING"),
+                        "avg_cost": avg_cost_f,
+                        "position_size_pct": float(position_size_pct) if isinstance(position_size_pct, (int, float)) else 0.0,
+                        "risk_budget_pct": float(risk_budget_pct) if isinstance(risk_budget_pct, (int, float)) else 1.0,
+                        "holding_horizon": holding_horizon,
+                        "timeframe": timeframe,
+                        "current_price": current_price,
+                        "pnl_pct": pnl_pct,
+                        "in_profit": in_profit,
+                    }
+                    if isinstance(ap_base, dict):
+                        ap_base["PositionStatePack"] = position_state_pack
+
                     ctx = {
                         "ticker": ticker_input,
                         "df": df_used,
                         "result": result,
                         "compute_character_pack": compute_character_pack,
                         "generate_insight_report": generate_insight_report,
+                        "position_state_pack": position_state_pack,
                     }
 
                     modules_out, mod_errors = run_modules(

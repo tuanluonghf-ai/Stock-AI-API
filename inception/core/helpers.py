@@ -143,3 +143,68 @@ def _json_default(o: Any) -> Any:
 def safe_json_dumps(obj: Any, **kwargs: Any) -> str:
     """JSON serialization helper used for snapshots / prompt payloads."""
     return json.dumps(obj, default=_json_default, ensure_ascii=False, **kwargs)
+
+
+def json_sanitize(obj: Any, *, max_df_rows: int = 3, max_list: int = 200) -> Any:
+    """Recursively coerce objects into JSON-safe primitives.
+
+    This is a defensive utility for module payloads. It is intentionally lossy:
+    - pandas Series/Index -> last scalar (or None)
+    - pandas DataFrame -> small diagnostic snapshot (shape, columns, tail rows)
+    - numpy scalars -> python scalars
+    - dict keys -> str
+
+    The goal is to prevent pandas objects from leaking into UI boolean contexts
+    and to keep payloads serializable for logging / prompt snapshots.
+    """
+    try:
+        if obj is None:
+            return None
+        # pandas objects
+        if isinstance(obj, (pd.Series, pd.Index)):
+            v = _as_scalar(obj)
+            return json_sanitize(v, max_df_rows=max_df_rows, max_list=max_list)
+        if isinstance(obj, (pd.DataFrame,)):
+            try:
+                tail = obj.tail(max_df_rows)
+                return {
+                    "__pandas_dataframe__": True,
+                    "shape": [int(obj.shape[0]), int(obj.shape[1])],
+                    "columns": [str(c) for c in list(obj.columns)[:50]],
+                    "tail": tail.to_dict(orient="records"),
+                }
+            except Exception:
+                return {
+                    "__pandas_dataframe__": True,
+                    "shape": [int(getattr(obj, 'shape', [0, 0])[0]), int(getattr(obj, 'shape', [0, 0])[1])],
+                }
+        # numpy scalars
+        if isinstance(obj, (np.generic,)):
+            return obj.item()
+        if isinstance(obj, (np.ndarray,)):
+            return json_sanitize(obj.tolist(), max_df_rows=max_df_rows, max_list=max_list)
+
+        if isinstance(obj, dict):
+            out = {}
+            for k, v in obj.items():
+                out[str(k)] = json_sanitize(v, max_df_rows=max_df_rows, max_list=max_list)
+            return out
+        if isinstance(obj, (list, tuple)):
+            seq = list(obj)
+            if len(seq) > max_list:
+                seq = seq[:max_list] + [f"__truncated_list__:{len(obj)}"]
+            return [json_sanitize(v, max_df_rows=max_df_rows, max_list=max_list) for v in seq]
+        # datetime-like
+        if isinstance(obj, (pd.Timestamp,)):
+            try:
+                return obj.isoformat()
+            except Exception:
+                return str(obj)
+    except Exception:
+        # last resort
+        try:
+            return str(obj)
+        except Exception:
+            return None
+
+    return obj

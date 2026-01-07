@@ -301,6 +301,62 @@ def compute_master_score(last: pd.Series, dual_fib: Dict[str, Any], trade_plans:
         "PositionSizing": "N/A",  # Unlocked
         "Notes": notes
     }
+
+
+# ============================================================
+# 9D. RISK–REWARD SIMULATION PACK
+# (moved from app to core to keep a single source of truth)
+# ============================================================
+def build_rr_sim(trade_plans: Dict[str, TradeSetup]) -> Dict[str, Any]:
+    """Build a JSON-safe RR simulation pack from computed trade plans.
+
+    Notes
+    -----
+    - Only uses technical/tradeplan fields; no fundamental dependency.
+    - Skips setups marked as Invalid.
+    """
+    rows = []
+    best_rr = np.nan
+    for k, s in (trade_plans or {}).items():
+        status = getattr(s, "status", "Watch") or "Watch"
+        if status == "Invalid":
+            continue
+
+        entry = _safe_float(getattr(s, "entry", np.nan))
+        stop = _safe_float(getattr(s, "stop", np.nan))
+        tp = _safe_float(getattr(s, "tp", np.nan))
+        rr = _safe_float(getattr(s, "rr", np.nan))
+
+        risk_pct = (
+            ((entry - stop) / entry * 100)
+            if (pd.notna(entry) and pd.notna(stop) and entry != 0)
+            else np.nan
+        )
+        reward_pct = (
+            ((tp - entry) / entry * 100)
+            if (pd.notna(tp) and pd.notna(entry) and entry != 0)
+            else np.nan
+        )
+
+        rows.append(
+            {
+                "Setup": k,
+                "Entry": entry,
+                "Stop": stop,
+                "TP": tp,
+                "RR": rr,
+                "RiskPct": risk_pct,
+                "RewardPct": reward_pct,
+                "Confidence (Tech)": getattr(s, "probability", np.nan),
+                "Status": status,
+                "ReasonTags": list(getattr(s, "reason_tags", []) or []),
+            }
+        )
+
+        if pd.notna(rr):
+            best_rr = rr if pd.isna(best_rr) else max(best_rr, rr)
+
+    return {"Setups": rows, "BestRR": best_rr if pd.notna(best_rr) else np.nan}
 # ============================================================
 # 9D. RISK–REWARD SIMULATION PACK
 # ============================================================

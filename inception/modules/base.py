@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, List, Tuple
 import pandas as pd
 
+from inception.core.helpers import json_sanitize
+
 
 @dataclass
 class ModuleResult:
@@ -73,7 +75,8 @@ def run_modules(
             continue
 
         payload = res.payload if isinstance(res.payload, dict) else {"payload": res.payload}
-        outputs[name] = payload if res.ok else {"Error": res.error or "Unknown error", **payload}
+        raw_out = payload if res.ok else {"Error": res.error or "Unknown error", **payload}
+        outputs[name] = json_sanitize(raw_out)
         errors.extend(_validate_json_safe(outputs[name], name))
 
     return outputs, errors
