@@ -18,7 +18,22 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from inception.core.helpers import _safe_text, _safe_float, _clip, _safe_bool, _as_scalar
+# NOTE: `_clip` is used heavily in UI rendering. In some user environments, stale files or
+# partial updates can lead to NameError if `_clip` is missing from the imported namespace.
+# We defensively provide a local fallback to keep UI stable.
+try:
+    from inception.core.helpers import _safe_text, _safe_float, _clip, _safe_bool, _as_scalar  # type: ignore
+except Exception:  # pragma: no cover
+    from inception.core.helpers import _safe_text, _safe_float, _safe_bool, _as_scalar  # type: ignore
+
+    def _clip(x: float, lo: float, hi: float) -> float:
+        try:
+            if pd.isna(x):
+                return x
+            return float(max(lo, min(hi, float(x))))
+        except Exception:
+            return x
+
 from inception.core.dashboard_pack import compute_dashboard_summary_pack_v1
 
 def _val_or_na(v: Any) -> str:
@@ -32,6 +47,19 @@ def _val_or_na(v: Any) -> str:
         return s if s else "N/A"
     except Exception:
         return "N/A"
+
+
+# --------------------------
+# Defensive dict helpers
+# --------------------------
+
+def _ensure_dict(x: Any) -> Dict[str, Any]:
+    return x if isinstance(x, dict) else {}
+
+
+def _ensure_list(x: Any) -> List[Any]:
+    return x if isinstance(x, list) else ([] if x is None else [x])
+
 
 def _call_openai(prompt: str, temperature: float = 0.5) -> str:
     """Best-effort OpenAI call used only for small UI blurbs.
@@ -219,10 +247,10 @@ def _trade_plan_gate(analysis_pack: Dict[str, Any], character_pack: Dict[str, An
     Returns (status, meta) where status ∈ {"ACTIVE","WATCH","LOCK"}.
     Meta includes score/tier for UI copy.
     """
-    ap = analysis_pack or {}
-    cp = character_pack or {}
+    ap = _ensure_dict(analysis_pack)
+    cp = _ensure_dict(character_pack)
     score = _safe_float(ap.get("Conviction"), default=np.nan)
-    tier = (cp.get("Conviction") or {}).get("Tier", None)
+    tier = (_ensure_dict(cp.get("Conviction"))).get("Tier", None)
 
     # Default thresholds (v6.4 Appendix E)
     active = (pd.notna(score) and score >= 6.5) or (isinstance(tier, (int, float)) and tier >= 4)
@@ -325,10 +353,10 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
     Streamlit rendering for Character Card.
     Does not affect existing report A–D.
     """
-    cp = character_pack or {}
-    core = cp.get("CoreStats") or {}
-    combat = cp.get("CombatStats") or {}
-    conv = cp.get("Conviction") or {}
+    cp = _ensure_dict(character_pack)
+    core = _ensure_dict(cp.get("CoreStats"))
+    combat = _ensure_dict(cp.get("CombatStats"))
+    conv = _ensure_dict(cp.get("Conviction"))
     flags = cp.get("Flags") or []
     cclass = cp.get("CharacterClass") or "N/A"
     err = (cp.get("Error") or "")
@@ -445,7 +473,7 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
         st.warning(f"Character module error: {cp.get('Error')}")
 
     # Dashboard Class Signature (Radar) — 5 long-run DNA anchors (no 'Now/Opportunity' metrics)
-    dna = (cp.get("StockTraits") or {}).get("DNA") or {}
+    dna = (_ensure_dict(cp.get("StockTraits"))).get("DNA") or {}
     params = dna.get("Params") or {}
     groups = dna.get("Groups") or {}
 
@@ -667,7 +695,7 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
 
     Deliberately excludes legacy "CORE STATS" and any 'Now/Opportunity' metrics.
     """
-    cp = character_pack or {}
+    cp = _ensure_dict(character_pack)
     cclass = _safe_text(cp.get("CharacterClass") or "N/A").strip()
     ticker = _safe_text(cp.get("_Ticker") or "").strip().upper()
 
@@ -683,7 +711,7 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
         st.markdown(get_character_blurb(ticker, cclass) or "")
 
     # ---- DNA pack (15 params / 5 groups) ----
-    dna = (cp.get("StockTraits") or {}).get("DNA") or {}
+    dna = (_ensure_dict(cp.get("StockTraits"))).get("DNA") or {}
     tier1 = dna.get("Tier1") or {}
     params = dna.get("Params") or {}
     groups = dna.get("Groups") or {}
@@ -780,8 +808,8 @@ def render_character_traits(character_pack: Dict[str, Any]) -> None:
 
 def render_combat_stats_panel(character_pack: Dict[str, Any]) -> None:
     """Render Combat Stats as 'Now / Opportunity' metrics (0–10), intended to live under CURRENT STATUS."""
-    cp = character_pack or {}
-    combat = cp.get("CombatStats") or {}
+    cp = _ensure_dict(character_pack)
+    combat = _ensure_dict(cp.get("CombatStats"))
 
     combat_order = [
         ("Upside Power", combat.get("UpsidePower")),
@@ -822,10 +850,10 @@ def render_stock_dna_insight(character_pack: Dict[str, Any]) -> None:
     DNA Insight — MUST stay in the long-run layer.
     No 'Now/Opportunity' metrics allowed here.
     """
-    cp = character_pack or {}
+    cp = _ensure_dict(character_pack)
     cclass = _safe_text(cp.get("CharacterClass") or "N/A").strip()
 
-    dna = (cp.get("StockTraits") or {}).get("DNA") or {}
+    dna = (_ensure_dict(cp.get("StockTraits"))).get("DNA") or {}
     tier1 = dna.get("Tier1") or {}
     params = dna.get("Params") or {}
     groups = dna.get("Groups") or {}
@@ -956,8 +984,8 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
       - Uses HTML for layout; always escape dynamic strings.
       - Detail sections (Stock DNA / Current Status / Trade Plan / Decision Layer) are rendered separately under an expander.
     """
-    ap = analysis_pack or {}
-    cp = character_pack or {}
+    ap = _ensure_dict(analysis_pack)
+    cp = _ensure_dict(character_pack)
 
     # --------- helpers ---------
     def _sf(x: Any) -> float:
@@ -1042,11 +1070,11 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
 
     class_name = _safe_text(cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "N/A").strip()
 
-    conv = cp.get("Conviction") or {}
+    conv = _ensure_dict(cp.get("Conviction"))
     tier = conv.get("Tier", None)
 
-    core = cp.get("CoreStats") or {}
-    combat = cp.get("CombatStats") or {}
+    core = _ensure_dict(cp.get("CoreStats"))
+    combat = _ensure_dict(cp.get("CombatStats"))
 
     # Primary setup (already computed by Python)
     primary = ap.get("PrimarySetup") or {}
@@ -1204,7 +1232,7 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
         return "".join(parts)
 
     # Class Signature (DNA long-run only): 5-group anchors (0–10). No 'Now/Opportunity' metrics here.
-    dna_pack = (cp.get("StockTraits") or {}).get("DNA") or {}
+    dna_pack = (_ensure_dict(cp.get("StockTraits"))).get("DNA") or {}
     params = dna_pack.get("Params") or {}
     groups = dna_pack.get("Groups") or {}
 
@@ -1342,6 +1370,26 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     next_step = _safe_text(card2.get("next_step") or "Theo dõi và chờ thêm dữ liệu.").strip()
 
     risk_lines = card2.get("risk_flags") if isinstance(card2.get("risk_flags"), list) else []
+
+    # DataQualityPack (Step 9)
+    dq = card2.get("data_quality") if isinstance(card2.get("data_quality"), dict) else {}
+    dq = dq if isinstance(dq, dict) else {}
+    try:
+        dq_err = int(dq.get("error_count", 0) or 0)
+    except Exception:
+        dq_err = 0
+    try:
+        dq_warn = int(dq.get("warn_count", 0) or 0)
+    except Exception:
+        dq_warn = 0
+    dq_dot = "g" if (dq_err == 0 and dq_warn == 0) else ("r" if dq_err > 0 else "y")
+    if dq_err > 0:
+        dq_label = f"ERROR ({dq_err})"
+    elif dq_warn > 0:
+        dq_label = f"WARN ({dq_warn})"
+    else:
+        dq_label = "OK"
+    dq_issues = dq.get("issues") if isinstance(dq.get("issues"), list) else []
     risk_lines = [str(x) for x in risk_lines if x is not None]
 
     def _vn_clean_flag_line(t: str) -> str:
@@ -1420,6 +1468,8 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
       <div class=\"es-pt\">2) CURRENT STATUS</div>
 
       <div class=\"es-note\" style=\"font-weight:950;\">{html.escape(state_capsule_line)}</div>
+
+      <div class=\"es-note\" style=\"margin-top:4px;\"><span class=\"es-dot {dq_dot}\"></span>Data Quality: <b>{html.escape(dq_label)}</b></div>
 
       <div class=\"es-metric\"><div class=\"k\">Điểm tổng hợp</div><div class=\"v\">{html.escape(_fmt_num(master_total_d,1))}</div></div>
       <div class=\"es-mini\"><div style=\"width:{ms_pct:.0f}%\"></div></div>
@@ -1556,13 +1606,31 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
 
     st.markdown(card_html, unsafe_allow_html=True)
 
+    # Optional diagnostics block (Step 9)
+    try:
+        if dq_err > 0 or dq_warn > 0:
+            title = f"Data Quality: {dq_err} error(s), {dq_warn} warning(s)"
+            with st.expander(title, expanded=False):
+                for it in dq_issues[:10]:
+                    if not isinstance(it, dict):
+                        continue
+                    sev = _safe_text(it.get('severity') or '').strip().upper()
+                    pth = _safe_text(it.get('path') or '').strip()
+                    msg = _safe_text(it.get('message') or '').strip()
+                    typ = _safe_text(it.get('type') or '').strip()
+                    vt = _safe_text(it.get('value_type') or '').strip()
+                    extra_s = f" [{typ}{(':'+vt) if vt else ''}]" if typ else ''
+                    st.markdown(f"- **{sev}** `{pth}`: {msg}{extra_s}")
+    except Exception:
+        pass
+
 def render_character_decision(character_pack: Dict[str, Any]) -> None:
     """
     Render only the 'Decision' part of Character Card (for Appendix E / anti-anchoring).
     Includes: Conviction + Weaknesses + Playstyle Tags.
     """
-    cp = character_pack or {}
-    conv = cp.get("Conviction") or {}
+    cp = _ensure_dict(character_pack)
+    conv = _ensure_dict(cp.get("Conviction"))
     flags = cp.get("Flags") or []
     tags = cp.get("ActionTags") or []
 
@@ -1614,7 +1682,7 @@ def render_market_state(analysis_pack: Dict[str, Any]) -> None:
     Appendix E section (2): Market State / Current Regime.
     Must never crash if market context is missing.
     """
-    ap = analysis_pack or {}
+    ap = _ensure_dict(analysis_pack)
     m = ap.get("Market") or {}
     vn = m.get("VNINDEX") or {}
     vn30 = m.get("VN30") or {}
@@ -1667,9 +1735,9 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], character_pack:
     Uses AnalysisPack.TradePlans (Python-computed). No GPT math.
     Layout-only: reorders how the engine output is displayed.
     """
-    ap = analysis_pack or {}
+    ap = _ensure_dict(analysis_pack)
 
-    cp = character_pack or {}
+    cp = _ensure_dict(character_pack)
 
     # Prefer standardized TradePlanPack.v1 when available (Python pre-digest single source of truth)
     tpp = ap.get("TradePlanPack") or cp.get("TradePlanPack") or {}
@@ -1716,7 +1784,8 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], character_pack:
         def _fmt_gates(g: Any) -> str:
             if not isinstance(g, dict):
                 return "N/A"
-            keys = ["trigger", "volume", "rr", "exec", "structure"]
+            # Step 11: include plan completeness gate to prevent "PASS all triggers" masking missing Stop/EntryZone
+            keys = ["plan", "trigger", "volume", "rr", "exec", "structure"]
             parts = []
             for k in keys:
                 parts.append(f"{k.upper()}={_safe_text(g.get(k) or 'N/A').strip().upper()}")
@@ -1730,6 +1799,14 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], character_pack:
             st.markdown(f"#### {title} — {ptype} | {pstate}")
 
             st.caption(_fmt_gates(p.get("gates")))
+
+            # Step 11: surface PlanCompleteness explanation in the Trade Plan section itself
+            _pc = p.get("plan_completeness") or {}
+            if isinstance(_pc, dict):
+                _pcs = _safe_text(_pc.get("status") or "").strip().upper()
+                _pcm = _safe_text(_pc.get("message") or "").strip()
+                if _pcs in ("FAIL", "WARN") and _pcm:
+                    (st.warning if _pcs == "FAIL" else st.info)(_pcm)
 
             zone = _fmt_zone(p.get("entry_zone"))
             stop = _fmt_px(p.get("stop"))
@@ -2015,8 +2092,8 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
       - Convert long BiasCode into short pills (avoid unreadable mega-string)
       - No red accents (orange/neutral only)
     """
-    cp = character_pack or {}
-    ap = analysis_pack or {}
+    cp = _ensure_dict(character_pack)
+    ap = _ensure_dict(analysis_pack)
 
     # ------------------------------------------------------------
     # DecisionPack.v1 (Portfolio-ready; Long-only) — render if available
@@ -2123,7 +2200,7 @@ def render_decision_layer_switch(character_pack: Dict[str, Any], analysis_pack: 
         # Keep it readable: show top N pills only
         return out[:8]
 
-    conv = cp.get("Conviction") or {}
+    conv = _ensure_dict(cp.get("Conviction"))
     tier = conv.get("Tier", "N/A")
     pts = _safe_float(conv.get("Points"), default=np.nan)
     guide = _safe_text(conv.get("SizeGuidance") or "").strip()
@@ -2312,15 +2389,15 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
       4) Decision Layer (Conviction/Weakness/Tags)
     This renderer must not change any underlying calculations.
     """
-    modules = (result or {}).get("Modules") or {}
+    modules = (_ensure_dict(result)).get("Modules") or {}
     cp = modules.get("character") or {}
-    ap = analysis_pack or {}
+    ap = _ensure_dict(analysis_pack)
 
     # Trade-plan gate (for execution / anti-FOMO posture)
     gate_status, _meta = _trade_plan_gate(analysis_pack, cp)
 
     # ---------- HEADER: <Ticker> — <Last Close> <+/-%> ----------
-    ticker = _safe_text(ap.get("Ticker") or (result or {}).get("Ticker") or "").strip().upper()
+    ticker = _safe_text(ap.get("Ticker") or (_ensure_dict(result)).get("Ticker") or "").strip().upper()
     last_pack = ap.get("Last") or {}
     close_val = _safe_float(last_pack.get("Close"), default=np.nan)
 
@@ -2488,7 +2565,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
 
             # 2.5 Combat Readiness (Now) — merged from legacy Combat Stats
             st.markdown("**Combat Readiness (Now)**")
-            combat = cp.get("CombatStats") or {}
+            combat = _ensure_dict(cp.get("CombatStats"))
             combat = combat if isinstance(combat, dict) else {}
 
             def _bar_row_now(label: str, val: Any, maxv: float = 10.0) -> None:
@@ -2592,7 +2669,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                     code = _safe_text(f.get("code") or "Flag").strip()
                     risk_lines.append(f"- [{code}] {note}" if note else f"- [{code}]")
 
-            dna_t1 = (((cp.get("StockTraits") or {}).get("DNA") or {}).get("Tier1") or {})
+            dna_t1 = (((_ensure_dict(cp.get("StockTraits"))).get("DNA") or {}).get("Tier1") or {})
             mods = dna_t1.get("Modifiers") if isinstance(dna_t1, dict) else []
             if isinstance(mods, list) and mods:
                 mods_txt = ", ".join([str(x) for x in mods[:6]])
@@ -2653,7 +2730,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
 
     st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
 
-    ap = analysis_pack or {}
+    ap = _ensure_dict(analysis_pack)
     scenario_pack = ap.get("Scenario12") or {}
     master_pack = ap.get("MasterScore") or {}
     conviction_score = ap.get("Conviction", "N/A")
@@ -2711,7 +2788,7 @@ def render_report_pretty(report_text: str, analysis_pack: dict):
         st.info("N/A")
 
     st.markdown('<div class="sec-title">RỦI RO &amp; LỢI NHUẬN</div>', unsafe_allow_html=True)
-    ps = (analysis_pack or {}).get("PrimarySetup") or {}
+    ps = (_ensure_dict(analysis_pack)).get("PrimarySetup") or {}
     risk = ps.get("RiskPct", None)
     reward = ps.get("RewardPct", None)
     rr = ps.get("RR", None)

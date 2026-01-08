@@ -146,6 +146,29 @@ def compute_trade_plan_pack_v1(analysis_pack: Dict[str, Any], character_ctx: Opt
         "exec": st_exec,
     }
 
+    # ------------------------------------------------------------
+    # Step 11: PlanCompleteness gate
+    # - If Entry/EntryZone/Stop is missing, a plan can look like all triggers PASS
+    #   but still cannot be executed.
+    # - We surface this as a dedicated gate so state mapping & Decision Layer can
+    #   downgrade action deterministically.
+    # ------------------------------------------------------------
+    missing: List[str] = []
+    if pd.isna(entry):
+        missing.append("Entry")
+    # EntryZone derives from entry; still treat as missing when bounds are NaN.
+    if pd.isna(lo) or pd.isna(hi):
+        missing.append("EntryZone")
+    if pd.isna(stop):
+        missing.append("Stop")
+
+    # Gate value used by state mapping (PASS/WAIT/FAIL only)
+    if missing:
+        # HOLDING: keep plan visible but flag as WAIT (risk management required)
+        gates["plan"] = "WAIT" if is_holding else "FAIL"
+    else:
+        gates["plan"] = "PASS"
+
     def _state_flat(g: Dict[str, str]) -> str:
         if any(str(v).upper() == "FAIL" for v in g.values()):
             return "INVALID"
@@ -190,10 +213,21 @@ def compute_trade_plan_pack_v1(analysis_pack: Dict[str, Any], character_ctx: Opt
 
     invalidation = "Invalidation: thiếu stop." if pd.isna(stop) else "Invalidation: thủng stop/đóng cửa dưới vùng cấu trúc neo stop."
 
+    plan_completeness = {
+        "status": "FAIL" if (missing and not is_holding) else ("WARN" if missing else "PASS"),
+        "missing": missing,
+        "message": (
+            "Plan thiếu STOP/ENTRY ZONE nên không thể thực thi (hệ thống tự hạ trạng thái)."
+            if (missing and not is_holding)
+            else ("Đang nắm giữ nhưng thiếu STOP/ENTRY ZONE → ưu tiên bổ sung stop và quản trị rủi ro." if missing else "Plan đầy đủ."),
+        ),
+    }
+
     plan_primary = {
         "type": setup_type,
         "state": plan_state,
         "gates": gates,
+        "plan_completeness": plan_completeness,
         "entry_zone": {"Low": float(lo) if pd.notna(lo) else np.nan, "High": float(hi) if pd.notna(hi) else np.nan},
         "stop": float(stop) if pd.notna(stop) else np.nan,
         "tp1": float(tp1) if pd.notna(tp1) else np.nan,
@@ -229,11 +263,22 @@ def compute_trade_plan_pack_v1(analysis_pack: Dict[str, Any], character_ctx: Opt
     if is_holding:
         explain = "HOLDING mode: ưu tiên bảo toàn vốn/lợi nhuận; quyết định TRIM/EXIT do Decision Layer dựa trên PnL & gates."
 
-    return {
+    pack = {
         "schema": "TradePlanPack.v1",
         "mode": "HOLDING" if is_holding else "FLAT",
         "policy_hint_line": policy_hint_line,
+        "plan_completeness": plan_completeness,
         "plan_primary": plan_primary,
         "plan_alt": plan_alt,
         "explain": explain,
     }
+
+    # Step 8: normalize pack contract (fail-safe)
+    try:
+        from inception.core.contracts import normalize_tradeplan_pack
+        pack = normalize_tradeplan_pack(pack)
+    except Exception:
+        pass
+
+    return pack
+

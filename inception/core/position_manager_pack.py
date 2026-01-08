@@ -155,7 +155,7 @@ def compute_position_manager_pack_v1(
     pos_sz = float(position_size_pct_nav) if pd.notna(position_size_pct_nav) else None
     stop_out = float(stop_suggest) if pd.notna(stop_suggest) else None
 
-    return {
+    pack = {
         "schema": "PositionManagerPack.v1",
         "mode": "HOLDING" if is_holding else "FLAT",
         "action": action,
@@ -166,3 +166,13 @@ def compute_position_manager_pack_v1(
         "size_cap_pct_nav": size_cap_pct_nav,
         "position_size_pct_nav": pos_sz,
     }
+
+    # Step 8: normalize pack contract (fail-safe)
+    try:
+        from inception.core.contracts import normalize_position_manager_pack
+        pack = normalize_position_manager_pack(pack)
+    except Exception:
+        pass
+
+    return pack
+

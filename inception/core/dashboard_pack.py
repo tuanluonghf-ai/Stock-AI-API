@@ -19,6 +19,7 @@ import pandas as pd
 
 from .helpers import _safe_text, _safe_float
 from .policy import get_class_policy_hint_line
+from .validate import collect_data_quality_pack
 
 
 def _pretty_level_label(level_type: str, side: str = "overhead") -> str:
@@ -179,6 +180,7 @@ def compute_dashboard_summary_pack_v1(
         return "FAIL"
 
     plan_status = "N/A"
+    plan_comp = "N/A"
     rr_plan = _safe_float(primary.get("RR"), default=np.nan)
 
     st_break = st_vol = st_rr = st_struct = "N/A"
@@ -209,6 +211,12 @@ def compute_dashboard_summary_pack_v1(
         st_vol = _safe_text(gpack.get("volume") or "N/A").strip().upper()
         st_rr = _safe_text(gpack.get("rr") or "N/A").strip().upper()
         st_struct = _safe_text(gpack.get("structure") or "N/A").strip().upper()
+        try:
+            pc = pp.get("plan_completeness") or {}
+            pc = pc if isinstance(pc, dict) else {}
+            plan_comp = _safe_text(pc.get("status") or gpack.get("plan") or "N/A").strip().upper()
+        except Exception:
+            plan_comp = _safe_text(gpack.get("plan") or "N/A").strip().upper()
     else:
         # legacy fallback: derive statuses from metrics and structure ceiling gate
         combat = cp.get("CombatStats") or {}
@@ -228,7 +236,7 @@ def compute_dashboard_summary_pack_v1(
     st_rr = _norm_st(st_rr)
     st_struct = _norm_st(st_struct)
 
-    gate_line = f"Gate: {gtxt or 'N/A'} | Plan: {setup_name} ({plan_status or 'N/A'})"
+    gate_line = f"Gate: {gtxt or 'N/A'} | Plan: {setup_name} ({plan_status or 'N/A'}) | PlanCompleteness: {plan_comp or 'N/A'}"
 
     # Next step (single line, long-only language)
     next_step = "Theo dõi và chờ thêm dữ liệu."
@@ -297,6 +305,15 @@ def compute_dashboard_summary_pack_v1(
     except Exception:
         decision_summary = {}
 
+
+    # Data quality (Step 9): show early drift signals on Dashboard without crashing
+    dq_extra = {
+        'TradePlanPack': ap.get('TradePlanPack'),
+        'DecisionPack': ap.get('DecisionPack'),
+        'PositionManagerPack': ap.get('PositionManagerPack'),
+    }
+    dq = collect_data_quality_pack(ap, cp, extra=dq_extra, max_issues=8)
+
     out = {
         "schema": "DashboardSummaryPack.v1",
         "CurrentStatusCard": {
@@ -316,6 +333,7 @@ def compute_dashboard_summary_pack_v1(
             },
             "risk_flags": risk_lines,
             "decision": decision_summary,
+            "data_quality": dq,
         },
     }
     return out

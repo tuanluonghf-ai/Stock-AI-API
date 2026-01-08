@@ -2,6 +2,7 @@
 
 This package is the long-term home for all pure computations.
 Phase 4 introduces the first clusters: helpers, indicators, tradeplan, scoring.
+Phase 8 adds contracts/normalization to keep pack shapes stable.
 """
 
 from .helpers import (
@@ -27,6 +28,21 @@ from .scoring import (
     build_rr_sim,
 )
 
+# Contracts / normalization (Phase 8)
+from .contracts import (
+    as_dict,
+    as_list,
+    as_str,
+    as_float,
+    normalize_analysis_pack,
+    normalize_character_pack,
+    normalize_tradeplan_pack,
+    normalize_decision_pack,
+    normalize_position_manager_pack,
+)
+
+from .validate import validate_required_paths
+
 __all__ = [
     "DataError",
     "assert_not_pandas_bool",
@@ -50,4 +66,14 @@ __all__ = [
     "classify_scenario12",
     "compute_master_score",
     "build_rr_sim",
+    "as_dict",
+    "as_list",
+    "as_str",
+    "as_float",
+    "normalize_analysis_pack",
+    "normalize_character_pack",
+    "normalize_tradeplan_pack",
+    "normalize_decision_pack",
+    "normalize_position_manager_pack",
+    "validate_required_paths",
 ]

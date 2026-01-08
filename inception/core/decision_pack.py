@@ -41,6 +41,16 @@ def compute_decision_pack_v1(analysis_pack: Dict[str, Any], trade_plan_pack: Opt
     trig = _safe_text(gates.get("trigger") or "").strip().upper()
     vol = _safe_text(gates.get("volume") or "").strip().upper()
 
+    # Step 11: plan completeness gate (execution safety)
+    plan_gate = _safe_text(gates.get("plan") or "").strip().upper()
+    if plan_gate not in ("PASS", "WAIT", "FAIL"):
+        plan_gate = "WAIT"
+
+    plan_comp = pp.get("plan_completeness") or {}
+    plan_comp = plan_comp if isinstance(plan_comp, dict) else {}
+    missing = plan_comp.get("missing") or []
+    missing = missing if isinstance(missing, list) else []
+
     constraints: List[str] = []
     if structure in ("WAIT", "FAIL"):
         constraints.append("No add while StructureGate is WAIT/FAIL; prioritize reclaim/confirm.")
@@ -50,6 +60,10 @@ def compute_decision_pack_v1(analysis_pack: Dict[str, Any], trade_plan_pack: Opt
         constraints.append("R:R below policy minimum; wait for better location or confirmation.")
     if trig == "FAIL":
         constraints.append("Trigger weak; avoid chasing; require clearer setup.")
+    if plan_gate == "FAIL":
+        constraints.append("Plan incomplete (missing Stop/EntryZone); do not execute until completed.")
+    elif plan_gate == "WAIT" and missing:
+        constraints.append("Plan missing critical fields (Stop/EntryZone); prioritize risk controls.")
 
     # Default decision
     action = "WAIT"
@@ -59,7 +73,12 @@ def compute_decision_pack_v1(analysis_pack: Dict[str, Any], trade_plan_pack: Opt
     if not is_holding:
         state = _safe_text(pp.get("state") or "").strip().upper()
         any_fail = any(_safe_text(v).strip().upper() == "FAIL" for v in gates.values())
-        if state == "ACTIVE" and not any_fail:
+        # Step 11: even if all technical gates PASS, an incomplete plan disables BUY
+        if plan_gate == "FAIL":
+            action = "WAIT"
+            urgency = "LOW"
+            rationale = "Trade plan chưa hoàn chỉnh (thiếu Stop/Entry zone) → KHÔNG vào lệnh; hoàn thiện plan trước."
+        elif state == "ACTIVE" and not any_fail:
             action = "BUY"
             urgency = "HIGH"
             rationale = "Các điều kiện chính đã PASS/đủ xác nhận; có thể triển khai kế hoạch mua mới."
@@ -87,9 +106,14 @@ def compute_decision_pack_v1(analysis_pack: Dict[str, Any], trade_plan_pack: Opt
             urgency = "LOW"
             rationale = "Cấu trúc ổn (Structure PASS) → ưu tiên giữ và dời stop theo cấu trúc."
 
+        # Step 11: HOLDING but missing stop/entry zone -> raise urgency & force risk review language
+        if plan_gate == "WAIT" and missing:
+            urgency = "HIGH" if urgency != "HIGH" else urgency
+            rationale = "Đang nắm giữ nhưng trade plan thiếu Stop/Entry zone → ưu tiên bổ sung stop/giảm rủi ro trước khi hành động thêm."
+
     constraints = constraints[:3]
 
-    return {
+    pack = {
         "schema": "DecisionPack.v1",
         "mode": "HOLDING" if is_holding else "FLAT",
         "action": action,
@@ -99,3 +123,13 @@ def compute_decision_pack_v1(analysis_pack: Dict[str, Any], trade_plan_pack: Opt
         "in_profit": in_profit,
         "pnl_pct": pnl_pct,
     }
+
+    # Step 8: normalize pack contract (fail-safe)
+    try:
+        from inception.core.contracts import normalize_decision_pack
+        pack = normalize_decision_pack(pack)
+    except Exception:
+        pass
+
+    return pack
+
