@@ -13,6 +13,19 @@ import pandas as pd
 
 from .helpers import _safe_float
 
+def _round_price(x: float, ndigits: int = 2) -> float:
+    """Round price consistently.
+
+    v14.6 behavior: round to ndigits (default=2) and return NaN for missing.
+    """
+    try:
+        if pd.isna(x):
+            return np.nan
+        return round(float(x), ndigits)
+    except Exception:
+        return np.nan
+
+
 @dataclass
 class TradeSetup:
     name: str

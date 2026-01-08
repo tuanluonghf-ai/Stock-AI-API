@@ -136,7 +136,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-APP_VERSION = "14.6"
+APP_VERSION = "14.9"
 APP_TITLE = "INCEPTION"
 
 # ------------------------------------------------------------
@@ -188,6 +188,9 @@ from inception.infra.datahub import DataHub, DataError as HubDataError
 from inception.modules.base import run_modules
 from inception.modules import load_default_modules
 load_default_modules()
+
+# Step 12 (v14.7): single pipeline entry (app only wires inputs -> pipeline -> UI)
+from inception.core.pipeline import build_result as build_result_pipeline
 
 # ------------------------------
 # JSON safe-serialization helpers
@@ -4011,31 +4014,6 @@ div[data-testid="stExpander"] > details > summary:hover{opacity:0.98;}
         else:
             with st.spinner(f"Đang xử lý phân tích {ticker_input}..."):
                 try:
-                    result = analyze_ticker(ticker_input)
-
-                    # ------------------------------
-                    # MODULE EXECUTION (REGISTRY)
-                    # ------------------------------
-                    ap_base = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
-                    df_used = result.get("_DF", None) if isinstance(result, dict) else None
-
-
-                    # ------------------------------
-                    # PositionStatePack (Portfolio-ready; Long-only)
-                    # ------------------------------
-                    current_price = None
-                    try:
-                        if isinstance(df_used, pd.DataFrame) and len(df_used) > 0:
-                            col_close = None
-                            for c in ["Close", "close", "Adj Close", "adj_close", "Last", "last"]:
-                                if c in df_used.columns:
-                                    col_close = c
-                                    break
-                            if col_close:
-                                current_price = float(df_used[col_close].iloc[-1])
-                    except Exception:
-                        current_price = None
-
                     avg_cost_f = None
                     try:
                         avg_cost_f = float(avg_cost) if float(avg_cost) > 0 else None
@@ -4050,51 +4028,40 @@ div[data-testid="stExpander"] > details > summary:hover{opacity:0.98;}
                     pnl_pct = None
                     in_profit = None
                     try:
-                        if position_mode == "HOLDING" and avg_cost_f and current_price and avg_cost_f > 0:
-                            pnl_pct = (float(current_price) / float(avg_cost_f) - 1.0) * 100.0
-                            # Treat as "in profit" only if above a small noise buffer
-                            in_profit = float(current_price) > float(avg_cost_f) * 1.002
+                        pnl_pct = None
+                        in_profit = None
                     except Exception:
                         pnl_pct = None
                         in_profit = None
-                    position_state_pack = {
-                        "schema": "PositionStatePack.v1",
-                        "ticker": ticker_input,
-                        "mode": position_mode,
-                        "is_holding": (position_mode == "HOLDING"),
-                        "avg_cost": avg_cost_f,
-                        "position_size_pct": float(position_size_pct) if isinstance(position_size_pct, (int, float)) else 0.0,
-                        "risk_budget_pct": float(risk_budget_pct) if isinstance(risk_budget_pct, (int, float)) else 1.0,
-                        "holding_horizon": holding_horizon,
-                        "timeframe": timeframe,
-                        "current_price": current_price,
-                        "pnl_pct": pnl_pct,
-                        "in_profit": in_profit,
-                    }
-                    if isinstance(ap_base, dict):
-                        ap_base["PositionStatePack"] = position_state_pack
 
-                    ctx = {
-                        "ticker": ticker_input,
-                        "df": df_used,
-                        "result": result,
-                        "position_state_pack": position_state_pack,
-                    }
-
-                    modules_out, mod_errors = run_modules(
-                        analysis_pack=ap_base if isinstance(ap_base, dict) else {},
-                        enabled=["report_ad", "character"],
-                        ctx=ctx,
+                    # ------------------------------
+                    # Step 12 (v14.7): single pipeline entry
+                    # - loads data
+                    # - builds AnalysisPack
+                    # - injects PositionStatePack
+                    # - runs modules (character -> report_ad)
+                    # - builds DashboardSummaryPack
+                    # ------------------------------
+                    result = build_result_pipeline(
+                        ticker=ticker_input,
+                        data_dir=str(DATA_DIR),
+                        price_vol_path=str(PRICE_VOL_PATH),
+                        position_mode=position_mode,
+                        avg_cost=avg_cost_f,
+                        position_size_pct_nav=float(position_size_pct) if isinstance(position_size_pct, (int, float)) else 0.0,
+                        risk_budget_pct_nav=float(risk_budget_pct) if isinstance(risk_budget_pct, (int, float)) else 1.0,
+                        holding_horizon=holding_horizon,
+                        timeframe=timeframe,
+                        enabled_modules=["character", "report_ad"],
                     )
 
-                    if isinstance(result, dict):
-                        result["Modules"] = modules_out
-                        if mod_errors:
-                            result["_ModuleErrors"] = mod_errors
-
-                    report = ((modules_out or {}).get("report_ad") or {}).get("report") if isinstance(modules_out, dict) else ""
+                    report = ""
+                    try:
+                        report = (result or {}).get("Report") if isinstance(result, dict) else ""
+                    except Exception:
+                        report = ""
                     if not report:
-                        report = generate_insight_report(result)
+                        report = generate_insight_report(result if isinstance(result, dict) else {})
                     st.markdown("<hr>", unsafe_allow_html=True)
                     analysis_pack = result.get("AnalysisPack", {}) if isinstance(result, dict) else {}
                     if not isinstance(analysis_pack, dict):

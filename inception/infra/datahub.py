@@ -55,10 +55,21 @@ class DataHub:
     data_dir: Path
 
     @staticmethod
-    def from_env(default_dir: Optional[Path] = None) -> "DataHub":
+    def from_env(default_dir: Optional[object] = None) -> "DataHub":
+        """Create a DataHub from environment or a fallback directory.
+
+        Notes:
+        - INCEPTION_DATA_DIR (env var) takes precedence.
+        - `default_dir` may be a Path or a str (common when passed from app/pipeline).
+        """
+
         base = os.environ.get("INCEPTION_DATA_DIR")
         if base:
             return DataHub(Path(base).resolve())
+
+        if isinstance(default_dir, str):
+            default_dir = Path(default_dir)
+
         return DataHub((default_dir or Path.cwd()).resolve())
 
     def load_price_vol(self, path: str) -> pd.DataFrame:
