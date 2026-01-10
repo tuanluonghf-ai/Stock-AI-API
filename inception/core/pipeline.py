@@ -62,22 +62,40 @@ def _build_position_state_pack(
         pnl_pct = (c - ac) / ac * 100.0
         in_profit = bool(pnl_pct > 0)
 
-    return {
-        "Mode": "HOLDING" if is_holding else "FLAT",
-        "IsHolding": bool(is_holding),
-        "Timeframe": str(timeframe or "D").upper(),
-        "HoldingHorizon": str(holding_horizon or "SWING").upper(),
-        "AvgCost": ac,
-        "CurrentPrice": c,
-        "PnlPct": pnl_pct,
-        "InProfit": bool(in_profit),
-        "PositionSizePctNAV": _safe_float(position_size_pct_nav, default=np.nan)
+    # Canonical snake_case (core expects these)
+    p = {
+        "mode": "HOLDING" if is_holding else "FLAT",
+        "is_holding": bool(is_holding),
+        "timeframe": str(timeframe or "D").upper(),
+        "holding_horizon": str(holding_horizon or "SWING").upper(),
+        "avg_cost": ac,
+        "current_price": c,
+        "pnl_pct": pnl_pct,
+        "in_profit": bool(in_profit),
+        "position_size_pct_nav": _safe_float(position_size_pct_nav, default=np.nan)
         if position_size_pct_nav is not None
         else np.nan,
-        "RiskBudgetPctNAV": _safe_float(risk_budget_pct_nav, default=np.nan)
+        "risk_budget_pct_nav": _safe_float(risk_budget_pct_nav, default=np.nan)
         if risk_budget_pct_nav is not None
         else np.nan,
     }
+
+    # Backward-compat: also expose TitleCase aliases (some older renderers).
+    p.update(
+        {
+            "Mode": p["mode"],
+            "IsHolding": p["is_holding"],
+            "Timeframe": p["timeframe"],
+            "HoldingHorizon": p["holding_horizon"],
+            "AvgCost": p["avg_cost"],
+            "CurrentPrice": p["current_price"],
+            "PnlPct": p["pnl_pct"],
+            "InProfit": p["in_profit"],
+            "PositionSizePctNAV": p["position_size_pct_nav"],
+            "RiskBudgetPctNAV": p["risk_budget_pct_nav"],
+        }
+    )
+    return p
 
 
 def build_result(
@@ -148,6 +166,30 @@ def build_result(
     except Exception:
         last_close = np.nan
 
+    # Robust mode inference: if the app forgets to pass mode but provides avg_cost/size, treat as HOLDING.
+    pmode = (position_mode or "FLAT").strip().upper()
+    try:
+        psize = _safe_float(position_size_pct_nav, default=np.nan)
+    except Exception:
+        psize = np.nan
+    try:
+        pac = _safe_float(avg_cost, default=np.nan)
+    except Exception:
+        pac = np.nan
+    coerced = False
+    if pmode not in ("FLAT", "HOLDING"):
+        pmode = "FLAT"
+    if pmode == "FLAT":
+        if (np.isfinite(psize) and float(psize) > 0) or np.isfinite(pac):
+            pmode = "HOLDING"
+            coerced = True
+    if coerced:
+        try:
+            analysis_pack.setdefault("_Warnings", []).append("PositionMode auto-coerced to HOLDING because avg_cost/position_size_pct_nav is provided.")
+        except Exception:
+            pass
+    position_mode = pmode
+
     pos_pack = _build_position_state_pack(
         mode=position_mode,
         current_price=last_close,
@@ -157,7 +199,12 @@ def build_result(
         holding_horizon=holding_horizon,
         timeframe=timeframe,
     )
-    analysis_pack["PositionStatePack"] = pos_pack
+    # Normalize to stable contract (snake_case) while keeping legacy TitleCase aliases
+    try:
+        from inception.core.contracts import normalize_position_state_pack
+        analysis_pack["PositionStatePack"] = normalize_position_state_pack(pos_pack)
+    except Exception:
+        analysis_pack["PositionStatePack"] = pos_pack
 
     # 5) Run modules (character first, then report)
     if enabled_modules is None:

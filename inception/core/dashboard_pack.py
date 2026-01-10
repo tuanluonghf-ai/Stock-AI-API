@@ -20,6 +20,7 @@ import pandas as pd
 from .helpers import _safe_text, _safe_float
 from .policy import get_class_policy_hint_line
 from .validate import collect_data_quality_pack
+from .fail_reasons import summarize_top_reason
 
 
 def _pretty_level_label(level_type: str, side: str = "overhead") -> str:
@@ -181,6 +182,7 @@ def compute_dashboard_summary_pack_v1(
 
     plan_status = "N/A"
     plan_comp = "N/A"
+    plan_reason = {"code": "-", "ui_short": "-", "label": "-"}
     rr_plan = _safe_float(primary.get("RR"), default=np.nan)
 
     st_break = st_vol = st_rr = st_struct = "N/A"
@@ -203,6 +205,8 @@ def compute_dashboard_summary_pack_v1(
     if _safe_text(tpp.get("schema") or "").strip() == "TradePlanPack.v1":
         pp = tpp.get("plan_primary") or {}
         pp = pp if isinstance(pp, dict) else {}
+        # Align dashboard plan name with TradePlanPack primary (prevents dashboard/detail drift)
+        setup_name = _safe_text(pp.get('type') or setup_name).strip() or setup_name
         gpack = pp.get("gates") or {}
         gpack = gpack if isinstance(gpack, dict) else {}
         plan_status = _safe_text(pp.get("state") or "N/A").strip().upper()
@@ -217,6 +221,13 @@ def compute_dashboard_summary_pack_v1(
             plan_comp = _safe_text(pc.get("status") or gpack.get("plan") or "N/A").strip().upper()
         except Exception:
             plan_comp = _safe_text(gpack.get("plan") or "N/A").strip().upper()
+
+        # Top fail reason (ranked) for dashboard UI
+        try:
+            fr = pp.get("fail_reasons")
+            plan_reason = summarize_top_reason(fr)
+        except Exception:
+            plan_reason = {"code": "-", "ui_short": "-", "label": "-"}
     else:
         # legacy fallback: derive statuses from metrics and structure ceiling gate
         combat = cp.get("CombatStats") or {}
@@ -236,7 +247,10 @@ def compute_dashboard_summary_pack_v1(
     st_rr = _norm_st(st_rr)
     st_struct = _norm_st(st_struct)
 
-    gate_line = f"Gate: {gtxt or 'N/A'} | Plan: {setup_name} ({plan_status or 'N/A'}) | PlanCompleteness: {plan_comp or 'N/A'}"
+    # Gate line is compact; add reason only when it materially explains plan readiness.
+    reason_short = _safe_text(plan_reason.get("ui_short") if isinstance(plan_reason, dict) else "").strip()
+    reason_part = f" | Reason: {reason_short}" if (reason_short and reason_short != "-" and _safe_text(plan_comp).strip().upper() != "PASS") else ""
+    gate_line = f"Gate: {gtxt or 'N/A'} | Plan: {setup_name} ({plan_status or 'N/A'}) | PlanCompleteness: {plan_comp or 'N/A'}{reason_part}"
 
     # Next step (single line, long-only language)
     next_step = "Theo dõi và chờ thêm dữ liệu."
@@ -325,6 +339,7 @@ def compute_dashboard_summary_pack_v1(
             "gate_line": gate_line,
             "next_step": next_step,
             "plan_status": plan_status,
+            "plan_reason": plan_reason,
             "triggers": {
                 "breakout": st_break,
                 "volume": st_vol,

@@ -437,4 +437,146 @@ def build_trade_plan(df: pd.DataFrame, dual_fib: Dict[str, Any]) -> Dict[str, Tr
     )
     plans["Pullback"] = pullback
 
+    # ----------------------------
+    # 3) MEAN-REVERSION PLAN
+    # Entry: nearest support below close (or close if missing)
+    # Stop: next support below entry - buffer
+    # TP: nearest resistance above close (or 2R fallback)
+    # ----------------------------
+    sup_tag, sup_val = _nearest_support_below(anchors, close) if pd.notna(close) else ("N/A", np.nan)
+    res_tag, res_val = _nearest_resistance_above(anchors, close) if pd.notna(close) else ("N/A", np.nan)
+
+    entry_m = _round_price(sup_val) if pd.notna(sup_val) else (_round_price(close) if pd.notna(close) else np.nan)
+    buf_m = _buffer_price_dynamic(df, entry_m) if pd.notna(entry_m) else np.nan
+
+    stop_ref_tag_m, stop_ref_val_m = _nearest_support_below(anchors, entry_m, exclude_vals=[sup_val])
+    if pd.isna(stop_ref_val_m) and pd.notna(entry_m) and pd.notna(buf_m):
+        stop_ref_tag_m, stop_ref_val_m = "Fallback_Buffer", float(entry_m - 1.0 * buf_m)
+
+    stop_m = _round_price(stop_ref_val_m - buf_m) if (pd.notna(stop_ref_val_m) and pd.notna(buf_m)) else np.nan
+
+    # TP: prefer nearest resistance; if missing, use 2R fallback
+    tp_m = _round_price(res_val) if pd.notna(res_val) else np.nan
+    if pd.isna(tp_m) and pd.notna(entry_m) and pd.notna(stop_m) and entry_m > stop_m:
+        tp_m = _round_price(entry_m + 2.0 * (entry_m - stop_m))
+
+    rr_m = _compute_rr(entry_m, stop_m, tp_m)
+
+    tags_m: List[str] = []
+    if sup_tag and sup_tag != "N/A":
+        tags_m.append(f"EntryAnchor={sup_tag}")
+    if stop_ref_tag_m and stop_ref_tag_m != "N/A":
+        tags_m.append(f"StopRef={stop_ref_tag_m}")
+    if res_tag and res_tag != "N/A" and pd.notna(res_val):
+        tags_m.append(f"TPRef={res_tag}")
+    if pd.notna(vr):
+        tags_m.append(f"VolRatio={round(vr,2)}")
+    if pd.notna(buf_m):
+        tags_m.append("Buffer=Dynamic(ATR/Proxy)")
+
+    status_m = "Watch"
+    if any(pd.isna([entry_m, stop_m, tp_m, rr_m])) or (entry_m <= stop_m) or (rr_m < 1.2):
+        status_m = "Invalid"
+        tags_m.append("Invalid=GeometryOrRR")
+    else:
+        # Mean-reversion trigger: close near support + not in extended RSI
+        rsi = _safe_float(last.get("RSI"))
+        near_entry = (abs(close - entry_m) / close * 100) <= 0.9 if (pd.notna(close) and close != 0) else False
+        if near_entry and (pd.isna(rsi) or rsi < 70):
+            status_m = "Active"
+            tags_m.append("Trigger=NearSupport")
+
+    prob_m = _probability_label_from_facts(df, rr_m, status_m, vr)
+    mean_rev = TradeSetup(
+        name="MeanRev",
+        entry=entry_m,
+        stop=stop_m,
+        tp=tp_m,
+        rr=rr_m,
+        probability=prob_m,
+        status=status_m,
+        reason_tags=tags_m,
+    )
+    plans["MeanRev"] = mean_rev
+
+    # ----------------------------
+    # 4) RECLAIM PLAN
+    # Entry: reclaim nearest overhead resistance (small buffer)
+    # Stop: below reclaimed level - buffer
+    # TP: next fib above entry (or 2.4R fallback)
+    # ----------------------------
+    base_res_k, base_res_v = _nearest_resistance_above(anchors, close) if pd.notna(close) else ("N/A", np.nan)
+    if pd.isna(base_res_v) and pd.notna(close):
+        base_res_k, base_res_v = "Fallback_Close", float(close)
+
+    entry_r = _round_price(base_res_v * 1.002) if pd.notna(base_res_v) else np.nan
+    buf_r = _buffer_price_dynamic(df, entry_r) if pd.notna(entry_r) else np.nan
+
+    stop_ref_tag_r, stop_ref_val_r = _nearest_support_below(anchors, entry_r)
+    stop_r = _round_price(stop_ref_val_r - buf_r) if (pd.notna(stop_ref_val_r) and pd.notna(buf_r)) else np.nan
+
+    tp_label_r, tp_val_r = _nearest_above(levels_tp, entry_r) if pd.notna(entry_r) else (None, np.nan)
+    if pd.notna(tp_val_r):
+        tp_r = _round_price(tp_val_r)
+    else:
+        if pd.notna(entry_r) and pd.notna(stop_r) and entry_r > stop_r:
+            tp_r = _round_price(entry_r + 2.4 * (entry_r - stop_r))
+        else:
+            tp_r = np.nan
+
+    rr_r = _compute_rr(entry_r, stop_r, tp_r)
+
+    tags_r: List[str] = []
+    if base_res_k and base_res_k != "N/A":
+        tags_r.append(f"EntryAnchor={base_res_k}")
+    if stop_ref_tag_r and stop_ref_tag_r != "N/A":
+        tags_r.append(f"StopRef={stop_ref_tag_r}")
+    if tp_label_r:
+        tags_r.append(f"TP=Fib{tp_label_r}")
+    if pd.notna(vr):
+        tags_r.append(f"VolRatio={round(vr,2)}")
+    if pd.notna(buf_r):
+        tags_r.append("Buffer=Dynamic(ATR/Proxy)")
+
+    status_r = "Watch"
+    if any(pd.isna([entry_r, stop_r, tp_r, rr_r])) or (entry_r <= stop_r) or (rr_r < 1.2):
+        status_r = "Invalid"
+        tags_r.append("Invalid=GeometryOrRR")
+    else:
+        # Reclaim trigger: price above entry + not weak volume
+        if pd.notna(close) and close >= entry_r:
+            if (pd.isna(vr) or vr >= 1.0):
+                status_r = "Active"
+                tags_r.append("Trigger=Reclaim")
+
+    prob_r = _probability_label_from_facts(df, rr_r, status_r, vr)
+    reclaim = TradeSetup(
+        name="Reclaim",
+        entry=entry_r,
+        stop=stop_r,
+        tp=tp_r,
+        rr=rr_r,
+        probability=prob_r,
+        status=status_r,
+        reason_tags=tags_r,
+    )
+    plans["Reclaim"] = reclaim
+
+    # ----------------------------
+    # 5) DEFENSIVE PLAN
+    # A non-execution plan used under high risk/unclear structure.
+    # Not intended for RR ranking.
+    # ----------------------------
+    defensive = TradeSetup(
+        name="Defensive",
+        entry=np.nan,
+        stop=np.nan,
+        tp=np.nan,
+        rr=np.nan,
+        probability="N/A",
+        status="Watch",
+        reason_tags=["Defensive=NoTrade"],
+    )
+    plans["Defensive"] = defensive
+
     return plans

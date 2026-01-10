@@ -181,7 +181,93 @@ def normalize_analysis_pack(ap_in: Any) -> Dict[str, Any]:
 
     ap["PrimarySetup"] = as_dict(ap.get("PrimarySetup"))
 
+    # PositionStatePack: normalize common key drift (TitleCase -> snake_case)
+    ap["PositionStatePack"] = normalize_position_state_pack(ap.get("PositionStatePack"))
+
     return ap
+
+
+def normalize_position_state_pack(pack_in: Any) -> Dict[str, Any]:
+    """Normalize PositionStatePack to a stable snake_case contract.
+
+    Historical drift notes
+    - Older pipeline injectors used TitleCase keys (e.g., "Mode", "IsHolding").
+    - Core modules and dashboard expect snake_case (e.g., "mode", "is_holding").
+
+    We keep both key styles for backward compatibility, but always populate snake_case.
+    """
+    p = as_dict(pack_in)
+
+    # Map TitleCase -> snake_case when needed
+    mapping = {
+        "Mode": "mode",
+        "IsHolding": "is_holding",
+        "Timeframe": "timeframe",
+        "HoldingHorizon": "holding_horizon",
+        "AvgCost": "avg_cost",
+        "CurrentPrice": "current_price",
+        "PnlPct": "pnl_pct",
+        "InProfit": "in_profit",
+        "PositionSizePctNAV": "position_size_pct_nav",
+        "RiskBudgetPctNAV": "risk_budget_pct_nav",
+    }
+    for src, dst in mapping.items():
+        if dst not in p and src in p:
+            p[dst] = p.get(src)
+
+    # Canonicalize a few fields
+    mode = as_str(p.get("mode") or "FLAT", default="FLAT").strip().upper()
+    if mode not in ("FLAT", "HOLDING"):
+        mode = "FLAT"
+    p["mode"] = mode
+    p["is_holding"] = bool(p.get("is_holding")) if mode == "HOLDING" else False
+    p["timeframe"] = as_str(p.get("timeframe") or "D", default="D").strip().upper()
+    p["holding_horizon"] = as_str(p.get("holding_horizon") or "SWING", default="SWING").strip().upper()
+
+    # Numeric fields
+    for k in ("avg_cost", "current_price", "pnl_pct", "position_size_pct_nav", "risk_budget_pct_nav"):
+        if k in p:
+            p[k] = as_float(p.get(k), default=np.nan)
+
+    # Boolean convenience
+    if "in_profit" in p:
+        try:
+            p["in_profit"] = bool(p.get("in_profit"))
+        except Exception:
+            p["in_profit"] = False
+
+
+
+    # Distress overlay (HOLDING risk sanity)
+    # This does not change trading logic; it only provides stable labels for downstream gating.
+    pnl = as_float(p.get("pnl_pct"), default=np.nan)
+    distress_level = "-"
+    if np.isfinite(pnl):
+        if pnl <= -25.0:
+            distress_level = "SEVERE"
+        elif pnl <= -15.0:
+            distress_level = "MEDIUM"
+        elif pnl <= -7.0:
+            distress_level = "MILD"
+        else:
+            distress_level = "OK"
+    p["distress_level"] = distress_level
+    p["underwater_pct"] = pnl if np.isfinite(pnl) else np.nan
+    p["avg_cost_gap_pct"] = abs(pnl) if np.isfinite(pnl) else np.nan
+
+    # Legacy aliases
+    if "DistressLevel" not in p:
+        p["DistressLevel"] = p.get("distress_level")
+    if "UnderwaterPct" not in p:
+        p["UnderwaterPct"] = p.get("underwater_pct")
+    if "AvgCostGapPct" not in p:
+        p["AvgCostGapPct"] = p.get("avg_cost_gap_pct")
+    # Re-populate legacy TitleCase to avoid breaking any downstream renderers.
+    for src, dst in mapping.items():
+        if src not in p and dst in p:
+            p[src] = p.get(dst)
+
+    return p
 
 
 def normalize_character_pack(pack_in: Any) -> Dict[str, Any]:

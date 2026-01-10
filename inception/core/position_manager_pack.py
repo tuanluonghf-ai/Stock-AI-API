@@ -85,6 +85,24 @@ def compute_position_manager_pack_v1(
 
     in_profit = pos.get("in_profit", None)
 
+    # Distress overlay (robust): used to prevent nonsensical stop suggestions when underwater.
+    pnl_val = _safe_float(pos.get("pnl_pct"), default=np.nan)
+    distress_level = _safe_text(pos.get("distress_level") or "").strip().upper()
+    if not distress_level or distress_level in ("-", "N/A"):
+        if pd.notna(pnl_val):
+            if pnl_val <= -25.0:
+                distress_level = "SEVERE"
+            elif pnl_val <= -15.0:
+                distress_level = "MEDIUM"
+            elif pnl_val <= -7.0:
+                distress_level = "MILD"
+            else:
+                distress_level = "OK"
+        else:
+            distress_level = "-"
+
+    cur_px = _safe_float(pos.get("current_price"), default=np.nan)
+
     # --- Trade plan stop suggestion (default = plan stop) ---
     pp = tpp.get("plan_primary") or {}
     pp = pp if isinstance(pp, dict) else {}
@@ -110,6 +128,43 @@ def compute_position_manager_pack_v1(
     base_buf = max(0.003, min(0.012, 0.006 * (float(vol_pct) / 1.5)))
 
     stop_suggest = stop_plan if pd.notna(stop_plan) else np.nan
+
+    # If HOLDING and underwater, prioritize a defensive hard stop below current price.
+    defensive_hard_stop = np.nan
+    try:
+        alt = tpp.get("plan_alt") if isinstance(tpp, dict) else None
+        if isinstance(alt, dict) and _safe_text(alt.get("type") or "").strip().upper() == "DEFENSIVE":
+            defensive_hard_stop = _safe_float(alt.get("defensive_hard_stop"), default=np.nan)
+        if pd.isna(defensive_hard_stop):
+            for c in (tpp.get("plans_all") or []):
+                if not isinstance(c, dict):
+                    continue
+                if _safe_text(c.get("type") or "").strip().upper() != "DEFENSIVE":
+                    continue
+                defensive_hard_stop = _safe_float(c.get("defensive_hard_stop"), default=np.nan)
+                break
+    except Exception:
+        defensive_hard_stop = np.nan
+
+    if is_holding and distress_level in ("MEDIUM", "SEVERE") and pd.notna(cur_px):
+        # Choose the closest meaningful stop below current price.
+        candidates = []
+        if pd.notna(defensive_hard_stop) and defensive_hard_stop < cur_px:
+            candidates.append(float(defensive_hard_stop))
+        try:
+            for c in (tpp.get("plans_all") or []):
+                if not isinstance(c, dict):
+                    continue
+                s = _safe_float(c.get("stop"), default=np.nan)
+                if pd.notna(s) and s < cur_px:
+                    candidates.append(float(s))
+        except Exception:
+            pass
+        if candidates:
+            stop_suggest = max(candidates)  # nearest below current price
+        # Safety: never suggest a stop ABOVE current price when underwater.
+        if pd.notna(stop_suggest) and stop_suggest >= cur_px:
+            stop_suggest = np.nan
     try:
         zl = _safe_float(us_zone.get("Low"), default=np.nan)
         if pd.notna(zl):
@@ -122,6 +177,11 @@ def compute_position_manager_pack_v1(
                     stop_suggest = float(stop_candidate)
     except Exception:
         pass
+
+    # Final safety: never suggest a stop ABOVE current price when underwater.
+    if is_holding and distress_level in ("MEDIUM", "SEVERE") and pd.notna(cur_px) and pd.notna(stop_suggest):
+        if float(stop_suggest) >= float(cur_px):
+            stop_suggest = np.nan
 
     # --- Trim suggestion (only meaningful for TRIM) ---
     trim_pct_of_position = None
@@ -143,9 +203,15 @@ def compute_position_manager_pack_v1(
     if action == "BUY" and not is_holding:
         guidance = "Triển khai theo Trade Plan; ưu tiên đúng vùng Entry và tuân thủ Stop." 
     elif action == "HOLD":
-        guidance = "Giữ vị thế; dời stop lên theo cấu trúc khi có lợi thế."
+        if is_holding and distress_level in ("MEDIUM", "SEVERE"):
+            guidance = "Vị thế đang underwater: ưu tiên giảm rủi ro; chỉ giữ nếu cấu trúc không breakdown và đã đặt hard stop."
+        else:
+            guidance = "Giữ vị thế; dời stop lên theo cấu trúc khi có lợi thế."
     elif action == "TRIM":
-        guidance = "Chốt một phần gần trần cấu trúc để bảo toàn lợi nhuận; giữ phần còn lại nếu reclaim thành công."
+        if is_holding and distress_level in ("MEDIUM", "SEVERE"):
+            guidance = "Underwater: ưu tiên giảm tỷ trọng về mức an toàn; không add cho tới khi reclaim cấu trúc."
+        else:
+            guidance = "Chốt một phần gần trần cấu trúc để bảo toàn lợi nhuận; giữ phần còn lại nếu reclaim thành công."
     elif action == "EXIT":
         guidance = "Cấu trúc xấu; ưu tiên giảm rủi ro/thoát theo stop hoặc breakdown."
     else:

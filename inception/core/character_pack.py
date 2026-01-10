@@ -25,6 +25,7 @@ from inception.core.helpers import (
 from inception.core.tradeplan_pack import compute_trade_plan_pack_v1
 from inception.core.decision_pack import compute_decision_pack_v1
 from inception.core.position_manager_pack import compute_position_manager_pack_v1
+from inception.core.status_pack import compute_status_pack_v1
 
 
 def atr_wilder(df: pd.DataFrame, period: int = 14) -> pd.Series:
@@ -137,6 +138,120 @@ def _pretty_level_label(level_type: str, side: str = "overhead") -> str:
         "TRENDLINE": "Trendline",
     }
     return mapping.get(t, t)
+
+
+# ============================================================
+# Style Hybrid Scoring (Tier-1 StyleAxis) — v15.1
+# - Hard Filters (ILLIQ/GAP) keep NO tilt/runner-up for Style.
+# - For "clean" stocks, compute Trend/Momentum/Range scores and expose tilt when truly near-boundary.
+# ============================================================
+
+_STYLE_HYBRID_CFG_V1: Dict[str, float] = {
+    "PRIMARY_MIN_SCORE": 6.0,     # below this => StyleAxis = "Hybrid"
+    "RUNNERUP_MIN_SCORE": 6.0,    # below this => no tilt
+    "NEAR_ABS_MAX": 0.80,         # absolute score gap max
+    "NEAR_REL_PCT": 0.10,         # relative gap max (10% of score1)
+}
+
+
+def _style_tilt_strength(gap: float, near_thr: float) -> str:
+    try:
+        g = float(gap)
+        if not np.isfinite(g):
+            return "-"
+        if g <= 0.35:
+            return "Strong"
+        if g <= 0.65:
+            return "Medium"
+        if g <= float(near_thr):
+            return "Weak"
+        return "-"
+    except Exception:
+        return "-"
+
+
+def _compute_style_hybrid_v1(
+    *,
+    trend_integrity: float,
+    breakout_quality: float,
+    momentum_adj: float,
+    meanrev_prop: float,
+    whipsaw: bool,
+    autocorr1: Optional[float],
+    enabled: bool = True,
+    disabled_reason: str = "",
+) -> Tuple[str, Dict[str, Any]]:
+    """Return (StyleAxis, StyleHybridPack).
+
+    StyleAxis is one of {"Trend","Momentum","Range","Hybrid"}.
+
+    Notes:
+    - Deterministic; long-run oriented.
+    - Tilt is only exposed when near-boundary AND runner-up is strong enough.
+    """
+    ti = float(trend_integrity) if np.isfinite(trend_integrity) else 5.0
+    bq = float(breakout_quality) if np.isfinite(breakout_quality) else 5.0
+    ma = float(momentum_adj) if np.isfinite(momentum_adj) else 5.0
+    mr = float(meanrev_prop) if np.isfinite(meanrev_prop) else 5.0
+
+    ac1 = float(autocorr1) if (autocorr1 is not None and np.isfinite(autocorr1)) else np.nan
+
+    # Base scores (0–10)
+    s_trend = _clip(ti, 0, 10)
+    s_momo = _clip(0.70 * bq + 0.30 * ma, 0, 10)
+    s_range = _clip(mr, 0, 10)
+
+    # Gentle nudges (keep simple, preserve known structure signals)
+    if np.isfinite(ac1) and ac1 >= -0.02:
+        s_trend = _clip(s_trend + 0.35, 0, 10)
+    if mr <= 5.7:
+        s_trend = _clip(s_trend + 0.25, 0, 10)
+
+    if mr <= 6.5:
+        s_momo = _clip(s_momo + 0.20, 0, 10)
+
+    if bool(whipsaw) or (np.isfinite(ac1) and ac1 <= -0.05):
+        s_range = _clip(s_range + 0.35, 0, 10)
+
+    scores = {"Trend": float(s_trend), "Momentum": float(s_momo), "Range": float(s_range)}
+    ranked = sorted(scores.items(), key=lambda kv: float(kv[1]), reverse=True)
+
+    (k1, v1) = ranked[0]
+    (k2, v2) = ranked[1]
+    (k3, v3) = ranked[2]
+
+    primary_min = float(_STYLE_HYBRID_CFG_V1["PRIMARY_MIN_SCORE"])
+    runner_min = float(_STYLE_HYBRID_CFG_V1["RUNNERUP_MIN_SCORE"])
+    near_thr = float(max(_STYLE_HYBRID_CFG_V1["NEAR_ABS_MAX"], _STYLE_HYBRID_CFG_V1["NEAR_REL_PCT"] * v1))
+    gap12 = float(v1 - v2)
+
+    # Primary style
+    if v1 < primary_min:
+        style_axis = "Hybrid"
+    else:
+        style_axis = str(k1)
+
+    # Tilt only when enabled + primary is a concrete style
+    near = bool((enabled is True) and (style_axis in ("Trend", "Momentum", "Range")) and (v2 >= runner_min) and (gap12 <= near_thr))
+    tilt_to = str(k2) if near else "-"
+    tilt_strength = _style_tilt_strength(gap12, near_thr) if near else "-"
+
+    style_pack: Dict[str, Any] = {
+        "Version": "StyleHybrid_v1.0",
+        "Enabled": bool(enabled),
+        "DisabledReason": str(disabled_reason or "") if not enabled else "",
+        "Scores": scores,
+        "Primary": str(style_axis),
+        "TiltTo": tilt_to,
+        "TiltStrength": tilt_strength,
+        "NearBoundary": bool(near),
+        # Diagnostics (keep; UI can ignore)
+        "ScoreGap12": float(gap12),
+        "NearThreshold": float(near_thr),
+        "RunnerUp2": {"Style": str(k2), "Score": float(v2)},
+        "RunnerUp3": {"Style": str(k3), "Score": float(v3)},
+    }
+    return str(style_axis), style_pack
 
 
 def compute_character_pack_v1(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -> Dict[str, Any]:
@@ -1150,6 +1265,44 @@ def compute_character_pack_v1(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -
     if (vol_r <= 3.8 and dd_r <= 5.2 and tail_r <= 6.0 and liq_tradability >= 6.0):
         modifiers.append("DEF")
 
+    # --- v15.1: StyleHybrid v1 (soft scoring + near-boundary tilt; style-level only) ---
+    style_hybrid_pack: Dict[str, Any] = {"Version": "StyleHybrid_v1.0", "Enabled": False, "Scores": {}, "Primary": str(style_axis), "TiltTo": "-", "TiltStrength": "-", "NearBoundary": False}
+    hard_style_disabled = bool(("ILLIQ" in modifiers) or ("GAP" in modifiers))
+    if not hard_style_disabled:
+        try:
+            style_axis, style_hybrid_pack = _compute_style_hybrid_v1(
+                trend_integrity=float(trend_integrity),
+                breakout_quality=float(breakout_quality),
+                momentum_adj=float(momentum_adj),
+                meanrev_prop=float(meanrev_prop),
+                whipsaw=bool(whipsaw),
+                autocorr1=float(autocorr1) if (autocorr1 is not None and np.isfinite(autocorr1)) else None,
+                enabled=True,
+            )
+        except Exception:
+            # keep legacy style_axis; keep pack minimal
+            style_hybrid_pack = {"Version": "StyleHybrid_v1.0", "Enabled": False, "Scores": {}, "Primary": str(style_axis), "TiltTo": "-", "TiltStrength": "-", "NearBoundary": False}
+    else:
+        # Hard Filters: keep NO tilt/runner-up for style (still compute scores for diagnostics)
+        try:
+            _sa, style_hybrid_pack = _compute_style_hybrid_v1(
+                trend_integrity=float(trend_integrity),
+                breakout_quality=float(breakout_quality),
+                momentum_adj=float(momentum_adj),
+                meanrev_prop=float(meanrev_prop),
+                whipsaw=bool(whipsaw),
+                autocorr1=float(autocorr1) if (autocorr1 is not None and np.isfinite(autocorr1)) else None,
+                enabled=False,
+                disabled_reason="HardFilter",
+            )
+            style_hybrid_pack["Primary"] = str(style_axis)  # preserve legacy label
+            style_hybrid_pack["TiltTo"] = "-"
+            style_hybrid_pack["TiltStrength"] = "-"
+            style_hybrid_pack["NearBoundary"] = False
+        except Exception:
+            style_hybrid_pack = {"Version": "StyleHybrid_v1.0", "Enabled": False, "Scores": {}, "Primary": str(style_axis), "TiltTo": "-", "TiltStrength": "-", "NearBoundary": False}
+
+
     # Priority: execution risk first
     if "ILLIQ" in modifiers:
         cclass = "Illiquid / Noisy"
@@ -1197,6 +1350,7 @@ def compute_character_pack_v1(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -
         primary_mod = _pick_primary_modifier(modifiers if isinstance(modifiers, list) else [])
         stock_traits["DNA"]["Tier1"] = {
             "StyleAxis": str(style_axis),
+            "StyleHybrid": style_hybrid_pack,
             "RiskRegime": str(risk_regime),
             "RiskScore": float(risk_score) if np.isfinite(risk_score) else np.nan,
             # DNA confidence is a stability/coverage proxy (0–100) — strictly long-run inputs only
@@ -1205,6 +1359,7 @@ def compute_character_pack_v1(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -
             "Modifiers": list(modifiers) if isinstance(modifiers, list) else [],
             "PrimaryModifier": str(primary_mod),
         }
+        stock_traits["DNA"]["StyleHybrid"] = style_hybrid_pack
         stock_traits["DNA"]["Params"] = {
             # Group 1: Trend Structure (higher = better)
             "TrendIntegrity": float(trend_integrity),
@@ -1281,6 +1436,109 @@ def compute_character_pack_v1(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -
         atr_f = None
     atr_pos = (atr_f is not None and atr_f > 0)
 
+    # ------------------------------------------------------------
+    # v15.2: Linear Pipeline Packs (DNA -> Status -> TradePlan -> Decision)
+    # - DNA pack defines Rules of Engagement (plan priors) but does NOT emit actions.
+    # - Status pack contextualizes technicals through DNA lens, but does NOT emit actions.
+    # ------------------------------------------------------------
+    def _plan_prior_map_v1(_class: str, _style: str, _mods: List[str]) -> Dict[str, Any]:
+        """Return Strategy_Probability_Map / PlanPriorMap (Python-only, deterministic).
+
+        PlanTypes: ["PULLBACK", "BREAKOUT", "MEAN_REV", "RECLAIM", "DEFENSIVE"].
+        Output fields are intentionally lightweight so TradePlanBuilder can score.
+        """
+        # Base tiers -> numeric scores (0-10)
+        tier_score = {
+            "HIGH": 8.5,
+            "MED": 6.8,
+            "LOW": 4.5,
+            "VLOW": 3.3,
+        }
+
+        hard_ill = "ILLIQ" in (_mods or [])
+        hard_gap = "GAP" in (_mods or [])
+
+        cls = (_class or "").lower()
+        sty = (_style or "").strip().title()
+
+        # Default: balanced
+        pri = {
+            "PULLBACK": "MED",
+            "BREAKOUT": "MED",
+            "MEAN_REV": "MED",
+            "RECLAIM": "MED",
+            "DEFENSIVE": "MED",
+        }
+
+        if "illiquid" in cls or hard_ill:
+            pri.update({"DEFENSIVE": "HIGH", "BREAKOUT": "VLOW", "PULLBACK": "LOW", "MEAN_REV": "LOW", "RECLAIM": "LOW"})
+        elif "gap" in cls or hard_gap:
+            pri.update({"DEFENSIVE": "HIGH", "BREAKOUT": "LOW", "PULLBACK": "LOW", "MEAN_REV": "LOW", "RECLAIM": "MED"})
+        elif "momentum" in cls or sty == "Momentum":
+            pri.update({"BREAKOUT": "HIGH", "PULLBACK": "MED", "RECLAIM": "MED", "MEAN_REV": "LOW", "DEFENSIVE": "LOW"})
+        elif "range" in cls or sty == "Range":
+            pri.update({"MEAN_REV": "HIGH", "PULLBACK": "MED", "RECLAIM": "MED", "BREAKOUT": "LOW", "DEFENSIVE": "MED"})
+        elif "trend" in cls or sty == "Trend":
+            pri.update({"PULLBACK": "HIGH", "BREAKOUT": "MED", "RECLAIM": "MED", "MEAN_REV": "LOW", "DEFENSIVE": "LOW"})
+        else:
+            # Hybrid / mixed
+            pri.update({"PULLBACK": "MED", "BREAKOUT": "MED", "MEAN_REV": "MED", "RECLAIM": "MED", "DEFENSIVE": "MED"})
+
+        # Risk modifiers: be more defensive under high volatility or chop
+        if "HIVOL" in (_mods or []) or "CHOPVOL" in (_mods or []):
+            # downgrade breakout and upgrade defensive slightly
+            if pri.get("BREAKOUT") == "HIGH":
+                pri["BREAKOUT"] = "MED"
+            if pri.get("DEFENSIVE") in ("LOW", "MED"):
+                pri["DEFENSIVE"] = "MED"
+
+        out: Dict[str, Any] = {}
+        for k in ["PULLBACK", "BREAKOUT", "MEAN_REV", "RECLAIM", "DEFENSIVE"]:
+            t = pri.get(k, "MED")
+            score = float(tier_score.get(t, 6.8))
+            out[k] = {
+                "tier": t,
+                "fit_score": score,
+            }
+        return {
+            "schema": "PlanPriorMap.v1",
+            "plan_types": ["PULLBACK", "BREAKOUT", "MEAN_REV", "RECLAIM", "DEFENSIVE"],
+            "priors": out,
+            "notes": "Priors are class/style-based; hard gates (ILLIQ/GAP) override to DEFENSIVE bias.",
+        }
+
+    # Build DNAPack (Rules of Engagement)
+    dna_pack: Dict[str, Any] = {
+        "schema": "DNAPack.v1",
+        "class_primary": str(cclass),
+        "style_primary": str(style_hybrid_pack.get("Primary") or style_axis),
+        "style_tilt_to": str(style_hybrid_pack.get("TiltTo") or "-"),
+        "style_tilt_strength": str(style_hybrid_pack.get("TiltStrength") or "-"),
+        "near_boundary": bool(style_hybrid_pack.get("NearBoundary")) if isinstance(style_hybrid_pack, dict) else False,
+        "risk_regime": str(risk_regime),
+        "hard_gates": {
+            "illiquid": bool("ILLIQ" in (modifiers or [])),
+            "gap_prone": bool("GAP" in (modifiers or [])),
+        },
+        "modifiers": list(modifiers) if isinstance(modifiers, list) else [],
+    }
+    try:
+        dna_pack["plan_prior_map"] = _plan_prior_map_v1(dna_pack.get("class_primary"), dna_pack.get("style_primary"), dna_pack.get("modifiers"))
+    except Exception:
+        dna_pack["plan_prior_map"] = {"schema": "PlanPriorMap.v1", "plan_types": ["PULLBACK", "BREAKOUT", "MEAN_REV", "RECLAIM", "DEFENSIVE"], "priors": {}, "notes": "-"}
+
+    # Compute StatusPack (contextualized technicals) — NO actions
+    status_pack: Dict[str, Any] = {}
+    try:
+        status_pack = compute_status_pack_v1(analysis_pack, dna_pack) or {}
+    except Exception:
+        status_pack = {"schema": "StatusPack.v1", "class_context": {}, "technicals": {}}
+
+    # Attach to AnalysisPack for downstream consumption (safe mutation)
+    if isinstance(analysis_pack, dict):
+        analysis_pack["DNAPack"] = dna_pack
+        analysis_pack["StatusPack"] = status_pack
+
     
     # --- TradePlanPack v1 (scenario-driven + gate-driven blueprint) ---
     trade_plan_pack: Dict[str, Any] = {}
@@ -1290,6 +1548,8 @@ def compute_character_pack_v1(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -
             "CombatStats": combat_stats,
             "Flags": flags,
             "StructureQuality": struct_q,
+            "DNAPack": dna_pack,
+            "StatusPack": status_pack,
         }) or {}
         # Attach to AnalysisPack for single-source-of-truth rendering (safe mutation)
         if isinstance(analysis_pack, dict):
@@ -1314,6 +1574,7 @@ def compute_character_pack_v1(df: pd.DataFrame, analysis_pack: Dict[str, Any]) -
 
     pack = {
         "CharacterClass": cclass,
+        "StyleHybrid": stock_traits.get("DNA", {}).get("StyleHybrid", {}),
         "CoreStats": core_stats,
         "AdjustedStats": adjusted_stats,
         "StockTraits": stock_traits,
