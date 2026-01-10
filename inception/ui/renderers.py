@@ -37,16 +37,16 @@ except Exception:  # pragma: no cover
 from inception.core.dashboard_pack import compute_dashboard_summary_pack_v1
 
 def _val_or_na(v: Any) -> str:
-    """UI-friendly stringify with N/A fallback."""
+    """UI-friendly stringify with dash placeholder (system-wide)."""
     try:
         if v is None:
-            return "N/A"
+            return "-"
         if isinstance(v, float) and pd.isna(v):
-            return "N/A"
+            return "-"
         s = str(v).strip()
-        return s if s else "N/A"
+        return s if s else "-"
     except Exception:
-        return "N/A"
+        return "-"
 
 
 # --------------------------
@@ -998,11 +998,11 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
 
     def _fmt_num(x: Any, nd: int = 1) -> str:
         v = _sf(x)
-        return "N/A" if pd.isna(v) else f"{v:.{nd}f}"
+        return "-" if pd.isna(v) else f"{v:.{nd}f}"
 
     def _fmt_px(x: Any) -> str:
         v = _sf(x)
-        return "N/A" if pd.isna(v) else f"{v:.2f}"
+        return "-" if pd.isna(v) else f"{v:.2f}"
 
     def _fmt_pct(x: Any) -> str:
         v = _sf(x)
@@ -1344,7 +1344,7 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
         s = (s or "").strip().upper()
         if s in ("PASS", "WAIT", "FAIL"):
             return s
-        return "N/A"
+        return "-"
 
     st_break = _norm_st(st_break)
     st_vol = _norm_st(st_vol)
@@ -1562,6 +1562,84 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
 
     plan_block_html = "".join(plan_lines)
 
+    # If HOLDING is materially underwater, surface the DEFENSIVE hard stop + reclaim trigger in Scenario card.
+    # This prevents the UX confusion where 'Setup: DEFENSIVE' is shown but Entry/Stop lines still reflect BUY plans.
+    def_hs = np.nan
+    def_rc = np.nan
+    def_rz_lo = np.nan
+    def_rz_hi = np.nan
+    try:
+        tpp2 = ap.get("TradePlanPack") or cp.get("TradePlanPack") or {}
+        if isinstance(tpp2, dict) and _safe_text(tpp2.get("schema") or "").strip() == "TradePlanPack.v1":
+            pool = []
+            for k in ("plan_primary", "plan_alt"):
+                v = tpp2.get(k)
+                if isinstance(v, dict):
+                    pool.append(v)
+            for v in (tpp2.get("plans_all") or []):
+                if isinstance(v, dict):
+                    pool.append(v)
+            for p in pool:
+                if _safe_text(p.get("type") or "").strip().upper() == "DEFENSIVE":
+                    try:
+                        def_hs = float(p.get("defensive_hard_stop"))
+                    except Exception:
+                        def_hs = np.nan
+                    try:
+                        def_rc = float(p.get("defensive_reclaim"))
+                    except Exception:
+                        def_rc = np.nan
+                    try:
+                        _rz = p.get("defensive_reclaim_zone")
+                        if isinstance(_rz, dict):
+                            def_rz_lo = float(_rz.get("Low")) if _rz.get("Low") is not None else np.nan
+                            def_rz_hi = float(_rz.get("High")) if _rz.get("High") is not None else np.nan
+                    except Exception:
+                        pass
+                    break
+    except Exception:
+        pass
+
+    show_def_overlay = False
+    try:
+        show_def_overlay = (mode_for_plan == "HOLDING") and (pd.notna(pnl_f)) and (float(pnl_f) <= -15.0)
+    except Exception:
+        show_def_overlay = False
+
+    if show_def_overlay and (pd.isna(def_hs) and pd.notna(stop_sug)):
+        def_hs = stop_sug
+
+    if show_def_overlay:
+        setup_line = "DEFENSIVE"
+        hs_line = _fmt_px(def_hs)
+        # Prefer reclaim zone if available; fallback to single level
+        if pd.notna(def_rz_lo) and pd.notna(def_rz_hi):
+            rc_line = f"{def_rz_lo:.1f}–{def_rz_hi:.1f}"
+        else:
+            rc_line = _fmt_px(def_rc)
+        extra_items = []
+        if hs_line != "-":
+            extra_items.append(f"<li>Protect stop: {html.escape(hs_line)}</li>")
+        if rc_line != "-":
+            extra_items.append(f"<li>Reclaim trigger: {html.escape(rc_line)} (giữ lại & đồng pha volume/structure)</li>")
+        if action_for_plan == "TRIM" and pd.notna(trim_pct):
+            extra_items.append(f"<li>Trim guide: ~{int(round(float(trim_pct)*100))}% vị thế</li>")
+
+        scenario_ul = """\
+      <ul class=\"es-bul\">\
+        <li>Setup: {setup}</li>\
+        {extra}\
+      </ul>\
+""".format(setup=html.escape(setup_line), extra="\n        ".join(extra_items) if extra_items else "")
+    else:
+        scenario_ul = f"""\
+      <ul class=\"es-bul\">\
+        <li>Setup: {html.escape(setup_name)}</li>\
+        <li>Entry/Stop: {html.escape(_fmt_px(entry))} / {html.escape(stop_str)}</li>\
+        <li>Target: {html.escape(tp_str)} (RR {html.escape(_fmt_num(rr,1))})</li>\
+      </ul>\
+"""
+
     panel3 = f"""
     <div class="es-panel">
       <div class="es-pt">3) SCENARIO</div>
@@ -1571,11 +1649,7 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
       {plan_block_html}
 
       <div class="es-note" style="margin-top:10px;"><b>Kịch bản chính:</b> {html.escape(scenario_name)}</div>
-      <ul class="es-bul">
-        <li>Setup: {html.escape(setup_name)}</li>
-        <li>Entry/Stop: {html.escape(_fmt_px(entry))} / {html.escape(stop_str)}</li>
-        <li>Target: {html.escape(tp_str)} (RR {html.escape(_fmt_num(rr,1))})</li>
-      </ul>
+      {scenario_ul}
       <div class="es-note" style="margin-top:6px;opacity:0.9;"><b>Key blockers:</b> {html.escape(blockers_line)}</div>
     </div>
     """
@@ -1605,6 +1679,135 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     """
 
     st.markdown(card_html, unsafe_allow_html=True)
+
+
+    # ============================================================
+    # Communication Layer — "3 câu hỏi vàng" (Vietnamese, client-friendly)
+    # Objective: turn dashboard signals into a short, actionable narrative.
+    # NOTE: UI-only (no scoring logic). Uses existing packs only.
+    # ============================================================
+    try:
+        def _vn_gate_label(g: str) -> str:
+            gg = (g or "").strip().upper()
+            if gg in ("WATCH",):
+                return "Trạng thái cần quan sát thêm"
+            if gg in ("PASS", "OK"):
+                return "Trạng thái thuận lợi"
+            if gg in ("LOCK", "BLOCK"):
+                return "Trạng thái bị khóa điều kiện"
+            return gg or "-"
+
+        def _vn_action_label(a: str) -> str:
+            aa = (a or "").strip().upper()
+            return {
+                "BUY": "Mua mới",
+                "ADD": "Gia tăng",
+                "HOLD": "Giữ",
+                "TRIM": "Giảm tỷ trọng",
+                "EXIT": "Thoát vị thế",
+                "AVOID": "Không tham gia",
+                "WAIT": "Quan sát thêm",
+                "N/A": "-",
+                "-": "-",
+            }.get(aa, aa)
+
+        def _vn_urgency_label(u: str) -> str:
+            uu = (u or "").strip().upper()
+            return {"HIGH": "ưu tiên cao", "MED": "ưu tiên trung bình", "LOW": "ưu tiên thấp"}.get(uu, "")
+
+        def _bucket10(v: Any) -> str:
+            x = _sf(v)
+            if pd.isna(x):
+                return "mid"
+            if x < 4.0:
+                return "low"
+            if x < 6.5:
+                return "mid"
+            if x < 8.0:
+                return "good"
+            return "high"
+
+        # 1) Tính cách (DNA)
+        dna_sentence = ""
+        try:
+            if dash_lines:
+                s0 = _safe_text(dash_lines[0]).strip()
+                s0 = re.sub(r"^Đặc\s*tính\s*:\s*", "", s0, flags=re.IGNORECASE)
+                dna_sentence = s0
+        except Exception:
+            dna_sentence = ""
+        if not dna_sentence:
+            dna_sentence = f"Nhóm DNA hiện tại: {class_name}."
+
+        try:
+            if red_notes and red_notes[0] != "None":
+                dna_sentence = f"{dna_sentence} Lưu ý rủi ro nổi bật: {red_notes[0]}."
+        except Exception:
+            pass
+
+        # 2) Tình hình (Current Status)
+        ms_b = _bucket10(master_total_d)
+        cs_b = _bucket10(conviction_d)
+
+        ms_map = {
+            "low": "Cơ hội hiện tại kém hấp dẫn; ưu tiên phòng thủ hoặc đứng ngoài.",
+            "mid": "Cơ hội ở mức trung tính; cần chờ điểm vào tốt hơn hoặc thêm xác nhận.",
+            "good": "Cơ hội khá hấp dẫn nếu trade plan rõ và rủi ro được kiểm soát.",
+            "high": "Cơ hội rất hấp dẫn; thuộc nhóm nên ưu tiên theo dõi/triển khai có kỷ luật.",
+        }
+        cs_map = {
+            "low": "Độ chắc chắn thấp (tín hiệu còn nhiễu); tránh hành động lớn.",
+            "mid": "Độ chắc chắn trung tính; nên quan sát và chỉ hành động khi có xác nhận.",
+            "good": "Độ chắc chắn khá tốt; có thể triển khai nhưng vẫn cần kỷ luật.",
+            "high": "Độ chắc chắn cao; phù hợp triển khai theo kế hoạch, tập trung quản trị rủi ro.",
+        }
+
+        status_sentence = (
+            f"Điểm tổng hợp {_fmt_num(master_total_d,1)}/10 cho thấy {ms_map.get(ms_b, 'cơ hội ở mức trung tính')} "
+            f"Điểm tin cậy {_fmt_num(conviction_d,1)}/10 phản ánh {cs_map.get(cs_b, 'độ chắc chắn ở mức trung tính')}"
+        )
+        if insight_line_es:
+            status_sentence = f"{status_sentence} {insight_line_es}"
+
+        # 3) Hành động (Decision/Trade plan)
+        act_vn = _vn_action_label(action_d)
+        urg_vn = _vn_urgency_label(urg_d)
+        gate_vn = _vn_gate_label(gate_status)
+
+        action_bits: List[str] = []
+        action_bits.append(f"Hệ thống đang ở {gate_vn.lower()}.")
+        if act_vn != "-":
+            action_bits.append(f"Khuyến nghị hiện tại: {act_vn}{(' (' + urg_vn + ')') if urg_vn else ''}.")
+
+        if mode_d == "HOLDING":
+            if show_def_overlay:
+                hs = _fmt_px(def_hs)
+                if pd.notna(def_rz_lo) and pd.notna(def_rz_hi):
+                    rz_1dp = f"{def_rz_lo:.1f}–{def_rz_hi:.1f}"
+                else:
+                    rz_1dp = "-" if pd.isna(def_rc) else f"{float(def_rc):.1f}"
+                if hs != "-":
+                    action_bits.append(f"Stop bảo vệ: {hs}.")
+                if rz_1dp != "-":
+                    action_bits.append(f"Chỉ cân nhắc mua lại/gia tăng khi giá lấy lại vùng {rz_1dp} và giữ vững.")
+            else:
+                if pd.notna(stop_sug):
+                    action_bits.append(f"Stop bảo vệ tham chiếu: {_fmt_px(stop_sug)}.")
+        else:
+            if gate_line:
+                action_bits.append(gate_line)
+
+        action_sentence = " ".join([x for x in action_bits if _safe_text(x).strip()])
+
+        with st.expander("Diễn giải nhanh (3 câu hỏi vàng)", expanded=False):
+            st.markdown(f"**1) Tính cách (Stock DNA):** {dna_sentence}")
+            st.markdown(f"**2) Tình hình (Current Status):** {status_sentence}")
+            st.markdown(f"**3) Định hướng (Hành động):** {action_sentence}")
+
+    except Exception:
+        # Never block the dashboard if explainer fails.
+        pass
+
 
     # Optional diagnostics block (Step 9)
     try:
@@ -1690,7 +1893,7 @@ def render_market_state(analysis_pack: Dict[str, Any]) -> None:
     def _fmt_change(x: Any) -> str:
         v = _safe_float(x, default=np.nan)
         if pd.isna(v):
-            return "N/A"
+            return "-"
         return f"{v:+.2f}%"
 
     st.markdown('<div class="gc-sec"><div class="gc-sec-t">MARKET STATE (CURRENT REGIME)</div>', unsafe_allow_html=True)
@@ -1715,7 +1918,7 @@ def render_market_state(analysis_pack: Dict[str, Any]) -> None:
     def _fmt_change(x: Any) -> str:
         v = _safe_float(x, default=np.nan)
         if pd.isna(v):
-            return "N/A"
+            return "-"
         return f"{v:+.2f}%"
 
     st.markdown('<div class="gc-sec"><div class="gc-sec-t">MARKET STATE (CURRENT REGIME)</div>', unsafe_allow_html=True)
@@ -1762,28 +1965,41 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], character_pack:
 
         def _fmt_px(v: Any) -> str:
             x = _sf(v)
-            return "N/A" if pd.isna(x) else f"{x:.2f}"
+            return "-" if pd.isna(x) else f"{x:.2f}"
 
         def _fmt_rr(v: Any) -> str:
             x = _sf(v)
-            return "N/A" if pd.isna(x) else f"{x:.2f}"
+            return "-" if pd.isna(x) else f"{x:.2f}"
 
         def _fmt_rrm(v: Any) -> str:
             x = _sf(v)
-            return "N/A" if pd.isna(x) else f"{x:.1f}"
+            return "-" if pd.isna(x) else f"{x:.1f}"
 
         def _fmt_zone(z: Any) -> str:
             if not isinstance(z, dict):
-                return "N/A"
+                return "-"
             lo = _sf(z.get("Low"))
             hi = _sf(z.get("High"))
             if pd.isna(lo) or pd.isna(hi):
-                return "N/A"
+                return "-"
             return f"{lo:.2f} – {hi:.2f}"
+
+        def _fmt_px_1dp(v: Any) -> str:
+            x = _sf(v)
+            return "-" if pd.isna(x) else f"{x:.1f}"
+
+        def _fmt_zone_1dp(z: Any) -> str:
+            if not isinstance(z, dict):
+                return "-"
+            lo = _sf(z.get("Low"))
+            hi = _sf(z.get("High"))
+            if pd.isna(lo) or pd.isna(hi):
+                return "-"
+            return f"{lo:.1f}–{hi:.1f}"
 
         def _fmt_gates(g: Any) -> str:
             if not isinstance(g, dict):
-                return "N/A"
+                return "-"
             # Step 11: include plan completeness gate to prevent "PASS all triggers" masking missing Stop/EntryZone
             keys = ["plan", "trigger", "volume", "rr", "exec", "structure"]
             parts = []
@@ -1799,6 +2015,18 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], character_pack:
             st.markdown(f"#### {title} — {ptype} | {pstate}")
 
             st.caption(_fmt_gates(p.get("gates")))
+
+            # Explain blockers (top 3) — standardized Fail Reasons taxonomy (v15.5)
+            _fr = p.get("fail_reasons") if isinstance(p, dict) else None
+            if isinstance(_fr, list) and _fr and pstate not in ("ACTIVE",):
+                # compact bullets; each item already contains UI-ready labels
+                st.markdown("**Blockers / Why not ACTIVE:**")
+                for r in _fr[:3]:
+                    if not isinstance(r, dict):
+                        continue
+                    short = _safe_text(r.get("ui_short") or "").strip() or "-"
+                    label = _safe_text(r.get("label") or "").strip() or "-"
+                    st.markdown(f"- **{short}**: {label}")
 
             # Step 11: surface PlanCompleteness explanation in the Trade Plan section itself
             _pc = p.get("plan_completeness") or {}
@@ -1817,6 +2045,14 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], character_pack:
 
             st.markdown(f"- Entry zone: **{zone}**")
             st.markdown(f"- Stop: **{stop}** | TP1: **{tp1}** | TP2: **{tp2}** | RR: **{rr}** (min {rrm})")
+
+            # Defensive overlay: surface hard stop / reclaim trigger for underwater holding scenarios
+            if ptype.upper() == "DEFENSIVE":
+                hs = _fmt_px(p.get("defensive_hard_stop"))
+                rz = p.get("defensive_reclaim_zone")
+                rc = _fmt_zone_1dp(rz) if isinstance(rz, dict) else _fmt_px_1dp(p.get("defensive_reclaim"))
+                if hs != "-" or rc != "-":
+                    st.markdown(f"- Defensive overlay: Hard stop **{hs}** | Reclaim trigger **{rc}**")
 
             note = _safe_text(p.get("notes_short") or "").strip()
             if note:
@@ -1840,6 +2076,28 @@ def render_trade_plan_conditional(analysis_pack: Dict[str, Any], character_pack:
 
         _render_plan("Primary", tpp.get("plan_primary"))
         _render_plan("Alternative", tpp.get("plan_alt"))
+
+        # HOLDING safety: if materially underwater, always surface a DEFENSIVE de-risk plan.
+        # Prevents the UX blind spot where only BUY-oriented plans are shown while PnL is deeply negative.
+        try:
+            pos = ap.get("PositionStatePack") if isinstance(ap, dict) else {}
+            pos = pos if isinstance(pos, dict) else {}
+            mode_u = _safe_text(pos.get("mode") or "").strip().upper()
+            try:
+                pnl_v = float(pos.get("pnl_pct"))
+            except Exception:
+                pnl_v = None
+            need_def = (mode_u == "HOLDING") and (pnl_v is not None) and (pnl_v <= -15.0)
+            if need_def:
+                pt = _safe_text(((tpp.get("plan_primary") or {}) if isinstance(tpp.get("plan_primary"), dict) else {}).get("type") or "").strip().upper()
+                at = _safe_text(((tpp.get("plan_alt") or {}) if isinstance(tpp.get("plan_alt"), dict) else {}).get("type") or "").strip().upper()
+                if pt != "DEFENSIVE" and at != "DEFENSIVE":
+                    for c in (tpp.get("plans_all") or []):
+                        if isinstance(c, dict) and _safe_text(c.get("type") or "").strip().upper() == "DEFENSIVE":
+                            _render_plan("Defensive", c)
+                            break
+        except Exception:
+            pass
 
         if trade_text:
             with st.expander("Narrative (optional)"):
