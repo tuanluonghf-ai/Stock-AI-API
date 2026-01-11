@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Tuple
 import math
 import re
 import html
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -48,10 +49,429 @@ def _val_or_na(v: Any) -> str:
     except Exception:
         return "-"
 
+# --------------------------
+# Communication Layer (Baseline Spec)
+# --------------------------
+
+def build_comm_paragraph_v1(ctx: Dict[str, Any]) -> str:
+    """Communication Layer (VIP Advisory tone).
+
+    Requirements (Baseline + VIP Tone Guide):
+      - No brand slogans; no “INCEPTION đang đánh giá…”, no “quyết định cuối cùng…”
+      - Advisory flow (3-step): Context → Assessment → Action
+      - Soft agency shift (A/B) in natural prose (no “Cách 1/Cách 2…” labels)
+      - Exactly 1× pre-mortem line, 1× uncertainty line
+      - Empathy ONLY for HOLDING underwater / TRIM / EXIT
+      - Anti-repeat via stable rotate/hash by (ticker + situation)
+    """
+    ticker = str(ctx.get("ticker") or "").strip().upper() or "—"
+
+    def _is_nan(x: Any) -> bool:
+        try:
+            return x is None or (isinstance(x, float) and math.isnan(x))
+        except Exception:
+            return False
+
+    def _sf(x: Any, default: float = float("nan")) -> float:
+        try:
+            if x is None:
+                return default
+            if isinstance(x, str) and not x.strip():
+                return default
+            v = float(x)
+            return v
+        except Exception:
+            return default
+
+    def _fmt_score(v: Any) -> str:
+        f = _sf(v)
+        if _is_nan(f):
+            return "-"
+        # one decimal is enough for advisory
+        return f"{f:.1f}".rstrip("0").rstrip(".")
+
+    def _fmt_px2(v: Any) -> str:
+        try:
+            f = _sf(v)
+            if _is_nan(f):
+                return "-"
+            return f"{f:.2f}"
+        except Exception:
+            return "-"
+
+    def _fmt_zone_1(low: Any, high: Any, fallback: Any) -> str:
+        # Prefer "18.6–19.0" style (1 decimal)
+        def _one(x: Any) -> str:
+            f = _sf(x)
+            if _is_nan(f):
+                return ""
+            s = f"{f:.1f}"
+            return s.rstrip("0").rstrip(".")
+        lo = _one(low)
+        hi = _one(high)
+        if lo and hi:
+            return f"{lo}–{hi}"
+        fb = str(fallback or "").strip()
+        return fb if fb else "-"
+
+    def _stable_pick(group: str, options: List[str]) -> str:
+        if not options:
+            return ""
+        key = f"{ticker}|{situation}|{group}"
+        h = hashlib.md5(key.encode("utf-8")).hexdigest()
+        idx = int(h, 16) % len(options)
+        return options[idx]
+
+    def _dna_phrase(raw: str) -> str:
+        s = (raw or "").strip()
+        if not s:
+            return "trạng thái vận động riêng"
+        mapping = [
+            (["event", "gap", "event-prone", "gap-prone"], [
+                "nhạy cảm với thông tin, rủi ro biến động giá đột ngột (gap)",
+                "biến động theo tin tức khá mạnh; cần quản trị gap risk",
+                "dễ rung lắc theo thông tin; ưu tiên kỷ luật tỷ trọng và điểm rút",
+            ]),
+            (["aggressive trend", "momentum", "aggressive"], [
+                "động lượng tăng trưởng mạnh, dòng tiền tham gia quyết liệt",
+                "xu hướng bứt phá rõ, nhịp kéo nhanh",
+                "trend mạnh nhưng biến động cao; nhịp rũ có thể sâu",
+            ]),
+            (["smooth trend"], [
+                "xu hướng tăng bền vững, cấu trúc giá chặt chẽ",
+                "vận động ổn định theo xu hướng, phù hợp nắm giữ có kỷ luật",
+                "cấu trúc tăng được duy trì, ít nhiễu hơn mặt bằng chung",
+            ]),
+            (["range"], [
+                "tích lũy trong biên; phù hợp chiến lược giao dịch theo vùng",
+                "biên dao động rõ ràng; ưu tiên mua gần hỗ trợ và bán gần kháng cự",
+                "chưa thoát biên; kiên nhẫn chờ phiên xác nhận phá vỡ",
+            ]),
+            (["defensive"], [
+                "thiên hướng phòng thủ; ưu tiên bảo toàn vốn",
+                "độ nhạy thấp hơn thị trường; phù hợp chiến lược thận trọng",
+                "vận động theo nhịp phòng thủ; hạn chế đẩy rủi ro",
+            ]),
+            (["illiquid"], [
+                "thanh khoản mỏng; rủi ro trượt giá cao hơn bình thường",
+                "dòng tiền chưa dày; cần hạn chế quy mô và chọn điểm vào kỹ",
+                "khớp lệnh hạn chế; ưu tiên an toàn thay vì hiệu suất",
+            ]),
+        ]
+        sl = s.lower()
+        for keys, vals in mapping:
+            if any(k in sl for k in keys):
+                return vals[int(hashlib.md5(f"{ticker}|{situation}|dna".encode("utf-8")).hexdigest(), 16) % len(vals)]
+        return s.replace("_", " ").strip()
+
+    # --------------------------
+    # Inputs
+    # --------------------------
+    gate = str(ctx.get("gate_status") or "").strip().upper()
+    mode = str(ctx.get("mode") or "").strip().upper()
+    action = str(ctx.get("action") or "").strip().upper()
+
+    pnl = _sf(ctx.get("pnl_pct"))
+    ms = _sf(ctx.get("master_score"))
+    cv = _sf(ctx.get("conviction_score"))
+
+    class_name = str(ctx.get("class_name") or "").strip()
+    dash_lines = ctx.get("dash_lines") if isinstance(ctx.get("dash_lines"), list) else []
+
+    dna_raw = class_name
+    if not dna_raw:
+        for ln in dash_lines[:4]:
+            t = str(ln or "").strip()
+            if t.startswith("Đặc tính:"):
+                dna_raw = t.replace("Đặc tính:", "", 1).strip()
+                break
+
+    is_holding = (mode == "HOLDING") or bool(ctx.get("is_holding"))
+    underwater = bool(is_holding and (not _is_nan(pnl)) and (pnl <= -15.0))
+    trim_exit = bool(is_holding and (action in {"TRIM", "EXIT"}))
+
+    # --------------------------
+    # Situation routing (5 cases)
+    # --------------------------
+    if not is_holding:
+        situation = "FLAT_ACTIVE" if gate == "ACTIVE" else "FLAT_WATCH"
+    else:
+        if trim_exit:
+            situation = "HOLDING_TRIM_EXIT"
+        elif underwater:
+            situation = "HOLDING_UNDERWATER"
+        else:
+            situation = "HOLDING_GREEN"
+
+    dna_desc = _dna_phrase(dna_raw)
+
+    protect_stop = ctx.get("protect_stop")
+    stop_suggest = ctx.get("stop_suggest")
+    stop_px = protect_stop if protect_stop is not None else stop_suggest
+    stop_str = _fmt_px2(stop_px)
+
+    rz = _fmt_zone_1(ctx.get("reclaim_low"), ctx.get("reclaim_high"), ctx.get("reclaim"))
+    next_step = str(ctx.get("next_step") or "").strip()
+
+    # --------------------------
+    # Phrase banks (Private Banker tone)
+    # --------------------------
+    openers = [
+        "{TICKER} là kiểu cổ phiếu {DNA}. Trọng tâm là bám kịch bản và khóa rủi ro theo mốc.",
+        "Với {TICKER}, lợi thế thường xuất hiện khi đi đúng kế hoạch; đổi lại, biên dao động có thể mở rộng ở vùng nhạy cảm.",
+        "{TICKER} mang ‘tính cách’ {DNA}: thưởng cho người bám kỷ luật và phạt nhanh khi hành động theo cảm xúc.",
+    ]
+
+    assessments = [
+        "Điểm tổng hợp {MS}/10 và độ tin cậy {CV}/10 cho thấy tín hiệu đang ủng hộ; rủi ro chính vẫn là rung lắc ngắn hạn.",
+        "Hệ thống ghi nhận {MS}/10 với độ tin cậy {CV}/10 — có cơ sở để theo, nhưng không cần vội mở rộng rủi ro.",
+        "{MS}/10 và {CV}/10 là trạng thái tương đối tích cực; ưu tiên giữ rủi ro trong tầm kiểm soát thay vì đuổi theo giá.",
+    ]
+
+    addons_by_situation: Dict[str, List[str]] = {
+        "FLAT_ACTIVE": [
+            "Nếu giải ngân, ưu tiên theo đúng vùng/setup; tránh tâm lý sợ bỏ lỡ khiến vào sai điểm.",
+            "Giá vốn tốt quan trọng hơn tốc độ. Chúng ta chỉ tham gia khi có mốc xử lý rõ ràng.",
+            "Không cần mua đuổi. Chờ thị trường xác nhận lực rồi tham gia thường an toàn hơn.",
+        ],
+        "FLAT_WATCH": [
+            "Trạng thái này phù hợp quan sát: chờ tín hiệu xác nhận rõ ràng hơn để giảm rủi ro vào sai nhịp.",
+            "Chưa cần vội. Ưu tiên chờ điểm vào rủi ro thấp hoặc dấu hiệu đồng thuận rõ hơn.",
+            "Nếu chưa có vị thế, kiên nhẫn là một lợi thế — nhất là khi tín hiệu chưa “chín”.",
+        ],
+        "HOLDING_GREEN": [
+            "Đang có lợi thế. Trọng tâm là nâng dần ngưỡng bảo vệ để giữ thành quả.",
+            "Ưu tiên bảo vệ lợi nhuận: dời mốc theo cấu trúc/MA, tránh để một nhịp rung làm giảm hiệu quả.",
+            "Có thể tiếp tục nắm giữ theo xu hướng, nhưng cần mốc khóa lợi nhuận rõ ràng.",
+        ],
+        "HOLDING_UNDERWATER": [
+            "Ở vùng âm, ưu tiên của chúng ta là giảm biến động danh mục và giữ quyền chủ động.",
+            "Trạng thái này nên đặt quản trị rủi ro lên trước kỳ vọng hồi nhanh.",
+            "Không cần gỡ bằng mọi giá. Chúng ta ưu tiên “đứng vững”, rồi mới tính tối ưu.",
+        ],
+        "HOLDING_TRIM_EXIT": [
+            "Tín hiệu phòng thủ nổi trội; nên ưu tiên hạ rủi ro theo kỷ luật thay vì kỳ vọng thêm.",
+            "Giai đoạn này, làm đúng kế hoạch quan trọng hơn việc cố giữ vị thế vì cảm xúc.",
+            "Chiến lược phù hợp là phòng thủ: cơ cấu lại để tránh kéo dài drawdown.",
+        ],
+    }
+
+    ab_templates = [
+        "Nếu anh/chị ưu tiên an toàn và nhịp ổn định, {OPT_A}. Còn nếu chấp nhận dao động để tối ưu hóa lợi nhuận, {OPT_B}.",
+        "Nếu mục tiêu là kiểm soát rủi ro trước, {OPT_A}; ngược lại, khi thị trường xác nhận thuận lợi hơn, {OPT_B}.",
+        "Tuỳ khẩu vị rủi ro: {OPT_A}. Còn nếu muốn theo sát xu hướng với xác nhận rõ hơn, {OPT_B}.",
+    ]
+
+    premortems_with_stop = [
+        "Ngưỡng {STOP} là mốc bảo toàn; nếu giá đóng cửa dưới đây, khuyến nghị chuyển sang trạng thái phòng thủ để bảo toàn vốn.",
+        "Kịch bản hiện tại chỉ còn hiệu lực khi giữ được {STOP}; nếu mất mốc này, ưu tiên hạ rủi ro.",
+        "Nếu giá đóng cửa dưới {STOP}, chúng ta nên đổi kịch bản sang phòng thủ thay vì cố “chịu thêm” biến động.",
+    ]
+    premortems_generic = [
+        "Nếu cấu trúc bị phá vỡ rõ ràng, ưu tiên chuyển sang phòng thủ để tránh kéo dài rủi ro.",
+        "Khi hỗ trợ then chốt mất, nên đổi kịch bản sang phòng thủ thay vì cố gồng theo cảm xúc.",
+        "Plan chỉ hiệu lực khi cấu trúc còn giữ; nếu tín hiệu xấu đi, ưu tiên giảm rủi ro.",
+    ]
+
+    empathy_lines = [
+        "Với vị thế đang chịu áp lực, việc quan trọng nhất là giữ kỷ luật để bảo toàn vốn và tâm lý; chúng ta không cần vội gỡ ngay.",
+        "Giai đoạn khó chịu thường dễ kéo lệch quyết định. Ưu tiên hiện tại là giảm rủi ro để lấy lại quyền chủ động.",
+        "Tôi hiểu áp lực khi danh mục đi ngược kỳ vọng. Chúng ta xử lý theo mốc và theo kịch bản để tránh quyết định cảm tính.",
+    ]
+
+    uncertainty_lines = [
+        "Thị trường luôn có thể đi khác kịch bản tích cực. Đi theo hướng có xác suất cao hơn, nhưng vẫn khóa rủi ro bằng các mốc xử lý.",
+        "Không có gì chắc chắn tuyệt đối. Quan trọng là có kỷ luật và có mốc để hành động khi thị trường đổi nhịp.",
+        "Điều chúng ta kiểm soát được là kịch bản và mốc xử lý; còn biến động ngắn hạn luôn có thể bất ngờ.",
+    ]
+
+    # --------------------------
+    # Options by situation (A/B content)
+    # --------------------------
+    if situation == "FLAT_ACTIVE":
+        opt_a = "chúng ta có thể giải ngân thăm dò tỷ trọng nhỏ theo đúng vùng/setup, ưu tiên giá vốn đẹp và mốc dừng rõ"
+        opt_b = "đợi phiên xác nhận lực (follow-through) rồi mới nâng tỷ trọng để giảm rủi ro vào sớm"
+    elif situation == "FLAT_WATCH":
+        opt_a = "tạm thời kiên nhẫn quan sát và chờ tín hiệu xác nhận rõ ràng hơn"
+        opt_b = "nếu muốn tham gia, chỉ thăm dò rất nhỏ và tuân thủ dừng lỗ chặt"
+    elif situation == "HOLDING_GREEN":
+        opt_a = "duy trì vị thế và nâng dần ngưỡng bảo vệ theo đáy/MA để khóa lợi nhuận"
+        opt_b = "chốt một phần để hạ biến động danh mục; phần còn lại tiếp tục đi theo xu hướng"
+    elif situation == "HOLDING_UNDERWATER":
+        reclaim_part = (
+            f"chỉ cân nhắc chủ động hơn khi giá lấy lại vùng {rz} và tín hiệu xác nhận trở lại"
+            if rz and rz != "-" else
+            "chỉ cân nhắc chủ động hơn khi có tín hiệu reclaim rõ và cấu trúc/dòng tiền đồng thuận trở lại"
+        )
+        opt_a = "ưu tiên hạ tỷ trọng để giảm rủi ro và đưa danh mục về trạng thái kiểm soát"
+        opt_b = reclaim_part
+    else:  # HOLDING_TRIM_EXIT
+        opt_a = "chủ động hạ tỷ trọng/thoát theo kế hoạch trong các nhịp hồi kỹ thuật"
+        opt_b = "nếu rule còn cho phép, chờ thêm 1 phiên xác nhận rồi xử lý tiếp, nhưng không nới kỷ luật"
+
+    # --------------------------
+    # Compose output (Context → Assessment → Action → (Empathy) → Pre-mortem → Uncertainty)
+    # --------------------------
+    parts: List[str] = []
+
+    parts.append(_stable_pick("opener", openers).format(TICKER=ticker, DNA=dna_desc))
+
+    ms_s = _fmt_score(ms)
+    cv_s = _fmt_score(cv)
+    if ms_s != "-" and cv_s != "-":
+        parts.append(_stable_pick("assessment", assessments).format(MS=ms_s, CV=cv_s))
+    else:
+        # Fallback when scores are missing
+        parts.append(_stable_pick("assessment_fb", [
+            "Tín hiệu hiện tại có điểm sáng, nhưng vẫn nên giữ kỷ luật rủi ro và đi theo mốc.",
+            "Tổng quan đang ủng hộ, nhưng chiến lược vẫn là đi chậm và ưu tiên quản trị rủi ro.",
+            "Chưa cần vội. Ưu tiên xác nhận tín hiệu và kiểm soát điểm vào/điểm rút.",
+        ]))
+
+    # Situation-specific add-on
+    parts.append(_stable_pick("addon", addons_by_situation.get(situation, [])))
+
+    # Action line (soft A/B in prose)
+    parts.append(_stable_pick("ab", ab_templates).format(OPT_A=opt_a, OPT_B=opt_b))
+
+    # Optional plan hint: include only if it doesn't duplicate key instructions already present
+    if next_step:
+        ns = next_step.lower()
+        dedup_tokens = [
+            "follow-through", "xác nhận", "breakout", "mua đuổi", "đuổi", "kỷ luật stop", "dừng lỗ", "stop"
+        ]
+        existing = " ".join([opt_a, opt_b, parts[-2], parts[-1]]).lower()
+        if not any(t in existing and t in ns for t in dedup_tokens):
+            parts.append(f"Theo plan hiện có: {next_step}")
+
+    # Empathy (only underwater or trim/exit)
+    if situation in {"HOLDING_UNDERWATER", "HOLDING_TRIM_EXIT"}:
+        parts.append(_stable_pick("empathy", empathy_lines))
+
+    # Pre-mortem: exactly one sentence
+    if stop_str and stop_str != "-":
+        parts.append(_stable_pick("premortem_stop", premortems_with_stop).format(STOP=stop_str))
+    else:
+        parts.append(_stable_pick("premortem_generic", premortems_generic))
+
+    # Uncertainty: exactly one sentence
+    parts.append(_stable_pick("uncertainty", uncertainty_lines))
+
+    out = "\n".join([p.strip() for p in parts if p and p.strip()])
+
+    # Safety filters (hard constraints)
+    out = out.replace("INCEPTION đang đánh giá", "Theo tín hiệu hiện tại")
+    out = out.replace("quyết định cuối cùng", "bước xử lý")
+
+    return out.strip()
 
 # --------------------------
-# Defensive dict helpers
+# DNA Line (Strict long-run tone)
 # --------------------------
+
+_DNA_FORBIDDEN_TOKENS = ("đang", "hiện tại", "tín hiệu", "hôm nay")
+
+def build_dna_line_v1(
+    ticker: str,
+    final_class: str,
+    style_axis: str | None = None,
+    risk_regime: str | None = None,
+) -> str:
+    """Return a single-sentence DNA line (long-run trait + edge + discipline).
+
+    Guardrails:
+      - Long-run trait only (no short-term verbs like 'đang', no 'hiện tại/hôm nay/tín hiệu')
+      - No MS/CV mention
+      - Always includes a discipline clause (rule-of-engagement)
+      - Private banker tone, with B/C + blended rotation (stable by ticker+class)
+    """
+    tkr = (ticker or "").strip().upper() or "—"
+    cls = (final_class or "").strip() or "N/A"
+    sty = (style_axis or "").strip()
+    rsk = (risk_regime or "").strip()
+
+    key = f"{tkr}|{cls}|{sty}|{rsk}|DNA_LINE"
+    h = hashlib.md5(key.encode("utf-8")).hexdigest()
+    pick = int(h, 16) % 3  # 0=B, 1=C, 2=Blend(B+C)
+
+    def _norm(s: str) -> str:
+        return (s or "").lower().strip()
+
+    s_all = " ".join([_norm(cls), _norm(sty), _norm(rsk)])
+
+    mapping = "cổ phiếu có tính cách riêng"
+    edge = "lợi thế thường xuất hiện khi thị trường đi đúng nhịp"
+    discipline = "vào theo vùng/kịch bản, có mốc bảo vệ rõ ràng, và tránh mua đuổi"
+    discipline_short = "vào từng phần theo vùng và luôn có mốc bảo vệ"
+
+    if any(k in s_all for k in ["smooth trend", "smooth", "trend bền"]):
+        mapping = "trend bền"
+        edge = "hành vi giá tương đối sạch, tôn trọng cấu trúc và hỗ trợ động"
+        discipline = "ưu tiên mua theo nhịp điều chỉnh, dời điểm bảo vệ theo cấu trúc; hạn chế mua đuổi"
+        discipline_short = "mua theo nhịp điều chỉnh và dời bảo vệ theo cấu trúc"
+    elif any(k in s_all for k in ["momentum trend", "momentum", "động lượng"]):
+        mapping = "động lượng"
+        edge = "chạy nhanh khi có lực, breakout/continuation hiệu quả hơn bắt đáy"
+        discipline = "chỉ tăng vị thế khi có follow-through; chốt từng phần khi đà suy yếu; không nới kỷ luật stop"
+        discipline_short = "chỉ tăng khi có follow-through và chốt dần khi đà suy yếu"
+    elif any(k in s_all for k in ["aggressive trend", "aggressive", "biến động", "volatile trend"]):
+        mapping = "trend mạnh nhưng biến động cao"
+        edge = "lợi nhuận tiềm năng lớn khi đúng nhịp, nhưng sai nhịp sẽ trả giá nhanh"
+        discipline = "vào theo kế hoạch từng phần, giảm quy mô so với chuẩn; stop theo cấu trúc + buffer; tránh FOMO/đuổi giá"
+        discipline_short = "vào từng phần, size nhỏ hơn chuẩn, stop theo cấu trúc + buffer"
+    elif any(k in s_all for k in ["range", "mean-reversion", "sideway", "tích lũy"]):
+        mapping = "giao dịch theo biên"
+        edge = "hỗ trợ/kháng cự rõ, xác suất tốt khi mua gần hỗ trợ và giảm gần kháng cự"
+        discipline = "ưu tiên giao dịch theo vùng: mua gần hỗ trợ, giảm/chốt gần kháng cự; tránh mua ở giữa biên"
+        discipline_short = "mua gần hỗ trợ và giảm/chốt gần kháng cự"
+    elif any(k in s_all for k in ["volatile range", "mixed", "choppy", "whipsaw", "nhiễu"]):
+        mapping = "range nhiễu"
+        edge = "edge chỉ xuất hiện ở mép biên và các nhịp đảo chiều có xác nhận"
+        discipline = "chỉ vào ở mép biên khi có xác nhận, giảm tỷ trọng và siết kỷ luật dừng lỗ"
+        discipline_short = "chỉ vào ở mép biên khi có xác nhận và giảm tỷ trọng"
+    elif any(k in s_all for k in ["event", "gap", "event / gap-prone", "gap-prone"]):
+        mapping = "nhạy tin/gap risk"
+        edge = "biên lợi nhuận có thể mở rộng nhanh, nhưng rủi ro trượt giá cũng cao"
+        discipline = "giới hạn quy mô, hạn chế giữ qua thời điểm nhạy cảm; yêu cầu RR đủ dày và dùng mốc bảo vệ rõ ràng"
+        discipline_short = "size nhỏ, hạn chế qua sự kiện, RR đủ dày"
+    elif any(k in s_all for k in ["illiquid", "thanh khoản", "noisy"]):
+        mapping = "thanh khoản mỏng/khó thực thi"
+        edge = "biến động thực thi (trượt giá) có thể ăn vào hiệu quả"
+        discipline = "giới hạn quy mô, ưu tiên lệnh giới hạn; nếu không đạt liquidity gate thì không giao dịch"
+        discipline_short = "giới hạn quy mô và ưu tiên lệnh giới hạn"
+
+    if pick == 0:
+        s = (
+            f"{tkr} là kiểu cổ phiếu {mapping}: {edge}. "
+            f"Chiến lược phù hợp là {discipline_short}."
+        )
+    elif pick == 1:
+        s = (
+            f"{tkr} mang ‘tính cách’ {mapping}: thưởng cho người bám kế hoạch, và phạt nhanh khi hành động theo cảm xúc. "
+            f"Quy tắc ở đây là {discipline}."
+        )
+    else:
+        s = (
+            f"{tkr} là kiểu {mapping}; lợi thế nằm ở {edge}. "
+            f"Đổi lại, điều kiện bắt buộc là {discipline}."
+        )
+
+    sl = s.lower()
+    if any(tok in sl for tok in _DNA_FORBIDDEN_TOKENS):
+        s = (
+            f"{tkr} thuộc kiểu {mapping}; lợi thế nằm ở {edge}. "
+            f"Điều kiện bắt buộc là {discipline}."
+        )
+
+    s = re.sub(r"\bđang\b\s*", "", s, flags=re.IGNORECASE).strip()
+    s = s.replace("hiện tại", "").replace("Hôm nay", "").replace("hôm nay", "")
+    s = s.replace("tín hiệu", "hành vi").replace("Tín hiệu", "Hành vi")
+    s = re.sub(r"\s+", " ", s).strip()
+    if not s.endswith("."):
+        s = s + "."
+    return s
+
+
 
 def _ensure_dict(x: Any) -> Dict[str, Any]:
     return x if isinstance(x, dict) else {}
@@ -118,7 +538,7 @@ CLASS_TEMPLATES: Dict[str, List[str]] = {
         "Ưu tiên chốt nhanh, không bình quân giá khi cấu trúc yếu và luôn quản trị rủi ro theo volatility.",
     ],
     "Mixed / Choppy Trader": [
-        "Nhóm này thiếu xu hướng rõ ràng hoặc hay đổi tính theo thời gian; tín hiệu dễ nhiễu và whipsaw cao. Edge thường chỉ xuất hiện theo từng nhịp ngắn.",
+        "Nhóm này thiếu xu hướng rõ ràng hoặc hay đổi tính theo thời gian; hành vi giá dễ nhiễu và whipsaw cao. Edge thường chỉ xuất hiện theo từng nhịp ngắn.",
         "Phù hợp với giao dịch chiến thuật: chỉ trade khi setup đạt chất lượng cao và có xác nhận; phần lớn thời gian nên đứng ngoài.",
         "Kỷ luật vào/ra và size nhỏ là bắt buộc; tránh giữ vị thế dài khi cấu trúc không rõ.",
     ],
@@ -171,7 +591,7 @@ CLASS_TEMPLATES_DASHBOARD: Dict[str, List[str]] = {
         "Chiến thuật: Size nhỏ, stop + buffer, chỉ tham gia khi RR đủ dày.",
     ],
     "Illiquid / Noisy": [
-        "Đặc tính: Rủi ro thực thi (thanh khoản kém/không ổn định), tín hiệu dễ nhiễu.",
+        "Đặc tính: Rủi ro thực thi (thanh khoản kém/không ổn định), hành vi giá dễ nhiễu.",
         "Phù hợp: Chỉ dành cho người rất kỷ luật, chấp nhận giải ngân nhỏ.",
         "Chiến thuật: Lệnh giới hạn, tránh đuổi giá; không đạt liquidity gate thì NO TRADE.",
     ],
@@ -192,8 +612,10 @@ def _character_blurb_fallback(ticker: str, cclass: str) -> str:
         return f"{name}: {lines[0]} {lines[1]} {lines[2]}"
 
     # Generic fallback (class unknown)
-    return (f"{name} đang được gắn nhãn DNA '{cc}'. Hãy ưu tiên bám cấu trúc giá, "
-            f"chỉ triển khai khi trade plan có điều kiện rõ ràng và tuân thủ kỷ luật quản trị rủi ro.")
+    return (
+        f"{name} thuộc nhóm DNA '{cc}'. Lợi thế của nhóm này nằm ở hành vi giá đặc thù; "
+        f"đổi lại, điều kiện bắt buộc là triển khai theo vùng/kịch bản và tuân thủ kỷ luật quản trị rủi ro."
+    )
 
 def get_character_blurb(ticker: str, cclass: str) -> str:
     # GPT paragraph: 100–200 words, no numbers
@@ -605,7 +1027,7 @@ CLASS_TEMPLATES: Dict[str, List[str]] = {
         "Ưu tiên chốt nhanh, không bình quân giá khi cấu trúc yếu và luôn quản trị rủi ro theo volatility.",
     ],
     "Mixed / Choppy Trader": [
-        "Nhóm này thiếu xu hướng rõ ràng hoặc hay đổi tính theo thời gian; tín hiệu dễ nhiễu và whipsaw cao. Edge thường chỉ xuất hiện theo từng nhịp ngắn.",
+        "Nhóm này thiếu xu hướng rõ ràng hoặc hay đổi tính theo thời gian; hành vi giá dễ nhiễu và whipsaw cao. Edge thường chỉ xuất hiện theo từng nhịp ngắn.",
         "Phù hợp với giao dịch chiến thuật: chỉ trade khi setup đạt chất lượng cao và có xác nhận; phần lớn thời gian nên đứng ngoài.",
         "Kỷ luật vào/ra và size nhỏ là bắt buộc; tránh giữ vị thế dài khi cấu trúc không rõ.",
     ],
@@ -661,7 +1083,7 @@ CLASS_TEMPLATES_DASHBOARD: Dict[str, List[str]] = {
         "Chiến thuật: Size nhỏ, stop + buffer, chỉ tham gia khi RR đủ dày.",
     ],
     "Illiquid / Noisy": [
-        "Đặc tính: Rủi ro thực thi (thanh khoản kém/không ổn định), tín hiệu dễ nhiễu.",
+        "Đặc tính: Rủi ro thực thi (thanh khoản kém/không ổn định), hành vi giá dễ nhiễu.",
         "Phù hợp: Chỉ dành cho người rất kỷ luật, chấp nhận giải ngân nhỏ.",
         "Chiến thuật: Lệnh giới hạn, tránh đuổi giá; không đạt liquidity gate thì NO TRADE.",
     ],
@@ -1680,123 +2102,87 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
 
     st.markdown(card_html, unsafe_allow_html=True)
 
-
     # ============================================================
-    # Communication Layer — "3 câu hỏi vàng" (Vietnamese, client-friendly)
-    # Objective: turn dashboard signals into a short, actionable narrative.
-    # NOTE: UI-only (no scoring logic). Uses existing packs only.
+    # Communication Layer — Baseline Spec (Co-pilot paragraph)
+    # Objective: one paragraph under the dashboard; no raw system tags.
     # ============================================================
     try:
-        def _vn_gate_label(g: str) -> str:
-            gg = (g or "").strip().upper()
-            if gg in ("WATCH",):
-                return "Trạng thái cần quan sát thêm"
-            if gg in ("PASS", "OK"):
-                return "Trạng thái thuận lợi"
-            if gg in ("LOCK", "BLOCK"):
-                return "Trạng thái bị khóa điều kiện"
-            return gg or "-"
+        comm_ctx = {
+            "ticker": ticker,
+            "gate_status": gate_status,
+            "master_score": master_total_d,
+            "conviction_score": conviction_d,
+            "class_name": class_name,
+            "dash_lines": dash_lines,
+            "risk_flags": risk_lines,
+            "mode": mode_d,
+            "action": action_d,
+            "urgency": urg_d,
+            "pnl_pct": pnl_f,
+            "is_holding": (mode_d == "HOLDING"),
+            # Prefer defensive overlay (underwater) levels when available; otherwise use stop_suggest
+            "protect_stop": (def_hs if show_def_overlay else stop_sug),
+            "stop_suggest": stop_sug,
+            "reclaim_low": def_rz_lo,
+            "reclaim_high": def_rz_hi,
+            "reclaim": def_rc,
+            "blockers": {"breakout": st_break, "volume": st_vol, "rr": st_rr, "structure": st_struct},
+            "next_step": next_step,
+        }
+        comm_par = build_comm_paragraph_v1(comm_ctx)
+        if _safe_text(comm_par).strip():
+            st.markdown(
+                f"<div class='incept-comm'>{html.escape(_safe_text(comm_par).strip())}</div>",
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        # Never block the dashboard if comm layer fails.
+        pass
 
-        def _vn_action_label(a: str) -> str:
-            aa = (a or "").strip().upper()
-            return {
-                "BUY": "Mua mới",
-                "ADD": "Gia tăng",
-                "HOLD": "Giữ",
-                "TRIM": "Giảm tỷ trọng",
-                "EXIT": "Thoát vị thế",
-                "AVOID": "Không tham gia",
-                "WAIT": "Quan sát thêm",
-                "N/A": "-",
-                "-": "-",
-            }.get(aa, aa)
-
-        def _vn_urgency_label(u: str) -> str:
-            uu = (u or "").strip().upper()
-            return {"HIGH": "ưu tiên cao", "MED": "ưu tiên trung bình", "LOW": "ưu tiên thấp"}.get(uu, "")
-
-        def _bucket10(v: Any) -> str:
-            x = _sf(v)
-            if pd.isna(x):
-                return "mid"
-            if x < 4.0:
-                return "low"
-            if x < 6.5:
-                return "mid"
-            if x < 8.0:
-                return "good"
-            return "high"
-
-        # 1) Tính cách (DNA)
-        dna_sentence = ""
-        try:
-            if dash_lines:
-                s0 = _safe_text(dash_lines[0]).strip()
-                s0 = re.sub(r"^Đặc\s*tính\s*:\s*", "", s0, flags=re.IGNORECASE)
-                dna_sentence = s0
-        except Exception:
-            dna_sentence = ""
-        if not dna_sentence:
-            dna_sentence = f"Nhóm DNA hiện tại: {class_name}."
-
-        try:
-            if red_notes and red_notes[0] != "None":
-                dna_sentence = f"{dna_sentence} Lưu ý rủi ro nổi bật: {red_notes[0]}."
-        except Exception:
-            pass
+    # ============================================================
+    # Optional: Diễn giải nhanh (3 câu hỏi vàng) — secondary explainer
+    # ============================================================
+    try:
+        # 1) Tính cách (Stock DNA) — STRICT long-run line (no short-term verbs)
+        dna_sentence = build_dna_line_v1(
+            ticker=ticker,
+            final_class=class_name,
+            style_axis=str(((_ensure_dict((_ensure_dict(cp.get('StockTraits'))).get('DNA') or {}).get('Tier1') or {}).get('StyleAxis') or '')).strip(),
+            risk_regime=str(((_ensure_dict((_ensure_dict(cp.get('StockTraits'))).get('DNA') or {}).get('Tier1') or {}).get('RiskRegime') or '')).strip(),
+        )
 
         # 2) Tình hình (Current Status)
-        ms_b = _bucket10(master_total_d)
-        cs_b = _bucket10(conviction_d)
+        ms_s = "-" if pd.isna(master_total_d) else f"{float(master_total_d):.1f}"
+        cv_s = "-" if pd.isna(conviction_d) else f"{float(conviction_d):.1f}"
+        status_bits = [f"Gate: {_safe_text(gate_status)}.", f"Điểm tổng hợp {ms_s}/10 | Tin cậy {cv_s}/10."]
+        if _safe_text(next_step).strip() and _safe_text(next_step).strip() != "-":
+            status_bits.append(_safe_text(next_step).strip().rstrip(".") + ".")
+        status_sentence = " ".join(status_bits)
 
-        ms_map = {
-            "low": "Cơ hội hiện tại kém hấp dẫn; ưu tiên phòng thủ hoặc đứng ngoài.",
-            "mid": "Cơ hội ở mức trung tính; cần chờ điểm vào tốt hơn hoặc thêm xác nhận.",
-            "good": "Cơ hội khá hấp dẫn nếu trade plan rõ và rủi ro được kiểm soát.",
-            "high": "Cơ hội rất hấp dẫn; thuộc nhóm nên ưu tiên theo dõi/triển khai có kỷ luật.",
-        }
-        cs_map = {
-            "low": "Độ chắc chắn thấp (tín hiệu còn nhiễu); tránh hành động lớn.",
-            "mid": "Độ chắc chắn trung tính; nên quan sát và chỉ hành động khi có xác nhận.",
-            "good": "Độ chắc chắn khá tốt; có thể triển khai nhưng vẫn cần kỷ luật.",
-            "high": "Độ chắc chắn cao; phù hợp triển khai theo kế hoạch, tập trung quản trị rủi ro.",
-        }
-
-        status_sentence = (
-            f"Điểm tổng hợp {_fmt_num(master_total_d,1)}/10 cho thấy {ms_map.get(ms_b, 'cơ hội ở mức trung tính')} "
-            f"Điểm tin cậy {_fmt_num(conviction_d,1)}/10 phản ánh {cs_map.get(cs_b, 'độ chắc chắn ở mức trung tính')}"
-        )
-        if insight_line_es:
-            status_sentence = f"{status_sentence} {insight_line_es}"
-
-        # 3) Hành động (Decision/Trade plan)
-        act_vn = _vn_action_label(action_d)
-        urg_vn = _vn_urgency_label(urg_d)
-        gate_vn = _vn_gate_label(gate_status)
+        # 3) Định hướng (Hành động)
+        act_map = {"BUY": "MUA", "HOLD": "GIỮ", "TRIM": "GIẢM TỶ TRỌNG", "EXIT": "THOÁT"}
+        act_vn = act_map.get(_safe_text(action_d).strip().upper(), "-")
+        urg_u = _safe_text(urg_d).strip().upper()
+        urg_map = {"HIGH": "mạnh", "MED": "vừa", "MID": "vừa", "LOW": "nhẹ", "STRONG": "mạnh", "WEAK": "nhẹ"}
+        urg_vn = urg_map.get(urg_u, "")
 
         action_bits: List[str] = []
-        action_bits.append(f"Hệ thống đang ở {gate_vn.lower()}.")
-        if act_vn != "-":
-            action_bits.append(f"Khuyến nghị hiện tại: {act_vn}{(' (' + urg_vn + ')') if urg_vn else ''}.")
-
         if mode_d == "HOLDING":
+            action_bits.append(f"{act_vn}{(' (' + urg_vn + ')') if urg_vn else ''} cho vị thế đang nắm.")
             if show_def_overlay:
                 hs = _fmt_px(def_hs)
-                if pd.notna(def_rz_lo) and pd.notna(def_rz_hi):
-                    rz_1dp = f"{def_rz_lo:.1f}–{def_rz_hi:.1f}"
-                else:
-                    rz_1dp = "-" if pd.isna(def_rc) else f"{float(def_rc):.1f}"
                 if hs != "-":
                     action_bits.append(f"Stop bảo vệ: {hs}.")
-                if rz_1dp != "-":
-                    action_bits.append(f"Chỉ cân nhắc mua lại/gia tăng khi giá lấy lại vùng {rz_1dp} và giữ vững.")
+                if pd.notna(def_rz_lo) and pd.notna(def_rz_hi):
+                    action_bits.append(f"Chỉ cân nhắc gia tăng khi giá lấy lại vùng {def_rz_lo:.1f}–{def_rz_hi:.1f}.")
             else:
                 if pd.notna(stop_sug):
-                    action_bits.append(f"Stop bảo vệ tham chiếu: {_fmt_px(stop_sug)}.")
+                    action_bits.append(f"Stop tham chiếu: {_fmt_px(stop_sug)}.")
         else:
-            if gate_line:
-                action_bits.append(gate_line)
-
+            if act_vn != "-":
+                action_bits.append(f"{act_vn}{(' (' + urg_vn + ')') if urg_vn else ''}.")
+            if _safe_text(next_step).strip() and _safe_text(next_step).strip() != "-":
+                action_bits.append(_safe_text(next_step).strip().rstrip(".") + ".")
         action_sentence = " ".join([x for x in action_bits if _safe_text(x).strip()])
 
         with st.expander("Diễn giải nhanh (3 câu hỏi vàng)", expanded=False):

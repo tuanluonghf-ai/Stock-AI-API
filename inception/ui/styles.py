@@ -69,7 +69,7 @@ a, a:visited{color: inherit !important; text-decoration:none !important;}
 a:hover{text-decoration:none !important;}
 
 /* Markdown baseline */
-.stMarkdown p, .stMarkdown li, .stMarkdown span, .stMarkdown div{
+.stMarkdown p, .stMarkdown li{
   font-size: 17px !important;
   line-height: 1.55 !important;
   color: var(--fg) !important;
@@ -90,7 +90,7 @@ a:hover{text-decoration:none !important;}
 }
 .incept-brand{
   font-weight: 900;
-  font-size: 34px;
+  font-size: 60px !important;
   letter-spacing: 0.8px;
   color: #FFFFFF;
 }
@@ -246,6 +246,19 @@ div[data-testid="stExpander"] > details > summary:hover{opacity:0.98;}
   letter-spacing:0.8px;
   text-transform:uppercase;
 }
+
+/* Communication Layer (Co-pilot paragraph) */
+.incept-comm{
+  margin: 10px 0 12px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.04);
+  color: var(--fg) !important;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
 </style>"""
 
 
@@ -262,3 +275,5 @@ HEADER_HTML_TEMPLATE = r"""<div class="incept-wrap">
 
 def render_header_html(app_title: str) -> str:
     return HEADER_HTML_TEMPLATE.replace("{APP_TITLE}", app_title)
+
+
