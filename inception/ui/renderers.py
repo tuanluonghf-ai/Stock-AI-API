@@ -1397,6 +1397,17 @@ def render_current_status_insight(master_score_total: Any, conviction_score: Any
 # 10. DASHBOARD SUMMARY PACK (v1) — Single source of truth for Executive Snapshot
 # ============================================================
 
+def _get_dashboard_card(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Get DashboardSummaryPack.v1.CurrentStatusCard (if present)."""
+    try:
+        dsp = _ensure_dict((_ensure_dict(result)).get("DashboardSummaryPack"))
+        if _safe_text(dsp.get("schema") or "").strip() != "DashboardSummaryPack.v1":
+            return {}
+        return _ensure_dict(dsp.get("CurrentStatusCard"))
+    except Exception:
+        return {}
+
+
 def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dict[str, Any], gate_status: str) -> None:
     """Executive Snapshot — dashboard-style summary card.
 
@@ -1406,8 +1417,12 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
       - Uses HTML for layout; always escape dynamic strings.
       - Detail sections (Stock DNA / Current Status / Trade Plan / Decision Layer) are rendered separately under an expander.
     """
-    ap = _ensure_dict(analysis_pack)
+    # Backward-compat: accept either (analysis_pack, character_pack) OR (result_pack, character_pack).
+    ap_in = _ensure_dict(analysis_pack)
     cp = _ensure_dict(character_pack)
+    result_pack = ap_in if (isinstance(ap_in, dict) and "DashboardSummaryPack" in ap_in and "AnalysisPack" in ap_in) else {}
+    card = _get_dashboard_card(result_pack) if result_pack else {}
+    ap = _ensure_dict((result_pack.get("AnalysisPack") if result_pack else ap_in))
 
     # --------- helpers ---------
     def _sf(x: Any) -> float:
@@ -1478,17 +1493,12 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
         return "KELLY BET: NO TRADE"
 
     # --------- data extraction ---------
-    ticker = _safe_text(ap.get("Ticker") or cp.get("_Ticker") or "").strip().upper()
-    last_pack = ap.get("Last") or {}
-    close_px = last_pack.get("Close")
-
-    mkt = ap.get("Market") or {}
-    chg_pct = mkt.get("StockChangePct")
-
-    scenario_name = _safe_text((ap.get("Scenario12") or {}).get("Name") or "N/A").strip()
-
-    master_total = (ap.get("MasterScore") or {}).get("Total", np.nan)
-    conviction = ap.get("Conviction", np.nan)
+    ticker = _safe_text(card.get("ticker") or ap.get("Ticker") or cp.get("_Ticker") or "").strip().upper()
+    close_px = card.get("close_px") if card else (ap.get("Last") or {}).get("Close")
+    chg_pct = card.get("stock_chg_pct") if card else (ap.get("Market") or {}).get("StockChangePct")
+    scenario_name = _safe_text(card.get("scenario_name") or (ap.get("Scenario12") or {}).get("Name") or "N/A").strip()
+    master_total = card.get("master_total") if card else (ap.get("MasterScore") or {}).get("Total", np.nan)
+    conviction = card.get("conviction") if card else ap.get("Conviction", np.nan)
 
     class_name = _safe_text(cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "N/A").strip()
 
@@ -1501,7 +1511,7 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     # Primary setup (already computed by Python)
     primary = ap.get("PrimarySetup") or {}
     primary = primary if isinstance(primary, dict) else {}
-    setup_name = _safe_text(primary.get("Name") or "N/A").strip()
+    setup_name = _safe_text((card.get("setup_name") if card else "") or primary.get("Name") or "N/A").strip()
 
     # Prefer TradePlanPack (single source of truth for plan/state/levels). Fallback to legacy TradePlans.
     tpp = ap.get("TradePlanPack") or {}
@@ -1542,13 +1552,31 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     if not red_notes:
         red_notes = ["None"]
 
-    # Triggers
-    vol_ratio = (ap.get("ProTech") or {}).get("Volume", {}).get("Ratio")
+    # Triggers (prefer DashboardSummaryPack statuses to avoid UI drift)
+    triggers = _ensure_dict(card.get("triggers")) if card else {}
+    st_break = _safe_text(triggers.get("breakout") or "").strip().upper()
+    st_vol = _safe_text(triggers.get("volume") or "").strip().upper()
+    st_rr = _safe_text(triggers.get("rr") or "").strip().upper()
+
+    # Raw values (fallback only; do NOT re-derive statuses here)
+    struct_snap = _ensure_dict(card.get("structure_snapshot")) if card else {}
+    vol_ratio = struct_snap.get("vol_ratio")
+    if vol_ratio is None:
+        vol_ratio = (((ap.get("ProTech") or {}).get("Volume") or {}).get("Ratio"))
     rr_val = rr
 
-    dot_breakout = _dot(combat.get("BreakoutForce"), good=6.8, warn=5.5)
-    dot_volume = _dot(vol_ratio, good=1.20, warn=0.95)
-    dot_rr = _dot(rr_val, good=1.80, warn=1.30)
+    def _dot_from_status(s: str) -> str:
+        s = (s or "").strip().upper()
+        if s == "PASS":
+            return "g"
+        if s == "FAIL":
+            return "r"
+        # WAIT / N/A default to yellow
+        return "y"
+
+    dot_breakout = _dot_from_status(st_break) if st_break else _dot(combat.get("BreakoutForce"), good=6.8, warn=5.5)
+    dot_volume = _dot_from_status(st_vol) if st_vol else _dot(vol_ratio, good=1.20, warn=0.95)
+    dot_rr = _dot_from_status(st_rr) if st_rr else _dot(rr_val, good=1.80, warn=1.30)
 
     # --- DEBUG (auto-show only when Upside Room is N/A) ---
     meta = cp.get("Meta") or {}
@@ -3049,46 +3077,18 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
       4) Decision Layer (Conviction/Weakness/Tags)
     This renderer must not change any underlying calculations.
     """
-    modules = (_ensure_dict(result)).get("Modules") or {}
+    r = _ensure_dict(result)
+    modules = r.get("Modules") or {}
     cp = modules.get("character") or {}
-    ap = _ensure_dict(analysis_pack)
+    ap = _ensure_dict(r.get("AnalysisPack") or analysis_pack)
+    card = _get_dashboard_card(r)
 
     # Trade-plan gate (for execution / anti-FOMO posture)
-    gate_status, _meta = _trade_plan_gate(analysis_pack, cp)
+    gate_status, _meta = _trade_plan_gate(ap, cp)
 
-    # ---------- HEADER: <Ticker> — <Last Close> <+/-%> ----------
-    ticker = _safe_text(ap.get("Ticker") or (_ensure_dict(result)).get("Ticker") or "").strip().upper()
-    last_pack = ap.get("Last") or {}
-    close_val = _safe_float(last_pack.get("Close"), default=np.nan)
-
-    mkt = ap.get("Market") or {}
-    stock_chg = _safe_float(mkt.get("StockChangePct"), default=np.nan)
-
-    def _fmt_close(x: Any) -> str:
-        try:
-            v = float(x)
-            if not math.isfinite(v):
-                return "N/A"
-            return f"{v:.2f}"
-        except Exception:
-            return "N/A"
-
-    def _fmt_change_pct(x: Any) -> str:
-        v = _safe_float(x, default=np.nan)
-        if pd.isna(v):
-            return ""
-        return f"{v:+.2f}%"
-
-    price_str = _fmt_close(close_val)
-    chg_str = _fmt_change_pct(stock_chg)
-
-    if ticker or price_str != "N/A":
-        header = ticker or ""
-        if price_str != "N/A":
-            header = f"{header} — {price_str}" if header else price_str
-        if chg_str:
-            header = f"{header} ({chg_str})"
-        render_executive_snapshot(ap, cp, gate_status)
+    # ---------- EXECUTIVE SNAPSHOT (single source of truth: DashboardSummaryPack) ----------
+    # render_executive_snapshot is backward-compatible: it can accept the full result pack as its first argument.
+    render_executive_snapshot(r, cp, gate_status)
 
     # Pre-split legacy report once for reuse
     exp_label = "BẤM ĐỂ XEM CHI TIẾT PHÂN TÍCH & BIỂU ĐỒ"
@@ -3114,17 +3114,26 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             # ============================================================
             st.markdown('<div class="major-sec">CURRENT STATUS</div>', unsafe_allow_html=True)
 
-            # 2.1 Relative Strength vs VNINDEX
-            rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
+            # 2.1 Relative Strength vs VNINDEX (prefer DashboardSummaryPack)
+            rel = card.get("relative_strength_vs_vnindex") if card else None
+            if rel is None:
+                rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
             st.markdown(f"**Relative Strength vs VNINDEX:** {_val_or_na(rel)}")
 
-            # 2.2 Scenario & Scores
+            # 2.2 Scenario & Scores (prefer DashboardSummaryPack)
             scenario_pack = ap.get("Scenario12") or {}
             master_pack = ap.get("MasterScore") or {}
-            conviction_score = ap.get("Conviction")
+            conviction_score = (card.get("conviction") if card else None)
+            if conviction_score is None:
+                conviction_score = ap.get("Conviction")
+
+            scenario_name = _safe_text(card.get("scenario_name") if card else "").strip() or _safe_text(scenario_pack.get("Name") or "N/A").strip()
+            ms_total = (card.get("master_total") if card else None)
+            if ms_total is None:
+                ms_total = master_pack.get("Total")
 
             st.markdown("**State Capsule (Scenario & Scores)**")
-            st.markdown(f"- Scenario: {_val_or_na(scenario_pack.get('Name'))}")
+            st.markdown(f"- Scenario: {html.escape(_safe_text(scenario_name))}")
 
             def _bar_row_cs(label: str, val: Any, maxv: float = 10.0) -> None:
                 v = _safe_float(val, default=np.nan)
@@ -3146,48 +3155,61 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                     unsafe_allow_html=True
                 )
 
-            _bar_row_cs("Điểm tổng hợp", master_pack.get("Total"), 10.0)
+            _bar_row_cs("Điểm tổng hợp", ms_total, 10.0)
             _bar_row_cs("Điểm tin cậy", conviction_score, 10.0)
 
             # Score interpretation (single block) — place directly under the two bars
-            render_current_status_insight(master_pack.get("Total"), conviction_score, gate_status)
+            render_current_status_insight(ms_total, conviction_score, gate_status)
 
             # Class Policy Hint (display-only)
             _final_class = _safe_text(cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "").strip()
-            _policy_hint = get_class_policy_hint_line(_final_class)
+            _policy_hint = _safe_text(card.get("policy_hint_line") if card else "").strip() or get_class_policy_hint_line(_final_class)
             if _policy_hint:
                 st.markdown(f"**Policy:** {_policy_hint}")
 
             # 2.3 State Capsule (Facts-only, compact)
             st.markdown("**Structure Summary (MA/Fibo/RSI/MACD/Volume)**")
-            protech = ap.get("ProTech") or {}
-            protech = protech if isinstance(protech, dict) else {}
-            ma = protech.get("MA") or {}
-            ma = ma if isinstance(ma, dict) else {}
-            rsi = protech.get("RSI") or {}
-            rsi = rsi if isinstance(rsi, dict) else {}
-            macd = protech.get("MACD") or {}
-            macd = macd if isinstance(macd, dict) else {}
-            vol = protech.get("Volume") or {}
-            vol = vol if isinstance(vol, dict) else {}
-            bias = protech.get("Bias") or {}
-            bias = bias if isinstance(bias, dict) else {}
+            ss = _ensure_dict(card.get("structure_snapshot")) if card else {}
+            if ss:
+                ma_reg = ss.get("ma_regime")
+                rsi_zone = ss.get("rsi_state")
+                rsi_dir = ss.get("rsi_direction")
+                macd_rel = ss.get("macd_state")
+                macd_zero = ss.get("macd_zero")
+                align = ss.get("rsi_macd_alignment")
+                short_band = ss.get("fib_short_band")
+                long_band = ss.get("fib_long_band")
+                fib_conflict = bool(ss.get("fib_conflict"))
+                vol_ratio = ss.get("vol_ratio")
+            else:
+                protech = ap.get("ProTech") or {}
+                protech = protech if isinstance(protech, dict) else {}
+                ma = protech.get("MA") or {}
+                ma = ma if isinstance(ma, dict) else {}
+                rsi = protech.get("RSI") or {}
+                rsi = rsi if isinstance(rsi, dict) else {}
+                macd = protech.get("MACD") or {}
+                macd = macd if isinstance(macd, dict) else {}
+                vol = protech.get("Volume") or {}
+                vol = vol if isinstance(vol, dict) else {}
+                bias = protech.get("Bias") or {}
+                bias = bias if isinstance(bias, dict) else {}
 
-            fib_ctx = ((ap.get("Fibonacci") or {}).get("Context") or {})
-            fib_ctx = fib_ctx if isinstance(fib_ctx, dict) else {}
+                fib_ctx = ((ap.get("Fibonacci") or {}).get("Context") or {})
+                fib_ctx = fib_ctx if isinstance(fib_ctx, dict) else {}
 
-            ma_reg = _safe_text(ma.get("Regime"))
-            rsi_zone = _safe_text(rsi.get("State"))
-            rsi_dir = _safe_text(rsi.get("Direction"))
-            macd_rel = _safe_text(macd.get("State"))
-            macd_zero = _safe_text(macd.get("ZeroLine"))
-            align = _safe_text(bias.get("Alignment"))
+                ma_reg = _safe_text(ma.get("Regime"))
+                rsi_zone = _safe_text(rsi.get("State"))
+                rsi_dir = _safe_text(rsi.get("Direction"))
+                macd_rel = _safe_text(macd.get("State"))
+                macd_zero = _safe_text(macd.get("ZeroLine"))
+                align = _safe_text(bias.get("Alignment"))
 
-            short_band = _safe_text(fib_ctx.get("ShortBand"))
-            long_band = _safe_text(fib_ctx.get("LongBand"))
-            fib_conflict = bool(fib_ctx.get("FiboConflictFlag"))
+                short_band = _safe_text(fib_ctx.get("ShortBand"))
+                long_band = _safe_text(fib_ctx.get("LongBand"))
+                fib_conflict = bool(fib_ctx.get("FiboConflictFlag"))
 
-            vol_ratio = _safe_float(vol.get("Ratio"), default=np.nan)
+                vol_ratio = _safe_float(vol.get("Ratio"), default=np.nan)
 
             st.markdown(f"- MA Structure: {_val_or_na(ma_reg)}")
             st.markdown(f"- RSI: {_val_or_na(rsi_zone)} | {_val_or_na(rsi_dir)}")
