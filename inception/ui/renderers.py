@@ -2143,13 +2143,29 @@ def render_executive_snapshot(analysis_pack: Dict[str, Any], character_pack: Dic
     # Optional: Diễn giải nhanh (3 câu hỏi vàng) — secondary explainer
     # ============================================================
     try:
-        # 1) Tính cách (Stock DNA) — STRICT long-run line (no short-term verbs)
-        dna_sentence = build_dna_line_v1(
-            ticker=ticker,
-            final_class=class_name,
-            style_axis=str(((_ensure_dict((_ensure_dict(cp.get('StockTraits'))).get('DNA') or {}).get('Tier1') or {}).get('StyleAxis') or '')).strip(),
-            risk_regime=str(((_ensure_dict((_ensure_dict(cp.get('StockTraits'))).get('DNA') or {}).get('Tier1') or {}).get('RiskRegime') or '')).strip(),
-        )
+        # 1) Tính cách (Stock DNA) — prefer Engine-built DNALineDraft if available.
+        ndp = ap.get("NarrativeDraftPack") or (_ensure_dict(result)).get("NarrativeDraftPack") or {}
+        dna_cfg = _ensure_dict((_ensure_dict(ndp)).get("dna"))
+        dna_sentence = _safe_text(dna_cfg.get("line_final") or dna_cfg.get("line_draft")).strip()
+        if not dna_sentence or dna_sentence == "-":
+            dna_sentence = build_dna_line_v1(
+                ticker=ticker,
+                final_class=class_name,
+                style_axis=str(
+                    (
+                        (_ensure_dict((_ensure_dict(cp.get("StockTraits"))).get("DNA") or {}).get("Tier1") or {})
+                        .get("StyleAxis")
+                        or ""
+                    )
+                ).strip(),
+                risk_regime=str(
+                    (
+                        (_ensure_dict((_ensure_dict(cp.get("StockTraits"))).get("DNA") or {}).get("Tier1") or {})
+                        .get("RiskRegime")
+                        or ""
+                    )
+                ).strip(),
+            )
 
         # 2) Tình hình (Current Status)
         ms_s = "-" if pd.isna(master_total_d) else f"{float(master_total_d):.1f}"
