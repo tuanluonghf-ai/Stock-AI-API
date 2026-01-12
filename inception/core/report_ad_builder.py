@@ -20,6 +20,7 @@ import pandas as pd
 
 from inception.core.helpers import _safe_float, _safe_text, json_sanitize
 from inception.core.contracts import normalize_analysis_pack
+from inception.core.phrase_bank import pick_phrase
 from inception.infra.llm_client import call_openai_chat, get_openai_api_key
 
 
@@ -33,6 +34,13 @@ def _val_or_na(v: Any) -> str:
         return s if s else "N/A"
     except Exception:
         return "N/A"
+
+
+def _disp(v: Any) -> str:
+    """User-facing display for missing values."""
+    s = _val_or_na(v)
+    return "–" if s == "N/A" else s
+
 
 
 def _as_dict(x: Any) -> Dict[str, Any]:
@@ -228,22 +236,29 @@ Confidence (Tech): <...>
 # ============================================================
 
 def _deterministic_report_ad(data: Dict[str, Any], note: str = "") -> str:
+    """Build a deterministic A–D report (VIP-ready, VN) using 3-step advisory structure:
+    Context → Assessment → Action.
+
+    This function MUST remain deterministic and must not require any LLM/API key.
+    """
     ap = normalize_analysis_pack((data or {}).get("AnalysisPack"))
+
+    tick = str((data or {}).get("Ticker") or ap.get("Ticker") or "").strip().upper() or "N/A"
 
     pro = _as_dict(ap.get("ProTech"))
     ma = _as_dict(pro.get("MA"))
     rsi = _as_dict(pro.get("RSI"))
     macd = _as_dict(pro.get("MACD"))
     bias = _as_dict(pro.get("Bias"))
-    fib = _as_dict(ap.get("Fibonacci"))
     vol = _as_dict(pro.get("Volume"))
+    fib = _as_dict(ap.get("Fibonacci"))
     scen = _as_dict(ap.get("Scenario12"))
     ms = _as_dict(ap.get("MasterScore"))
     conv = ap.get("Conviction")
 
     primary = _as_dict(ap.get("PrimarySetup"))
 
-    # Step 11: prefer TradePlanPack/DecisionPack for execution clarity
+    # Prefer TradePlanPack/DecisionPack for execution clarity
     tpp = _as_dict(ap.get("TradePlanPack"))
     pp = _as_dict(tpp.get("plan_primary"))
     comp = _as_dict(pp.get("plan_completeness") or tpp.get("plan_completeness"))
@@ -257,55 +272,253 @@ def _deterministic_report_ad(data: Dict[str, Any], note: str = "") -> str:
     dp_urg = _safe_text(dp.get("urgency") or "").strip().upper() or "N/A"
 
     setup_name = _val_or_na(primary.get("Name"))
-    # If TradePlanPack exists, show its computed state (it already accounts for PlanCompleteness)
-    plan_status = _val_or_na(pp.get("state")) if pp else _val_or_na(primary.get("Status"))
+    plan_state = _val_or_na(pp.get("state")) if pp else _val_or_na(primary.get("Status"))
     rr_txt = _val_or_na(primary.get("RR"))
 
     tags = primary.get("ReasonTags") or []
+    tags_preview = "N/A"
     if isinstance(tags, list):
         tags_preview = ", ".join([str(x) for x in tags[:6]]) if tags else "N/A"
-    else:
-        tags_preview = "N/A"
 
     risk = _val_or_na(primary.get("RiskPct"))
     reward = _val_or_na(primary.get("RewardPct"))
     must_rr = _val_or_na(primary.get("RR"))
     must_conf = _val_or_na(primary.get("Confidence (Tech)", primary.get("Probability")))
 
+    # Fundamental (optional)
+    fund = _as_dict(ap.get("Fundamental"))
+    fund_rec = _disp(fund.get("Recommendation"))
+    fund_target_k = _disp(_fmt_thousand(fund.get("TargetVND")))
+    fund_upside = _disp(_fmt_pct(fund.get("UpsidePct")))
+
+    # --- helper: deterministic action phrasing (no price levels)
+    def _tech_action(ma_regime: str, align: str) -> str:
+        ma_l = (ma_regime or "").lower()
+        al_l = (align or "").lower()
+        seed = f"{tick}|A|{ma_regime}|{align}"
+        if ("bull" in ma_l or "up" in ma_l or "tăng" in ma_l) and ("bull" in al_l or "tăng" in al_l or "đồng thuận" in al_l):
+            return pick_phrase("TECH_ACT_BULL", seed) or "Theo xu hướng là ưu tiên; vào từng phần và chỉ gia tăng khi có xác nhận, tránh mua đuổi."
+        if ("bear" in ma_l or "down" in ma_l or "giảm" in ma_l) or ("bear" in al_l or "giảm" in al_l):
+            return pick_phrase("TECH_ACT_BEAR", seed) or "Thiên về phòng thủ; giảm quy mô và chờ cấu trúc ổn định trở lại trước khi hành động."
+        return pick_phrase("TECH_ACT_NEUTRAL", seed) or "Kiên nhẫn quan sát; chỉ hành động khi cấu trúc và xung lực đồng thuận."
+
+    def _plan_action(act: str) -> str:
+        a = (act or "").upper()
+        seed = f"{tick}|C|{act}|{dp_urg}|{comp_status}"
+        if a in {"BUY", "ADD", "ACCUMULATE", "ENTER"}:
+            return pick_phrase("PLAN_ACT_BUY", seed) or "Giải ngân từng phần; chỉ gia tăng khi điều kiện vào lệnh được kích hoạt rõ ràng."
+        if a in {"TRIM", "REDUCE"}:
+            return pick_phrase("PLAN_ACT_TRIM", seed) or "Hạ tỷ trọng để quản trị rủi ro; giữ phần lõi nếu cấu trúc còn giữ được."
+        if a in {"EXIT", "CUT"}:
+            return pick_phrase("PLAN_ACT_EXIT", seed) or "Ưu tiên thoát/giảm mạnh để bảo toàn vốn; chỉ cân nhắc lại khi cấu trúc phục hồi."
+        if a in {"HOLD"}:
+            return pick_phrase("PLAN_ACT_HOLD", seed) or "Giữ vị thế và theo dõi kỷ luật; chỉ hành động khi điểm xác nhận xuất hiện."
+        return pick_phrase("PLAN_ACT_WAIT", seed) or "Kiên nhẫn quan sát; tránh hành động khi điều kiện chưa rõ."
+
+    # --- Fib bands (labels only; may include % but kept minimal)
+    fib_short_band = _disp(_as_dict(_as_dict(fib.get("ShortWindow")).get("Summary")).get("Band") or _as_dict(fib.get("ShortWindow")).get("Band"))
+    fib_long_band = _disp(_as_dict(_as_dict(fib.get("LongWindow")).get("Summary")).get("Band") or _as_dict(fib.get("LongWindow")).get("Band"))
+
     lines: List[str] = []
     if note:
         lines.append(note.strip())
         lines.append("")
+    # ----------------------------
+    # A. TECHNICAL ANALYSIS
+    # ----------------------------
+    ma_reg = _disp(ma.get("Regime"))
+    align = _disp(bias.get("Alignment"))
+    seed_a = f"{tick}|A|{ma_reg}|{align}|{_disp(scen.get('Name'))}"
+
+    a_ctx = (pick_phrase("A_CTX", seed_a) or "Kịch bản {scen}; nền xu hướng (MA) {ma_reg}.").format(
+        scen=_disp(scen.get("Name")),
+        ma_reg=ma_reg,
+    )
+    a_ass1 = (pick_phrase("A_ASSESS_1", seed_a) or "RSI {rsi_state}; MACD {macd_state}; mức đồng thuận RSI+MACD {align}.").format(
+        rsi_state=_disp(rsi.get("State")),
+        macd_state=_disp(macd.get("State")),
+        align=align,
+    )
+    a_ass2 = (pick_phrase("A_ASSESS_2", seed_a) or "Fibonacci ngắn {fib_short} | dài {fib_long}; dòng tiền {vol_reg}.").format(
+        fib_short=fib_short_band,
+        fib_long=fib_long_band,
+        vol_reg=_disp(vol.get("Regime")),
+    )
+    a_quant = (pick_phrase("A_QUANT_NOTE", seed_a) or "Ghi chú định lượng: Điểm tổng hợp {ms_total} | Tin cậy {conv}.").format(
+        ms_total=_disp(ms.get("Total")),
+        conv=_disp(conv),
+    )
 
     lines += [
-        "A. Ky thuat",
-        f"1. MA: {_val_or_na(ma.get('Regime'))}.",
-        f"2. RSI: {_val_or_na(rsi.get('State'))} | {_val_or_na(rsi.get('Direction'))}.",
-        f"3. MACD: {_val_or_na(macd.get('State'))} | ZeroLine: {_val_or_na(macd.get('ZeroLine'))}.",
-        f"4. RSI+MACD alignment: {_val_or_na(bias.get('Alignment'))}.",
-        f"5. Fibonacci: Short/Long = {_val_or_na(_as_dict(fib.get('ShortWindow')).get('Band'))} / {_val_or_na(_as_dict(fib.get('LongWindow')).get('Band'))}.",
-        f"6. Volume: Ratio {_val_or_na(vol.get('Ratio'))} | Regime: {_val_or_na(vol.get('Regime'))}.",
-        f"7. Scenario12: {_val_or_na(scen.get('Name'))}.",
-        f"8. Master/Conviction: {_val_or_na(ms.get('Total'))} | {_val_or_na(conv)}.",
+        "A. TECHNICAL ANALYSIS",
+        f"• Context: {a_ctx}",
+        f"• Assessment: {a_ass1}",
+        f"• Assessment: {a_ass2}",
+        f"• Action: {_tech_action(ma_reg, align)}",
+        f"• {a_quant}",
         "",
-        "B. Co ban",
-        "(Chi hien thi khi co du lieu co ban trong pack.)",
+    ]
+    # ----------------------------
+    # B. FUNDAMENTAL ANALYSIS
+    # ----------------------------
+    lines.append("B. FUNDAMENTAL ANALYSIS")
+    seed_b = f"{tick}|B|{fund_rec}|{fund_target_k}|{fund_upside}"
+    has_fund = (fund_target_k != "–") or (fund_rec != "–") or (fund_upside != "–")
+
+    if has_fund:
+        b_ctx = pick_phrase("B_CTX_HAS", seed_b) or "Dữ liệu cơ bản có sẵn trong gói hiện tại."
+        b_ass = (pick_phrase("B_ASSESS", seed_b) or "Khuyến nghị (tham khảo) {rec}; Giá mục tiêu (k) {target_k} | Upside {upside}.").format(
+            rec=fund_rec,
+            target_k=fund_target_k,
+            upside=fund_upside,
+        )
+        b_act = pick_phrase("B_ACT_HAS", seed_b) or "Dùng làm neo kỳ vọng trung hạn; vẫn ưu tiên kỷ luật kỹ thuật và quản trị rủi ro khi triển khai."
+        lines += [
+            f"• Context: {b_ctx}",
+            f"• Assessment: {b_ass}",
+            f"• Action: {b_act}",
+        ]
+    else:
+        b_ctx = pick_phrase("B_CTX_NONE", seed_b) or "Chưa có dữ liệu cơ bản trong gói hiện tại."
+        b_act = pick_phrase("B_ACT_NONE", seed_b) or "Tạm thời dùng khung kỹ thuật và kỷ luật giao dịch; bổ sung dữ liệu cơ bản khi cần quyết định trung hạn."
+        lines += [
+            f"• Context: {b_ctx}",
+            f"• Action: {b_act}",
+        ]
+    # ----------------------------
+    # C. TRADE PLAN
+    # ----------------------------
+    seed_c = f"{tick}|C|{setup_name}|{plan_state}|{_disp(rr_txt)}|{dp_act}|{dp_urg}|{comp_status}"
+
+    c_ctx = (pick_phrase("C_CTX", seed_c) or "Setup chính {setup}; trạng thái {plan_state}; RR {rr}.").format(
+        setup=setup_name,
+        plan_state=plan_state,
+        rr=_disp(rr_txt),
+    )
+    c_exec = (pick_phrase("C_ASSESS_EXEC", seed_c) or "Kỷ luật triển khai {act} ({urg}).").format(
+        act=dp_act,
+        urg=dp_urg,
+    )
+
+    if comp_missing:
+        miss = ", ".join([str(x) for x in comp_missing[:6]])
+        c_comp = (pick_phrase("C_ASSESS_COMP_MISS", seed_c) or "Hoàn thiện kế hoạch {comp} (thiếu: {miss}).").format(
+            comp=comp_status,
+            miss=miss,
+        )
+    else:
+        c_comp = (pick_phrase("C_ASSESS_COMP_OK", seed_c) or "Hoàn thiện kế hoạch {comp}.").format(
+            comp=comp_status,
+        )
+
+    lines += [
         "",
         "C. TRADE PLAN",
-        f"Primary setup: {setup_name} | Status: {plan_status} | RR: {rr_txt}.",
-        f"Plan tags: {tags_preview}.",
-        (f"PlanCompleteness: {comp_status} (missing: {', '.join([str(x) for x in comp_missing])})" if comp_status != "N/A" and comp_missing else f"PlanCompleteness: {comp_status}."),
-        (f"Reason: {comp_msg}." if comp_msg else ""),
-        (f"Decision Layer: {dp_act} ({dp_urg})." if dp_act != "N/A" else ""),
+        f"• Context: {c_ctx}",
+        f"• Assessment: {c_exec}",
+        f"• Assessment: {c_comp}",
+    ]
+
+    if comp_msg:
+        c_note = (pick_phrase("C_NOTE", seed_c) or "Ghi chú: {msg}.").format(msg=comp_msg)
+        lines.append(f"• {c_note}")
+
+    if tags_preview != "N/A":
+        c_tags = (pick_phrase("C_TAGS", seed_c) or "Tags: {tags}.").format(tags=tags_preview)
+        lines.append(f"• {c_tags}")
+
+    lines += [
+        f"• Action: {_plan_action(dp_act)}",
         "",
-        "D. Rui ro vs loi nhuan",
+        "D. Rủi ro / Lợi nhuận",
         f"Risk%: {risk}",
         f"Reward%: {reward}",
         f"RR: {must_rr}",
         f"Confidence (Tech): {must_conf}",
     ]
 
-    return "\n".join(lines).strip() + "\n"
+    return "\n".join([x for x in lines if x is not None and str(x).strip() != ""]).strip() + "\n"
+
+
+# ============================================================
+# Phase 4: Rewrite-only (draft -> GPT polish) with validators
+# ============================================================
+
+_FUND_LOCK_TOKENS = [
+    "target", "upside", "recommendation",
+    "khuyến nghị", "gia muc tieu", "giá mục tiêu", "mục tiêu", "định giá",
+]
+
+def _section_slice(text: str, start_pat: str, end_pat: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    m1 = re.search(start_pat, text, flags=re.IGNORECASE | re.MULTILINE)
+    if not m1:
+        return ""
+    s = text[m1.end():]
+    m2 = re.search(end_pat, s, flags=re.IGNORECASE | re.MULTILINE)
+    return (s[:m2.start()] if m2 else s).strip()
+
+def validate_fund_lock(text: str) -> bool:
+    """Ensure fundamental tokens only appear in section B."""
+    a = _section_slice(text, r"^\s*A\.", r"^\s*B\.")
+    c = _section_slice(text, r"^\s*C\.", r"^\s*D\.")
+    d = _section_slice(text, r"^\s*D\.", r"\Z")
+    blob = f"\n{a}\n{c}\n{d}\n".lower()
+    for tok in _FUND_LOCK_TOKENS:
+        if tok.lower() in blob:
+            return False
+    return True
+
+def _number_tokens(s: str) -> List[str]:
+    if not isinstance(s, str):
+        return []
+    return re.findall(r"\b\d+(?:\.\d+)?\b", s)
+
+def validate_no_new_numbers(draft: str, out: str) -> bool:
+    """Heuristic: forbid introducing new numeric tokens beyond the draft.
+
+    - Ignores small section numbering (<=9).
+    - Allows exact reuse of any numeric token in draft.
+    """
+    dset = set(_number_tokens(draft))
+    oset = set(_number_tokens(out))
+    allow_small = {str(i) for i in range(0, 10)}
+    new = {x for x in oset - dset if x not in allow_small}
+    return len(new) == 0
+
+def _rewrite_report_ad_only(draft: str, primary: Dict[str, Any], *, model: str = "gpt-4o") -> str:
+    """Rewrite-only: GPT receives the deterministic draft only (no full JSON)."""
+    prompt = f"""
+Bạn là biên tập viên ngôn ngữ cho báo cáo A–D. Dưới đây là BẢN NHÁP do engine đã chuẩn hoá.
+NHIỆM VỤ: chỉ chỉnh câu chữ cho mượt, rõ ràng hơn; KHÔNG thêm dữ kiện; KHÔNG suy luận; KHÔNG đổi số.
+
+RÀNG BUỘC BẮT BUỘC:
+- Giữ nguyên cấu trúc và tiêu đề: A. ... / B. ... / C. ... / D. ...
+- Mọi con số phải GIỮ NGUYÊN y hệt (không đổi, không thêm số mới).
+- Mục B là nơi DUY NHẤT được nhắc "khuyến nghị/giá mục tiêu/upside/target". Tuyệt đối không nhắc các nội dung này ở A/C/D.
+- Mục D bắt buộc đúng 4 dòng và COPY ĐÚNG số (không được tự tính):
+  Risk%: ...
+  Reward%: ...
+  RR: ...
+  Confidence (Tech): ...
+
+BẢN NHÁP (không được làm thay đổi dữ kiện, chỉ làm mượt câu chữ):
+{draft}
+""".strip()
+
+    guarded = call_gpt_with_guard(prompt, {"PrimarySetup": primary}, max_retry=2, model=model)
+
+    if not guarded:
+        return draft
+
+    if not validate_fund_lock(guarded):
+        return draft
+
+    if not validate_no_new_numbers(draft, guarded):
+        return draft
+
+    return guarded
 
 
 # ============================================================
@@ -315,8 +528,10 @@ def _deterministic_report_ad(data: Dict[str, Any], note: str = "") -> str:
 def generate_insight_report(data: Dict[str, Any]) -> str:
     """Generate A–D report.
 
-    - Uses GPT narrative if OPENAI_API_KEY exists.
-    - Falls back to deterministic A–D if key missing or call fails.
+    Phase 4:
+    - Engine builds a deterministic draft.
+    - GPT (optional) only polishes the draft (rewrite-only), without access to full JSON.
+    - Validators + fallback prevent drift (Section D, fund lock, new numbers).
     """
 
     if not isinstance(data, dict):
@@ -331,6 +546,7 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
 
     ap = normalize_analysis_pack(data.get("AnalysisPack"))
     data["AnalysisPack"] = ap
+
     last = data.get("Last") or (ap.get("Last") or {})
     close = _fmt_price((last or {}).get("Close"))
 
@@ -340,86 +556,23 @@ def generate_insight_report(data: Dict[str, Any]) -> str:
         f"{tick} — {close} | Diem tin cay: {conv_txt} | {scenario}</h2>"
     )
 
-    fund = ap.get("Fundamental") or {}
-    fund_text = (
-        f"Khuyen nghi: {fund.get('Recommendation', 'N/A')} | "
-        f"Gia muc tieu: {_fmt_thousand(fund.get('Target'))} | "
-        f"Upside: {_fmt_pct(fund.get('UpsidePct'))}"
-        if isinstance(fund, dict) and fund
-        else "Khong co du lieu co ban"
-    )
-
-    pack_json = _json_strict(ap)
-
-    primary = (ap.get("PrimarySetup") or {})
-    must_risk = primary.get("RiskPct")
-    must_reward = primary.get("RewardPct")
-    must_rr = primary.get("RR")
-    must_conf = primary.get("Confidence (Tech)", primary.get("Probability"))
-
-    prompt = f"""
-Ban la "INCEPTION Narrative Editor" cho bao cao phan tich co phieu.
-Vai tro: dien giai + bien tap van phong tu JSON "AnalysisPack".
-Tuyet doi:
-- Khong bia so, khong uoc luong, khong tu tinh.
-- Chi duoc dung dung con so co san trong JSON.
-
-RANG BUOC QUAN TRONG (FUNDAMENTAL LOCK):
-- Fundamental (Recommendation/Target/Upside/...) CHI DUOC NHAC O MUC B.
-- O A/C/D: CAM nhac Target/Upside/Recommendation.
-
-FORMAT OUTPUT:
-A. Ky thuat
-1) ...
-...
-8) ...
-
-B. Co ban
-(1-3 cau, dung dung dong du lieu cung cap)
-
-C. TRADE PLAN
-(5-9 cau)
-
-QUY TAC BAT BUOC CHO MUC C (PLAN COMPLETENESS):
-- Neu AnalysisPack.TradePlanPack.plan_primary.plan_completeness.status = FAIL (hoac gates.plan=FAIL):
-  + PHAI noi ro plan chua hoan chinh (thieu Stop/Entry zone) va KHONG duoc khuyen nghi vao lenh.
-  + Neu can, giai thich ngan gon vi sao he thong tu ha trang thai (WATCH/INVALID).
-
-D. Rui ro vs loi nhuan
-Risk%: ...
-Reward%: ...
-RR: ...
-Confidence (Tech): ...
-
-MUC B (FUNDAMENTAL - chi dung dong nay, khong suy luan them):
-{fund_text}
-
-RANG BUOC MUC D (COPY DUNG, khong tu tinh/uoc luong):
-- Risk% = {must_risk}
-- Reward% = {must_reward}
-- RR = {must_rr}
-- Confidence (Tech) = {must_conf}
-
-Du lieu (AnalysisPack JSON):
-{pack_json}
-""".strip()
+    draft = _deterministic_report_ad(data)
 
     key = get_openai_api_key()
-    if not key:
-        content = _deterministic_report_ad(
-            data,
-            note="NOTE: GPT narrative disabled (OPENAI_API_KEY not set). Using deterministic A–D.",
-        )
-        return f"{header_html}\n\n{content}"
+    enabled = str(os.getenv("INCEPTION_GPT_REWRITE_REPORT_AD", "1")).strip() not in {"0", "false", "False", "no", "NO"}
+    model = str(os.getenv("INCEPTION_GPT_MODEL_REPORT_AD", os.getenv("INCEPTION_GPT_MODEL", "gpt-4o"))).strip() or "gpt-4o"
+
+    if (not key) or (not enabled):
+        note = "NOTE: GPT rewrite-only disabled (no API key or feature flag off). Using deterministic A–D."
+        return f"{header_html}\n\n{note}\n\n{draft}".strip()
+
+    primary = _as_dict(ap.get("PrimarySetup"))
 
     try:
-        content = call_gpt_with_guard(prompt, ap, max_retry=2)
+        content = _rewrite_report_ad_only(draft, primary, model=model)
         if not content:
-            raise RuntimeError("Empty GPT response")
-        return f"{header_html}\n\n{content}"
+            raise RuntimeError("Empty rewrite result")
+        return f"{header_html}\n\n{content}".strip()
     except Exception as e:
-        content = _deterministic_report_ad(
-            data,
-            note=f"NOTE: GPT call failed ({e}). Using deterministic A–D.",
-        )
-        return f"{header_html}\n\n{content}"
+        note = f"NOTE: GPT rewrite-only failed ({e}). Using deterministic A–D."
+        return f"{header_html}\n\n{note}\n\n{draft}".strip()

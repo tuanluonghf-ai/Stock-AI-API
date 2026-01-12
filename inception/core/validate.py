@@ -175,6 +175,14 @@ def collect_data_quality_pack(
 
 _NUM_RE = re.compile(r"\d+(?:[\.,]\d+)?")
 
+def _split_sentences_safe(t: str) -> list[str]:
+    """Split sentences on .!? but avoid splitting decimal numbers (e.g., 2.5)."""
+    if not t:
+        return []
+    parts = [s.strip() for s in re.split(r'(?<!\d)[\.!?]+(?!\d)', t) if s.strip()]
+    return parts
+
+
 
 def _count_numbers_in_sentence(s: str) -> int:
     if not s:
@@ -219,7 +227,7 @@ def validate_dna_line(
 
     # number density guardrail (per sentence)
     # Split on ., !, ? while keeping it simple.
-    sentences = [s.strip() for s in re.split(r"[\.!?]+", t_strip) if s.strip()]
+    sentences = _split_sentences_safe(t_strip)
     if not sentences:
         sentences = [t_strip]
 
@@ -263,7 +271,7 @@ def validate_short_text(
         if re.search(r"(^|\s)([-*•]|\d+\))\s+", t_strip):
             issues.append("BULLET_STYLE")
 
-    sentences = [s.strip() for s in re.split(r"[\.!?]+", t_strip) if s.strip()]
+    sentences = _split_sentences_safe(t_strip)
     if not sentences:
         sentences = [t_strip]
 

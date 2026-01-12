@@ -29,7 +29,8 @@ from inception.core.contracts import normalize_analysis_pack
 from inception.core.dashboard_pack import compute_dashboard_summary_pack_v1
 from inception.core.helpers import _safe_float
 from inception.core.narrative_draft_pack import build_narrative_draft_pack_v1
-from inception.core.validate import validate_dna_line
+import os
+from inception.core.result_contract import finalize_result_pack_v1
 
 from inception.modules import load_default_modules
 from inception.modules.base import run_modules
@@ -236,38 +237,25 @@ def build_result(
     # 5.5) NarrativeDraftPack (Engine-built; no LLM). Attach to behavioural/UI layers.
     try:
         ndp = build_narrative_draft_pack_v1(analysis_pack, ctx) or {}
-        # Validate DNA line hard guardrails; never crash.
+        # Optional (Phase 2–3): GPT rewrite-only. Disabled by default.
+        # Enable via INCEPTION_ENABLE_GPT_REWRITE=1. Always guarded (never crash).
         try:
-            dna_cfg = (ndp.get("dna") or {}) if isinstance(ndp, dict) else {}
-            v = validate_dna_line(
-                dna_cfg.get("line_draft"),
-                banned_words=dna_cfg.get("banned_words"),
-                forbid_tokens=dna_cfg.get("forbid_tokens"),
-                max_numbers_per_sentence=int(dna_cfg.get("max_numbers_per_sentence") or 2),
-            )
-            if isinstance(dna_cfg, dict):
-                dna_cfg["validator"] = v
-                ndp["dna"] = dna_cfg
+            enable = str(os.environ.get("INCEPTION_ENABLE_GPT_REWRITE", "0")).strip() in ("1", "true", "TRUE", "yes", "YES")
         except Exception:
-            pass
+            enable = False
+        if enable:
+            try:
+                from inception.core.dna_rewrite_only import rewrite_dna_line_only
+                ndp = rewrite_dna_line_only(draft_pack=ndp, ctx=ctx) or ndp
+            except Exception:
+                pass
 
-
-        # 5.5.1) Phase 2 (optional): GPT rewrite-only for DNALine (validate + fallback; never crash).
-        try:
-            from inception.core.dna_rewrite_only import rewrite_dna_line_only
-            ndp = rewrite_dna_line_only(draft_pack=ndp, ctx=ctx) or ndp
-        except Exception:
-            pass
-
-        # 5.5.2) Phase 3 (optional): GPT rewrite-only for StatusLine & PlanLine.
-        # Guarded by validators + fallback (never crash; never drift facts).
-        try:
-            from inception.core.narrative_rewrite_only import rewrite_status_line_only, rewrite_plan_line_only
-
-            ndp = rewrite_status_line_only(draft_pack=ndp, ctx=ctx) or ndp
-            ndp = rewrite_plan_line_only(draft_pack=ndp, ctx=ctx) or ndp
-        except Exception:
-            pass
+            try:
+                from inception.core.narrative_rewrite_only import rewrite_status_line_only, rewrite_plan_line_only
+                ndp = rewrite_status_line_only(draft_pack=ndp, ctx=ctx) or ndp
+                ndp = rewrite_plan_line_only(draft_pack=ndp, ctx=ctx) or ndp
+            except Exception:
+                pass
 
         if isinstance(analysis_pack, dict):
             analysis_pack["NarrativeDraftPack"] = ndp
@@ -289,5 +277,11 @@ def build_result(
         result["Report"] = (modules_out.get("report_ad", {}) or {}).get("report", "")
     except Exception:
         result["Report"] = ""
+
+    # 8) Final contract gate (Engine → UI): ensure packs exist & are UI-safe.
+    try:
+        result = finalize_result_pack_v1(result)
+    except Exception:
+        pass
 
     return result

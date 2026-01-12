@@ -78,6 +78,19 @@ def compute_dashboard_summary_pack_v1(
     ap = analysis_pack or {}
     cp = character_pack or {}
 
+    # --- quote & market (UI-safe primitives) ---
+    ticker = _safe_text(ap.get("Ticker") or "").strip().upper() or "N/A"
+    last_pack = ap.get("Last") or {}
+    last_pack = last_pack if isinstance(last_pack, dict) else {}
+    close_px = last_pack.get("Close")
+
+    mkt = ap.get("Market") or {}
+    mkt = mkt if isinstance(mkt, dict) else {}
+    stock_chg_pct = mkt.get("StockChangePct")
+    rel_strength = mkt.get("RelativeStrengthVsVNINDEX")
+
+    scenario_name = _safe_text((ap.get("Scenario12") or {}).get("Name") or "N/A").strip()
+
     # --- core inputs ---
     primary = ap.get("PrimarySetup") or {}
     primary = primary if isinstance(primary, dict) else {}
@@ -100,6 +113,30 @@ def compute_dashboard_summary_pack_v1(
     ma_reg = _safe_text(ma.get("Regime") or "N/A").strip()
     vol_reg = _safe_text(volp.get("Regime") or "N/A").strip()
     vol_ratio = (protech.get("Volume") or {}).get("Ratio")
+
+    # Condensed structure snapshot (renderer-friendly; keeps "Current Status" stable)
+    rsi = protech.get("RSI") or {}
+    rsi = rsi if isinstance(rsi, dict) else {}
+    macd = protech.get("MACD") or {}
+    macd = macd if isinstance(macd, dict) else {}
+    bias = protech.get("Bias") or {}
+    bias = bias if isinstance(bias, dict) else {}
+
+    fib_ctx = ((ap.get("Fibonacci") or {}).get("Context") or {})
+    fib_ctx = fib_ctx if isinstance(fib_ctx, dict) else {}
+
+    structure_snapshot = {
+        "ma_regime": ma_reg,
+        "rsi_state": _safe_text(rsi.get("State") or "N/A").strip(),
+        "rsi_direction": _safe_text(rsi.get("Direction") or "N/A").strip(),
+        "macd_state": _safe_text(macd.get("State") or "N/A").strip(),
+        "macd_zero": _safe_text(macd.get("ZeroLine") or "N/A").strip(),
+        "rsi_macd_alignment": _safe_text(bias.get("Alignment") or "N/A").strip(),
+        "fib_short_band": _safe_text(fib_ctx.get("ShortBand") or "N/A").strip(),
+        "fib_long_band": _safe_text(fib_ctx.get("LongBand") or "N/A").strip(),
+        "fib_conflict": bool(fib_ctx.get("FiboConflictFlag")) if isinstance(fib_ctx, dict) else False,
+        "vol_ratio": vol_ratio,
+    }
 
     # Flags
     flags_list = list(cp.get("Flags") or [])
@@ -331,6 +368,14 @@ def compute_dashboard_summary_pack_v1(
     out = {
         "schema": "DashboardSummaryPack.v1",
         "CurrentStatusCard": {
+            "ticker": ticker,
+            "close_px": close_px,
+            "stock_chg_pct": stock_chg_pct,
+            "scenario_name": scenario_name,
+            "relative_strength_vs_vnindex": rel_strength,
+            "setup_name": setup_name,
+            "gate_status": (gate_status or "").strip().upper(),
+            "structure_snapshot": structure_snapshot,
             "state_capsule_line": state_capsule_line,
             "master_total": master_total,
             "conviction": conviction,

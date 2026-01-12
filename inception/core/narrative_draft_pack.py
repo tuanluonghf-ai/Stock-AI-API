@@ -288,10 +288,11 @@ def _plan_line(ap: Dict[str, Any]) -> str:
     state = _as_text(primary.get("state")).upper()
     ptype_label = _PLAN_TYPE_MAP.get(ptype.upper(), ptype if ptype != "-" else "-")
 
+    # Sentence 1: plan focus (+ optional blocker) in a single sentence.
     if ptype_label == "-":
-        base = "Trade Plan chưa đủ dữ liệu để chốt trọng tâm."
+        s1 = "Trade Plan chưa đủ dữ liệu để chốt trọng tâm"
     else:
-        base = f"Trade Plan ưu tiên {ptype_label} (trạng thái {state})."
+        s1 = f"Trade Plan ưu tiên {ptype_label} (trạng thái {state})"
 
     reasons = primary.get("fail_reasons") or []
     top_code = ""
@@ -299,7 +300,11 @@ def _plan_line(ap: Dict[str, Any]) -> str:
         top = reasons[0] if isinstance(reasons[0], dict) else {}
         top_code = _as_text(top.get("code"), fallback="").strip()
 
-    # Optional: attach PrimarySetup RR/Risk in a second sentence (keep numbers minimal).
+    if top_code:
+        s1 = f"{s1}, điểm nghẽn chính: {top_code}"
+    s1 = s1.rstrip(".") + "."
+
+    # Sentence 2 (optional): RR/Risk discipline, keep numbers minimal.
     ps = ap.get("PrimarySetup") or {}
     ps = ps if isinstance(ps, dict) else {}
     rr = _safe_float(ps.get("RR"))
@@ -316,14 +321,7 @@ def _plan_line(ap: Dict[str, Any]) -> str:
     elif risk_txt != "-":
         s2 = f"Trọng tâm kỷ luật: rủi ro {risk_txt}."
 
-    if top_code:
-        out = f"{base} Điểm nghẽn chính: {top_code}."
-    else:
-        out = f"{base}".rstrip(".") + "."
-
-    if s2:
-        return f"{out} {s2}"
-    return out
+    return f"{s1} {s2}".strip() if s2 else s1
 
 
 def _empathy_allowed(ap: Dict[str, Any]) -> bool:
