@@ -28,6 +28,8 @@ from inception.core.analysis_builder import build_base_result_v1
 from inception.core.contracts import normalize_analysis_pack
 from inception.core.dashboard_pack import compute_dashboard_summary_pack_v1
 from inception.core.helpers import _safe_float
+from inception.core.narrative_draft_pack import build_narrative_draft_pack_v1
+from inception.core.validate import validate_dna_line
 
 from inception.modules import load_default_modules
 from inception.modules.base import run_modules
@@ -230,6 +232,48 @@ def build_result(
     result["Modules"] = modules_out
     if module_errors:
         result["_ModuleErrors"] = module_errors
+
+    # 5.5) NarrativeDraftPack (Engine-built; no LLM). Attach to behavioural/UI layers.
+    try:
+        ndp = build_narrative_draft_pack_v1(analysis_pack, ctx) or {}
+        # Validate DNA line hard guardrails; never crash.
+        try:
+            dna_cfg = (ndp.get("dna") or {}) if isinstance(ndp, dict) else {}
+            v = validate_dna_line(
+                dna_cfg.get("line_draft"),
+                banned_words=dna_cfg.get("banned_words"),
+                forbid_tokens=dna_cfg.get("forbid_tokens"),
+                max_numbers_per_sentence=int(dna_cfg.get("max_numbers_per_sentence") or 2),
+            )
+            if isinstance(dna_cfg, dict):
+                dna_cfg["validator"] = v
+                ndp["dna"] = dna_cfg
+        except Exception:
+            pass
+
+
+        # 5.5.1) Phase 2 (optional): GPT rewrite-only for DNALine (validate + fallback; never crash).
+        try:
+            from inception.core.dna_rewrite_only import rewrite_dna_line_only
+            ndp = rewrite_dna_line_only(draft_pack=ndp, ctx=ctx) or ndp
+        except Exception:
+            pass
+
+        # 5.5.2) Phase 3 (optional): GPT rewrite-only for StatusLine & PlanLine.
+        # Guarded by validators + fallback (never crash; never drift facts).
+        try:
+            from inception.core.narrative_rewrite_only import rewrite_status_line_only, rewrite_plan_line_only
+
+            ndp = rewrite_status_line_only(draft_pack=ndp, ctx=ctx) or ndp
+            ndp = rewrite_plan_line_only(draft_pack=ndp, ctx=ctx) or ndp
+        except Exception:
+            pass
+
+        if isinstance(analysis_pack, dict):
+            analysis_pack["NarrativeDraftPack"] = ndp
+        result["NarrativeDraftPack"] = ndp
+    except Exception:
+        pass
 
     # 6) Dashboard summary
     try:

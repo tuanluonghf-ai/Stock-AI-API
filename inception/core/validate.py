@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import re
+
 from .contracts import as_dict
 
 
@@ -166,3 +168,125 @@ def collect_data_quality_pack(
         "warn_count": int(warn),
         "issues": issues_sorted[: max(0, int(max_issues))],
     }
+
+# ---------------------------------------------------------------------
+# Narrative validation (DNA tone guardrails)
+# ---------------------------------------------------------------------
+
+_NUM_RE = re.compile(r"\d+(?:[\.,]\d+)?")
+
+
+def _count_numbers_in_sentence(s: str) -> int:
+    if not s:
+        return 0
+    return len(_NUM_RE.findall(s))
+
+
+def validate_dna_line(
+    text: Any,
+    banned_words: Optional[Sequence[str]] = None,
+    forbid_tokens: Optional[Sequence[str]] = None,
+    max_numbers_per_sentence: int = 2,
+) -> Dict[str, Any]:
+    """Validate DNALine against hard guardrails.
+
+    Returns a dict:
+      {"ok": bool, "issues": [str, ...]}
+
+    This function is intentionally conservative: it flags early rather than
+    attempting to repair text.
+    """
+    t = "" if text is None else str(text)
+    t_strip = t.strip()
+    issues: List[str] = []
+
+    if not t_strip:
+        return {"ok": False, "issues": ["EMPTY"]}
+
+    tl = t_strip.lower()
+
+    # banned words
+    bw = [str(x).lower().strip() for x in (banned_words or []) if str(x).strip()]
+    for w in bw:
+        if w and w in tl:
+            issues.append(f"BANNED_WORD:{w}")
+
+    # forbidden MS/CV mentions
+    ft = [str(x).lower().strip() for x in (forbid_tokens or []) if str(x).strip()]
+    for tok in ft:
+        if tok and tok in tl:
+            issues.append(f"FORBID_TOKEN:{tok}")
+
+    # number density guardrail (per sentence)
+    # Split on ., !, ? while keeping it simple.
+    sentences = [s.strip() for s in re.split(r"[\.!?]+", t_strip) if s.strip()]
+    if not sentences:
+        sentences = [t_strip]
+
+    for i, s in enumerate(sentences, start=1):
+        n = _count_numbers_in_sentence(s)
+        if n > int(max_numbers_per_sentence):
+            issues.append(f"TOO_MANY_NUMBERS:S{i}:{n}")
+
+    return {"ok": len(issues) == 0, "issues": issues}
+
+
+def validate_short_text(
+    text: Any,
+    *,
+    max_sentences: int = 2,
+    max_numbers_per_sentence: int = 2,
+    forbid_bullets: bool = True,
+) -> Dict[str, Any]:
+    """Validate a short narrative line (Status/Plan) for rewrite-only.
+
+    Guardrails (conservative):
+    - Must not be empty.
+    - Must be within max_sentences (split on . ! ?).
+    - Each sentence must not exceed max_numbers_per_sentence.
+    - Optionally forbid bullet-like markers and newlines.
+
+    Returns {"ok": bool, "issues": [str, ...]}.
+    """
+    t = "" if text is None else str(text)
+    t_strip = t.strip()
+    issues: List[str] = []
+
+    if not t_strip:
+        return {"ok": False, "issues": ["EMPTY"]}
+
+    if "\n" in t_strip or "\r" in t_strip:
+        issues.append("NEWLINE")
+
+    if forbid_bullets:
+        # Common bullet tokens
+        if re.search(r"(^|\s)([-*•]|\d+\))\s+", t_strip):
+            issues.append("BULLET_STYLE")
+
+    sentences = [s.strip() for s in re.split(r"[\.!?]+", t_strip) if s.strip()]
+    if not sentences:
+        sentences = [t_strip]
+
+    if len(sentences) > int(max_sentences):
+        issues.append(f"TOO_MANY_SENTENCES:{len(sentences)}")
+
+    for i, s in enumerate(sentences, start=1):
+        n = _count_numbers_in_sentence(s)
+        if n > int(max_numbers_per_sentence):
+            issues.append(f"TOO_MANY_NUMBERS:S{i}:{n}")
+
+    return {"ok": len(issues) == 0, "issues": issues}
+
+
+def validate_contains_phrases(text: Any, required_phrases: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+    """Ensure all required phrases appear verbatim in text."""
+    t = "" if text is None else str(text)
+    t_strip = t.strip()
+    req = [str(x) for x in (required_phrases or []) if str(x).strip()]
+    issues: List[str] = []
+    if not t_strip:
+        return {"ok": False, "issues": ["EMPTY"]}
+    for p in req:
+        if p not in t_strip:
+            issues.append(f"MISSING_PHRASE:{p}")
+    return {"ok": len(issues) == 0, "issues": issues}
