@@ -1,0 +1,59 @@
+{
+  "contract": {
+    "issues": [],
+    "ok": true
+  },
+  "dashboard": {
+    "class": "",
+    "conviction_score": null,
+    "gate_status": "",
+    "master_score_total": null,
+    "scenario": "",
+    "style_tilt": ""
+  },
+  "decision": {
+    "action": "WAIT",
+    "conviction": null,
+    "guardrails": "",
+    "size_hint": ""
+  },
+  "generated_at_utc": "2026-01-12T13:58:02Z",
+  "meta": {
+    "error": "",
+    "has_error": false,
+    "module_errors": []
+  },
+  "narrative": {
+    "dna": {
+      "line": "VNM là kiểu cổ phiếu đi ngang nhưng biến động mạnh; lợi thế nằm ở biên dao động tạo cơ hội trading ngắn hạn; đổi lại, điều kiện bắt buộc là giảm quy mô và ưu tiên phản ứng nhanh; chỉ tham gia khi vùng giá rõ ràng, mất biên là đứng ngoài.",
+      "ok": true,
+      "reasons": []
+    },
+    "plan": {
+      "line": "Trade Plan ưu tiên Mean-reversion (trạng thái WATCH), điểm nghẽn chính: STRUCTURE_CEILING. Trọng tâm kỷ luật: RR 6.5; rủi ro 2.2%.",
+      "ok": true,
+      "reasons": []
+    },
+    "status": {
+      "line": "trên MA200 (xu hướng dài hạn thuận); đang vướng vùng cản; dòng tiền trung tính. Mức rủi ro thấp.",
+      "ok": true,
+      "reasons": []
+    }
+  },
+  "schema": "GoldenSnapshot.v1",
+  "ticker": "VNM",
+  "trade_plan": {
+    "name": "",
+    "plan_completeness": {
+      "message": "-",
+      "missing": [],
+      "status": "PASS"
+    },
+    "portion_1": null,
+    "portion_2": null,
+    "reward_pct": null,
+    "risk_pct": null,
+    "rr": null,
+    "triggers": {}
+  }
+}

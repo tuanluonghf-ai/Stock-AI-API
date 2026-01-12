@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 import streamlit as st
 
 APP_TITLE = os.environ.get("INCEPTION_APP_TITLE", "INCEPTION")
-APP_VERSION = os.environ.get("INCEPTION_APP_VERSION", "16.0")
+APP_VERSION = os.environ.get("INCEPTION_APP_VERSION", "16.1")
 
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
@@ -22,7 +22,6 @@ _require_path(REPO_ROOT / "inception" / "__init__.py",
               "Ensure package inception/ exists at repo root and has __init__.py")
 
 from inception.core.pipeline import build_result as build_result_pipeline
-from inception.core.report_ad_builder import generate_insight_report
 from inception.modules import load_default_modules
 from inception.ui.renderers import render_appendix_e, render_report_pretty
 from inception.ui.styles import GLOBAL_CSS, render_header_html
@@ -112,7 +111,7 @@ def main() -> None:
 
     if run_btn:
         if user_key not in VALID_KEYS:
-            st.error("❌ Client Code không đúng. Vui lòng nhập lại.")
+            st.error("Client Code không đúng. Vui lòng nhập lại.")
             return
 
         with st.spinner(f"Đang xử lý phân tích {ticker_input}..."):
@@ -144,7 +143,9 @@ def main() -> None:
                 except Exception:
                     report = ""
                 if not report:
-                    report = generate_insight_report(result if isinstance(result, dict) else {})
+                    # Enforce single source of truth: report should come from report_ad module.
+                    # If missing, render Appendix E without a report (UI will still show packs).
+                    st.warning("Report A–D chưa sẵn sàng (module report_ad). Vui lòng kiểm tra _ModuleErrors / DataQuality.")
 
                 st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -158,7 +159,7 @@ def main() -> None:
                     render_report_pretty(report, analysis_pack)
 
             except Exception as e:
-                st.error(f"⚠️ Lỗi xử lý: {e}")
+                st.error(f"Lỗi xử lý: {e}")
                 try:
                     import traceback
                     with st.expander("Chi tiết lỗi (traceback)", expanded=False):
