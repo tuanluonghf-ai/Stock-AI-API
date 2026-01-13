@@ -2,7 +2,7 @@
   "enabled_modules": [
     "character"
   ],
-  "generated_at_utc": "2026-01-12T13:57:40Z",
+  "generated_at_utc": "STATIC",
   "hsc_target": "Tickers Target Price.xlsx",
   "mode": "FLAT",
   "price_vol": "Price_Vol.xlsx",

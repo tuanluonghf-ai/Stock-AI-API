@@ -46,6 +46,12 @@ def _safe_get(d: Any, path: List[str], default=None):
             return default
     return cur
 
+def _safe_text(x: Any) -> str:
+    try:
+        return "" if x is None else str(x)
+    except Exception:
+        return ""
+
 def _is_number(x: Any) -> bool:
     return isinstance(x, (int, float)) and x == x  # not NaN
 
@@ -80,11 +86,14 @@ def _extract_snapshot(result: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract a compact, high-signal snapshot that is stable across UI refactors.
 
-    Focus:
-      - ContractPack
-      - DashboardSummaryPack (headline signals)
-      - TradePlanPack / DecisionPack (action + risk framing)
-      - NarrativeDraftPack (DNA/Status/Plan + validators)
+    Stability-first focus:
+      - stable_action (DecisionStabilityPack)
+      - plan_state (PlanStabilityPack)
+      - narrative anchor regime (NarrativeAnchorPack)
+
+    We intentionally avoid including volatile "draft text" fields so that
+    small wording / raw-signal drifts do not break golden baselines once
+    Stability Layer is enabled.
     """
     ap = result.get("AnalysisPack") if isinstance(result, dict) else {}
     dash = result.get("DashboardSummaryPack", {}) if isinstance(result, dict) else {}
@@ -100,74 +109,57 @@ def _extract_snapshot(result: Dict[str, Any]) -> Dict[str, Any]:
         return p if isinstance(p, dict) else {}
 
     contract = pick_pack("ContractPack")
+    dsp = pick_pack("DecisionStabilityPack")
+    psp = pick_pack("PlanStabilityPack")
+    nap = pick_pack("NarrativeAnchorPack")
     ndp = pick_pack("NarrativeDraftPack")
+    sdp = pick_pack("StabilityDiagnosticsPack")  # keep validators only
 
-    # Character module output sometimes holds TradePlan/Decision
-    modules = result.get("Modules", {}) if isinstance(result, dict) else {}
-    ch = modules.get("character", {}) if isinstance(modules, dict) else {}
-    trade_plan = {}
-    decision = {}
+    stable_action = _safe_get(dsp, ["stable_action"], "") or _safe_get(dsp, ["stableAction"], "") or ""
+    plan_state = _safe_get(psp, ["stable_plan_state"], "") or _safe_get(psp, ["plan_state"], "") or ""
+    regime = _safe_get(nap, ["regime"], "") or _safe_get(nap, ["anchor", "regime"], "") or ""
 
-    # Common keys in your codebase: TradePlanPack / DecisionPack
-    for k in ("TradePlanPack", "TradePlanPack.v1", "TradePlan"):
-        trade_plan = ch.get(k) if isinstance(ch, dict) and isinstance(ch.get(k), dict) else trade_plan
-        trade_plan = ap.get(k) if isinstance(ap, dict) and isinstance(ap.get(k), dict) else trade_plan
-        trade_plan = result.get(k) if isinstance(result.get(k), dict) else trade_plan
-
-    for k in ("DecisionPack", "DecisionPack.v1", "Decision"):
-        decision = ch.get(k) if isinstance(ch, dict) and isinstance(ch.get(k), dict) else decision
-        decision = ap.get(k) if isinstance(ap, dict) and isinstance(ap.get(k), dict) else decision
-        decision = result.get(k) if isinstance(result.get(k), dict) else decision
-
-    # Minimal normalization for high-signal fields
     snap = {
-        "schema": "GoldenSnapshot.v1",
-        "generated_at_utc": _utc_now(),
+        "schema": "GoldenSnapshot.v2",
+        "generated_at_utc": "STATIC",
         "ticker": _safe_get(ap, ["Ticker"], _safe_get(ap, ["ticker"], "")) or result.get("Ticker", ""),
         "contract": {
             "ok": bool(contract.get("ok")) if isinstance(contract, dict) else False,
             "issues": (contract.get("issues") or [])[:12] if isinstance(contract, dict) else [],
         },
         "dashboard": {
+            # Keep a small set of headline fields (should not be overly volatile).
             "scenario": _safe_get(dash, ["scenario_name"], _safe_get(dash, ["Scenario", "Name"], "")),
-            "master_score_total": _round_num(_safe_get(dash, ["master_score_total"], _safe_get(dash, ["MasterScore", "Total"], None)), 3),
-            "conviction_score": _round_num(_safe_get(dash, ["conviction_score"], _safe_get(dash, ["ConvictionScore"], None)), 3),
             "style_tilt": _safe_get(dash, ["style_tilt"], _safe_get(dash, ["StyleTilt"], "")),
             "class": _safe_get(dash, ["class"], _safe_get(dash, ["Class"], "")),
             "gate_status": _safe_get(dash, ["gate_status"], ""),
+            # Scores can drift slightly; keep rounded.
+            "master_score_total": _round_num(_safe_get(dash, ["master_score_total"], _safe_get(dash, ["MasterScore", "Total"], None)), 3),
+            "conviction_score": _round_num(_safe_get(dash, ["conviction_score"], _safe_get(dash, ["ConvictionScore"], None)), 3),
         },
-        "trade_plan": {
-            "name": _safe_get(trade_plan, ["PrimarySetup", "Name"], _safe_get(trade_plan, ["setup_name"], _safe_get(trade_plan, ["Name"], ""))),
-            "rr": _round_num(_safe_get(trade_plan, ["PrimarySetup", "RR"], _safe_get(trade_plan, ["rr"], None)), 3),
-            "risk_pct": _round_num(_safe_get(trade_plan, ["PrimarySetup", "RiskPct"], _safe_get(trade_plan, ["risk_pct"], None)), 3),
-            "reward_pct": _round_num(_safe_get(trade_plan, ["PrimarySetup", "RewardPct"], _safe_get(trade_plan, ["reward_pct"], None)), 3),
-            "plan_completeness": _safe_get(trade_plan, ["PlanCompleteness"], _safe_get(trade_plan, ["plan_completeness"], "")),
-            "triggers": _safe_get(trade_plan, ["Triggers"], _safe_get(trade_plan, ["triggers"], {})) if isinstance(_safe_get(trade_plan, ["Triggers"], _safe_get(trade_plan, ["triggers"], {})), dict) else {},
-            "portion_1": _round_num(_safe_get(trade_plan, ["Portion1"], _safe_get(trade_plan, ["portion_1"], None)), 3),
-            "portion_2": _round_num(_safe_get(trade_plan, ["Portion2"], _safe_get(trade_plan, ["portion_2"], None)), 3),
+        "stability": {
+            "decision": {
+                "stable_action": _safe_text(stable_action).strip().upper(),
+                "reason": _safe_get(dsp, ["reason"], ""),
+                "confidence_delta": _round_num(_safe_get(dsp, ["confidence_delta"], None), 3),
+            },
+            "trade_plan": {
+                "plan_state": _safe_text(plan_state).strip().upper(),
+                "reason": _safe_get(psp, ["reason"], ""),
+            },
+            "narrative": {
+                "regime": _safe_text(regime).strip(),
+                "anchor_phrase": _compact_text(_safe_get(nap, ["anchor_phrase"], "")),
+                "reason": _safe_get(nap, ["reason"], ""),
+            },
         },
-        "decision": {
-            "action": _safe_get(decision, ["Action"], _safe_get(decision, ["action"], "")),
-            "conviction": _round_num(_safe_get(decision, ["Conviction"], _safe_get(decision, ["conviction"], None)), 3),
-            "size_hint": _safe_get(decision, ["SizeHint"], _safe_get(decision, ["size_hint"], "")),
-            "guardrails": _safe_get(decision, ["Guardrails"], _safe_get(decision, ["guardrails"], "")),
-        },
-        "narrative": {
-            "dna": {
-                "line": _compact_text(_safe_get(ndp, ["dna", "line_draft"], "")),
-                "ok": bool(_safe_get(ndp, ["dna", "validator", "ok"], True)),
-                "reasons": (_safe_get(ndp, ["dna", "validator", "reasons"], []) or [])[:5],
-            },
-            "status": {
-                "line": _compact_text(_safe_get(ndp, ["status", "line_draft"], "")),
-                "ok": bool(_safe_get(ndp, ["status", "validator", "ok"], True)),
-                "reasons": (_safe_get(ndp, ["status", "validator", "reasons"], []) or [])[:5],
-            },
-            "plan": {
-                "line": _compact_text(_safe_get(ndp, ["plan", "line_draft"], "")),
-                "ok": bool(_safe_get(ndp, ["plan", "validator", "ok"], True)),
-                "reasons": (_safe_get(ndp, ["plan", "validator", "reasons"], []) or [])[:5],
-            },
+        "narrative_validators": {
+            "dna_ok": bool(_safe_get(ndp, ["dna", "validator", "ok"], True)),
+            "dna_reasons": (_safe_get(ndp, ["dna", "validator", "reasons"], []) or [])[:5],
+            "status_ok": bool(_safe_get(ndp, ["status", "validator", "ok"], True)),
+            "status_reasons": (_safe_get(ndp, ["status", "validator", "reasons"], []) or [])[:5],
+            "plan_ok": bool(_safe_get(ndp, ["plan", "validator", "ok"], True)),
+            "plan_reasons": (_safe_get(ndp, ["plan", "validator", "reasons"], []) or [])[:5],
         },
         "meta": {
             "module_errors": (result.get("_ModuleErrors") or [])[:10],
@@ -176,6 +168,7 @@ def _extract_snapshot(result: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
     return snap
+
 
 # ----------------------------
 # Diff
@@ -232,6 +225,13 @@ def main() -> int:
     parser.add_argument("--max-diff", type=int, default=50)
     args = parser.parse_args()
 
+    # Golden runs should be deterministic. Disable stability state persistence by default
+    # to avoid baselines depending on prior runs. Override by setting:
+    #   INCEPTION_GOLDEN_ALLOW_STATE=1
+    if os.environ.get("INCEPTION_GOLDEN_ALLOW_STATE", "").strip() not in ("1", "true", "TRUE", "yes", "YES"):
+        os.environ["INCEPTION_DISABLE_STABILITY_STATE"] = "1"
+
+
     repo = _repo_root()
     golden_dir = repo / "golden"
     golden_dir.mkdir(parents=True, exist_ok=True)
@@ -252,7 +252,7 @@ def main() -> int:
     diffs_total = 0
     manifest = {
         "schema": "GoldenManifest.v1",
-        "generated_at_utc": _utc_now(),
+        "generated_at_utc": "STATIC",
         "tickers": [t.strip().upper() for t in args.tickers],
         "mode": args.mode,
         "enabled_modules": enabled_modules,

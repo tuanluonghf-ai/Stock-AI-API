@@ -11,49 +11,36 @@
     "scenario": "",
     "style_tilt": ""
   },
-  "decision": {
-    "action": "WAIT",
-    "conviction": null,
-    "guardrails": "",
-    "size_hint": ""
-  },
-  "generated_at_utc": "2026-01-12T13:58:02Z",
+  "generated_at_utc": "STATIC",
   "meta": {
     "error": "",
     "has_error": false,
     "module_errors": []
   },
-  "narrative": {
-    "dna": {
-      "line": "CII là kiểu cổ phiếu nhạy tin, dễ nhảy giá; lợi thế nằm ở thường mở biên lợi nhuận mạnh khi catalyst rõ ràng; đổi lại, điều kiện bắt buộc là ưu tiên tham gia khi có xác nhận; luôn đặt mốc bảo vệ và quản trị tỷ trọng chặt, đặc biệt với rủi ro qua đêm; ưu tiên giảm quy mô và hạn c…",
-      "ok": true,
-      "reasons": []
+  "narrative_validators": {
+    "dna_ok": true,
+    "dna_reasons": [],
+    "plan_ok": true,
+    "plan_reasons": [],
+    "status_ok": true,
+    "status_reasons": []
+  },
+  "schema": "GoldenSnapshot.v2",
+  "stability": {
+    "decision": {
+      "confidence_delta": 0.0,
+      "reason": "raw",
+      "stable_action": "WAIT"
     },
-    "plan": {
-      "line": "Trade Plan ưu tiên Breakout (trạng thái WATCH), điểm nghẽn chính: TRIGGER_NOT_READY. Trọng tâm kỷ luật: RR 13.6; rủi ro 4.6%.",
-      "ok": true,
-      "reasons": []
+    "narrative": {
+      "anchor_phrase": "Cổ phiếu vận động theo xu hướng; ưu tiên kỷ luật hơn là phản ứng ngắn hạn.",
+      "reason": "cold_start",
+      "regime": "Trend"
     },
-    "status": {
-      "line": "trên MA200 nhưng đang điều chỉnh lành mạnh; cấu trúc còn giữ; dòng tiền ủng hộ. Mức rủi ro cao.",
-      "ok": true,
-      "reasons": []
+    "trade_plan": {
+      "plan_state": "PAUSED",
+      "reason": "still_paused"
     }
   },
-  "schema": "GoldenSnapshot.v1",
-  "ticker": "CII",
-  "trade_plan": {
-    "name": "",
-    "plan_completeness": {
-      "message": "-",
-      "missing": [],
-      "status": "PASS"
-    },
-    "portion_1": null,
-    "portion_2": null,
-    "reward_pct": null,
-    "risk_pct": null,
-    "rr": null,
-    "triggers": {}
-  }
+  "ticker": "CII"
 }
