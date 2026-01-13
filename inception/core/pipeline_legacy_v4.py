@@ -35,7 +35,6 @@ from inception.core.stability.decision_stability import apply_decision_stability
 from inception.core.stability.plan_stability import apply_plan_stability
 from inception.core.stability.narrative_anchor import apply_narrative_anchor
 
-from inception.core.stability.diagnostics import build_stability_diagnostics
 from inception.modules import load_default_modules
 from inception.modules.base import run_modules
 

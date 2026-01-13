@@ -35,7 +35,6 @@ from inception.core.stability.decision_stability import apply_decision_stability
 from inception.core.stability.plan_stability import apply_plan_stability
 from inception.core.stability.narrative_anchor import apply_narrative_anchor
 
-from inception.core.stability.diagnostics import build_stability_diagnostics
 from inception.modules import load_default_modules
 from inception.modules.base import run_modules
 
@@ -267,8 +266,7 @@ def build_result(
     except Exception:
         pass
 
-
-    # 5.6) Decision Stability (Hysteresis governor)
+    # 5.75) Decision Stability (Hysteresis governor)
     # Scope-locked: does NOT modify indicators or raw DecisionPack.
     try:
         dsp = apply_decision_stability(
@@ -282,13 +280,13 @@ def build_result(
     except Exception:
         pass
 
-    # 5.7) Trade Plan Stability (Plan Persistence governor)
+    # 5.26) Trade Plan Stability (Plan Persistence governor)
     # Scope-locked: does NOT modify indicators or raw TradePlanPack.
     try:
         psp = apply_plan_stability(
             ticker=ticker_u,
             analysis_pack=analysis_pack,
-            base_dir=str(getattr(hub, "data_dir", None)) if getattr(hub, "data_dir", None) is not None else None,
+            base_dir=str(hub.data_dir) if hub and getattr(hub, "data_dir", None) is not None else None,
         )
         if isinstance(analysis_pack, dict):
             analysis_pack["PlanStabilityPack"] = psp
@@ -296,19 +294,21 @@ def build_result(
     except Exception:
         pass
 
-    # 5.8) Narrative Stability (Semantic Anchoring)
-    # Scope-locked: does NOT modify indicators; may prepend anchor phrase into NarrativeDraftPack only when missing.
+    # 5.27) Narrative Stability (Semantic Anchoring)
+    # Scope-locked: does NOT modify indicators; provides anchor + regime hysteresis.
     try:
         nap = apply_narrative_anchor(
             ticker=ticker_u,
             analysis_pack=analysis_pack,
-            base_dir=str(getattr(hub, "data_dir", None)) if getattr(hub, "data_dir", None) is not None else None,
+            base_dir=str(hub.data_dir) if hub and getattr(hub, 'data_dir', None) is not None else None,
         )
         if isinstance(analysis_pack, dict):
-            analysis_pack["NarrativeAnchorPack"] = nap
-        result["NarrativeAnchorPack"] = nap
+            analysis_pack['NarrativeAnchorPack'] = nap
+        result['NarrativeAnchorPack'] = nap
     except Exception:
         pass
+
+
 
     # 6) Dashboard summary
     try:
