@@ -531,57 +531,15 @@ def _get_anchor_phrase(ap: Dict[str, Any]) -> str:
 
 
 
-def _get_stability_explain_line(ap: Dict[str, Any]) -> Dict[str, str]:
-    """Return a short explainability line and level when stability governor intervenes.
-
-    Policy (hardening):
-      - Show only when:
-          (a) stable_action != raw_action, OR
-          (b) plan_state in {PAUSED, INVALIDATED}
-      - Do NOT show for regime/anchor changes alone (avoid noise).
-      - If HOLDING underwater / distress, use level="warning" (else "info").
-    """
+def _get_stability_explain_line(ap: Dict[str, Any]) -> str:
+    """Return a short explainability line when stability governor intervenes."""
     try:
         sdp = ap.get("StabilityDiagnosticsPack") or {}
-        if not isinstance(sdp, dict):
-            return {"level": "", "text": ""}
-
-        raw_vs = sdp.get("raw_vs_stable") if isinstance(sdp.get("raw_vs_stable"), dict) else {}
-        raw_action = _safe_text(raw_vs.get("raw_action")).strip().upper()
-        stable_action = _safe_text(raw_vs.get("stable_action")).strip().upper()
-        plan_state = _safe_text(raw_vs.get("plan_state")).strip().upper()
-
-        must_show = False
-        if raw_action and stable_action and raw_action != stable_action:
-            must_show = True
-        if plan_state in ("PAUSED", "INVALIDATED"):
-            must_show = True
-
-        if not must_show:
-            return {"level": "", "text": ""}
-
-        text = _safe_text(sdp.get("ui_explain_line")).strip()
-        if not text:
-            return {"level": "", "text": ""}
-
-        # Distress signal (best-effort): prefer PositionStatePack, fallback to TradePlanPack.holding_overlay
-        distress = ""
-        try:
-            psp = ap.get("PositionStatePack") or {}
-            if isinstance(psp, dict):
-                distress = _safe_text(psp.get("distress_level") or psp.get("DistressLevel") or "").strip().upper()
-            if not distress:
-                tpp = ap.get("TradePlanPack") or {}
-                if isinstance(tpp, dict):
-                    ho = tpp.get("holding_overlay") if isinstance(tpp.get("holding_overlay"), dict) else {}
-                    distress = _safe_text(ho.get("distress_level") or ho.get("DistressLevel") or "").strip().upper()
-        except Exception:
-            distress = ""
-
-        level = "warning" if distress in ("MEDIUM", "SEVERE") else "info"
-        return {"level": level, "text": text}
+        if isinstance(sdp, dict):
+            return _safe_text(sdp.get("ui_explain_line")).strip()
     except Exception:
-        return {"level": "", "text": ""}
+        pass
+    return ""
 
 
 
