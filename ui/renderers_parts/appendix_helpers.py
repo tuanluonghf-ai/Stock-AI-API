@@ -1,86 +1,187 @@
 from __future__ import annotations
 
-# Auto-extracted Appendix E renderer (Pha B)
+from typing import Any, Dict, List, Tuple
 import html
+import math
+import os
 import re
-from typing import Any, Dict, Tuple
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from inception.ui.ui_constants import UI_PLACEHOLDER
+from inception.ui.renderers_parts.dashboard import _get_dashboard_card, render_executive_snapshot
+from inception.ui.renderers_parts.decision_layer import render_decision_layer_switch
+from inception.ui.renderers_parts.dna_status import (
+    render_character_traits,
+    render_current_status_insight,
+    render_stock_dna_insight,
+)
+from inception.ui.renderers_parts.trade_plan import _trade_plan_gate, render_trade_plan_conditional
+from .utils import (
+    _ensure_dict,
+    _safe_text,
+    _safe_float,
+    _clip,
+    _val_or_na,
+    get_class_policy_hint_line,
+)
 
-from inception.ui.zone_pack import compute_zone_pack
-from inception.ui.action_bias_pack import compute_action_bias_pack
+
+def _get_stable_action(analysis_pack: Dict[str, Any]) -> str:
+    ap = _ensure_dict(analysis_pack)
+    dsp = _ensure_dict(ap.get("DecisionStabilityPack"))
+    stable = _safe_text(dsp.get("stable_action") or "").strip().upper()
+    if not stable:
+        dp = _ensure_dict(ap.get("DecisionPack"))
+        stable = _safe_text(dp.get("action") or "").strip().upper()
+    return stable
 
 
-from inception.ui.formatters import _ensure_dict, _safe_text, _safe_float
-from inception.ui.render_charts import render_price_map_chart_v1
+
+
+def _get_plan_state(analysis_pack: Dict[str, Any]) -> str:
+    ap = _ensure_dict(analysis_pack)
+    tpp = _ensure_dict(ap.get("TradePlanPack"))
+    primary = _ensure_dict(tpp.get("plan_primary"))
+    plan_state = _safe_text(primary.get("state") or primary.get("status") or "").strip().upper()
+    if not plan_state:
+        legacy = _ensure_dict(ap.get("PrimarySetup"))
+        plan_state = _safe_text(legacy.get("Status") or "").strip().upper()
+    return plan_state
+
+
+
+
+def _get_anchor_phrase(analysis_pack: Dict[str, Any]) -> str:
+    ap = _ensure_dict(analysis_pack)
+    nap = _ensure_dict(ap.get("NarrativeAnchorPack"))
+    phrase = _safe_text(nap.get("anchor_phrase") or nap.get("phrase") or "").strip()
+    return phrase
+
+
+
+
+def _split_sections(report_text: str) -> dict:
+    parts = {"A": "", "B": "", "C": "", "D": ""}
+    if not report_text:
+        return parts
+    text = report_text.replace("\r\n", "\n")
+    pattern = re.compile(r"(?m)^(A|B|C|D)\.\s")
+    matches = list(pattern.finditer(text))
+    if not matches:
+        parts["A"] = text
+        return parts
+    for i, m in enumerate(matches):
+        key = m.group(1)
+        start = m.start()
+        end = matches[i+1].start() if i+1 < len(matches) else len(text)
+        parts[key] = text[start:end].strip()
+    return parts
+
+def _extract_a_items(a_text: str) -> list:
+    if not a_text:
+        return []
+    text = a_text.replace("\r\n", "\n")
+    text = re.sub(r"(?m)^A\..*\n?", "", text).strip()
+    item_pat = re.compile(r"(?ms)^\s*(\d)\.\s*(.*?)(?=^\s*\d\.|\Z)")
+    found = item_pat.findall(text)
+    items = [""] * 8
+    for num, body in found:
+        idx = int(num) - 1
+        if 0 <= idx < 8:
+            items[idx] = body.strip()
+    non_empty = sum(1 for x in items if x.strip())
+    return items if non_empty >= 4 else []
 
 def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: Dict[str, Any]) -> None:
     """
-    Decision Layer Report - Anti-Anchoring Output Order (layout only):
+    Decision Layer Report — Anti-Anchoring Output Order (layout only):
       1) Stock DNA (Traits)
       2) CURRENT STATUS (Scenario + Technical + Fundamental)
       3) Trade Plan & R:R (Conditional)
       4) Decision Layer (Conviction/Weakness/Tags)
     This renderer must not change any underlying calculations.
     """
-    # Late import to avoid circular dependency with inception.ui.renderers
-    from inception.ui.renderers import (
-        _clip,
-        _extract_a_items,
-        _get_anchor_phrase,
-        _get_dashboard_card,
-        _split_sections,
-        _trade_plan_gate,
-        _val_or_na,
-        get_class_policy_hint_line,
-        render_character_traits,
-        render_current_status_insight,
-        render_decision_layer_switch,
-        render_executive_snapshot,
-        render_stock_dna_insight,
-        render_trade_plan_conditional,
-    )
+    if os.getenv("INCEPTION_DEBUG_IMPORTS") == "1":
+        assert callable(_get_dashboard_card)
+        assert callable(render_executive_snapshot)
+        assert callable(render_character_traits)
+        assert callable(render_stock_dna_insight)
+        assert callable(render_current_status_insight)
+        assert callable(render_trade_plan_conditional)
+        assert callable(_trade_plan_gate)
+        assert callable(render_decision_layer_switch)
 
     r = _ensure_dict(result)
     modules = r.get("Modules") or {}
     cp = modules.get("character") or {}
     ap = _ensure_dict(r.get("AnalysisPack") or analysis_pack)
+    card = _get_dashboard_card(r)
 
-    # Phase F: resolve df_chart once (used by ZonePack + chart), then attach packs to AnalysisPack
+    # Phase F: resolve df_chart once (used by ZonePack), then attach packs to AnalysisPack
     try:
         df_chart = r.get("_DF")
     except Exception:
         df_chart = None
 
-    # --- ZonePack (single source of truth for chart + narrative) ---
-    zone_pack = {}
-    try:
-        zone_pack = compute_zone_pack(ap, df_price=df_chart)
-        ap["_ZonePack"] = zone_pack
-    except Exception:
-        zone_pack = {}
-
-    # --- ActionBiasPack (DNA × Zone → Bias/Size guidance; display-only) ---
-    action_bias_pack = {}
-    try:
-        action_bias_pack = compute_action_bias_pack(ap, zone_pack, character_pack=cp)
-        ap["_ActionBiasPack"] = action_bias_pack
-    except Exception:
-        action_bias_pack = {}
-
-    
+    zone_pack: Dict[str, Any] = {}
+    action_bias_pack: Dict[str, Any] = {}
     zone_warn = ""
     action_bias_warn = ""
-    if not isinstance(zone_pack, dict) or not zone_pack:
-        zone_warn = "ZonePack unavailable."
-    if not isinstance(action_bias_pack, dict) or not action_bias_pack:
-        action_bias_warn = "ActionBiasPack unavailable."
 
-    card = _get_dashboard_card(r)
+    try:
+        from inception.ui.zone_pack import compute_zone_pack
+        zone_pack = compute_zone_pack(ap, df_price=df_chart)
+        ap["_ZonePack"] = zone_pack
+    except Exception as exc:
+        zone_warn = f"ZonePack unavailable: {exc.__class__.__name__}"
+        zone_pack = {}
+        ap["_ZonePack"] = zone_pack
+
+    try:
+        from inception.ui.action_bias_pack import compute_action_bias_pack
+        action_bias_pack = compute_action_bias_pack(ap, zone_pack, character_pack=cp)
+        ap["_ActionBiasPack"] = action_bias_pack
+    except Exception as exc:
+        action_bias_warn = f"ActionBiasPack unavailable: {exc.__class__.__name__}"
+        action_bias_pack = {}
+        ap["_ActionBiasPack"] = action_bias_pack
+
+    def _format_zone_line(zp: Dict[str, Any]) -> str:
+        zones = zp.get("zones") if isinstance(zp.get("zones"), list) else []
+
+        def _zone_named(name: str) -> Dict[str, Any]:
+            for z in zones:
+                if _safe_text(z.get("name")).strip().upper() == name:
+                    return z
+            return {}
+
+        def _fmt_range(z: Dict[str, Any]) -> str:
+            if not isinstance(z, dict):
+                return UI_PLACEHOLDER
+            lo = z.get("low")
+            hi = z.get("high")
+            try:
+                if lo == float("-inf"):
+                    lo = None
+            except Exception:
+                pass
+            lo_f = _safe_float(lo, default=np.nan)
+            hi_f = _safe_float(hi, default=np.nan)
+            if pd.isna(lo_f) and pd.isna(hi_f):
+                return UI_PLACEHOLDER
+            if pd.isna(lo_f):
+                return f"<= {hi_f:.2f}"
+            if pd.isna(hi_f):
+                return f">= {lo_f:.2f}"
+            return f"{lo_f:.2f}-{hi_f:.2f}"
+
+        zone_now = _safe_text(zp.get("zone_now") or UI_PLACEHOLDER).strip() or UI_PLACEHOLDER
+        reclaim = _fmt_range(_zone_named("RECLAIM"))
+        risk = _fmt_range(_zone_named("RISK"))
+        return f"ZONE MAP: {zone_now} | reclaim: {reclaim} | risk: {risk}"
 
     # Trade-plan gate (for execution / anti-FOMO posture)
     gate_status, _meta = _trade_plan_gate(ap, cp)
@@ -116,61 +217,31 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             # 2) CURRENT STATUS
             # ============================================================
             st.markdown('<div class="major-sec">CURRENT STATUS</div>', unsafe_allow_html=True)
-            
-            
-            def _format_zone_line(zp: Dict[str, Any]) -> str:
-                zones = zp.get("zones") if isinstance(zp.get("zones"), list) else []
 
-                def _zone_named(name: str) -> Dict[str, Any]:
-                    for z in zones:
-                        if _safe_text(z.get("name")).strip().upper() == name:
-                            return z
-                    return {}
+            # 2.1 Relative Strength vs VNINDEX (prefer DashboardSummaryPack)
+            rel = card.get("relative_strength_vs_vnindex") if card else None
+            if rel is None:
+                rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
+            st.markdown(f"**Relative Strength vs VNINDEX:** {_val_or_na(rel)}")
 
-                def _fmt_range(z: Dict[str, Any]) -> str:
-                    if not isinstance(z, dict):
-                        return UI_PLACEHOLDER
-                    lo = z.get("low")
-                    hi = z.get("high")
-                    try:
-                        if lo == float("-inf"):
-                            lo = None
-                    except Exception:
-                        pass
-                    lo_f = _safe_float(lo, default=np.nan)
-                    hi_f = _safe_float(hi, default=np.nan)
-                    if pd.isna(lo_f) and pd.isna(hi_f):
-                        return UI_PLACEHOLDER
-                    if pd.isna(lo_f):
-                        return f"<= {hi_f:.2f}"
-                    if pd.isna(hi_f):
-                        return f">= {lo_f:.2f}"
-                    return f"{lo_f:.2f}-{hi_f:.2f}"
-
-                zone_now = _safe_text(zp.get("zone_now") or UI_PLACEHOLDER).strip() or UI_PLACEHOLDER
-                reclaim = _fmt_range(_zone_named("RECLAIM"))
-                risk = _fmt_range(_zone_named("RISK"))
-                return f"ZONE MAP: {zone_now} | reclaim: {reclaim} | risk: {risk}"
-
-            # Zone Map (facts-only)
+            # 2.1.1 Zone Map (display-only)
             st.markdown('<div class="sec-title">ZONE MAP</div>', unsafe_allow_html=True)
             if zone_warn:
                 st.warning(zone_warn)
             st.caption(_format_zone_line(zone_pack))
 
-            # Action Bias (facts-only)
+            # 2.1.2 Action Bias (display-only)
             st.markdown('<div class="sec-title">ACTION BIAS</div>', unsafe_allow_html=True)
             if action_bias_warn:
                 st.warning(action_bias_warn)
             bias = _safe_text(action_bias_pack.get("bias") or UI_PLACEHOLDER)
             size = _safe_text(action_bias_pack.get("size_hint") or UI_PLACEHOLDER)
             one = _safe_text(action_bias_pack.get("one_liner") or "").strip()
-
-            st.markdown(f"**Bias:** {bias}  \n**Size hint:** {size}")
+            st.markdown(f"**Bias:** {bias}  \\n**Size hint:** {size}")
             if one:
                 st.caption(one)
 
-            # Narrative (pack-only)
+            # 2.1.3 Narrative (pack-only: Draft/Final)
             st.markdown('<div class="sec-title">NARRATIVE (KEYED)</div>', unsafe_allow_html=True)
             npack = ap.get("NarrativeFinalPack") or r.get("NarrativeFinalPack") or ap.get("NarrativeDraftPack") or r.get("NarrativeDraftPack") or {}
             npack = npack if isinstance(npack, dict) else {}
@@ -180,15 +251,12 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                 line = _safe_text(sec.get("line_final") or sec.get("line_draft")).strip()
                 return line if line else UI_PLACEHOLDER
 
-            st.caption(f"DNA: {_line_from(npack, 'dna')}")
-            st.caption(f"Status: {_line_from(npack, 'status')}")
-            st.caption(f"Plan: {_line_from(npack, 'plan')}")
-
-            # 2.1 Relative Strength vs VNINDEX (prefer DashboardSummaryPack)
-            rel = card.get("relative_strength_vs_vnindex") if card else None
-            if rel is None:
-                rel = (ap.get("Market") or {}).get("RelativeStrengthVsVNINDEX")
-            st.markdown(f"**Relative Strength vs VNINDEX:** {_val_or_na(rel)}")
+            dna_line = _line_from(npack, "dna")
+            status_line = _line_from(npack, "status")
+            plan_line = _line_from(npack, "plan")
+            st.caption(f"DNA: {dna_line}")
+            st.caption(f"Status: {status_line}")
+            st.caption(f"Plan: {plan_line}")
 
             # 2.2 Scenario & Scores (prefer DashboardSummaryPack)
             scenario_pack = ap.get("Scenario12") or {}
@@ -197,7 +265,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             if conviction_score is None:
                 conviction_score = ap.get("Conviction")
 
-            scenario_name = _safe_text(card.get("scenario_name") if card else "").strip() or _safe_text(scenario_pack.get("Name") or UI_PLACEHOLDER).strip()
+            scenario_name = _safe_text(card.get("scenario_name") if card else "").strip() or _safe_text(scenario_pack.get("Name") or "?").strip()
             ms_total = (card.get("master_total") if card else None)
             if ms_total is None:
                 ms_total = master_pack.get("Total")
@@ -209,7 +277,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                 v = _safe_float(val, default=np.nan)
                 if pd.isna(v):
                     pct = 0.0
-                    v_disp = UI_PLACEHOLDER
+                    v_disp = "?"
                 else:
                     v = float(v)
                     pct = _clip(v / maxv * 100.0, 0.0, 100.0)
@@ -231,16 +299,6 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             # Score interpretation (single block) — place directly under the two bars
             render_current_status_insight(ms_total, conviction_score, gate_status)
 
-
-            # ============================================================
-            # 2.3 Price Map Chart (Candles + MA + Fibonacci + Volume)
-            # ============================================================
-            
-            if df_chart is not None:
-                with st.expander("Biểu đồ giá (nến + MA + Fibo + Volume)", expanded=True):
-                    render_price_map_chart_v1(df_chart, ap)
-            else:
-                st.info("Không có dữ liệu giá (_DF) để vẽ biểu đồ.")
             # Class Policy Hint (display-only)
             _final_class = _safe_text(cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "").strip()
             _policy_hint = _safe_text(card.get("policy_hint_line") if card else "").strip() or get_class_policy_hint_line(_final_class)
@@ -334,7 +392,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                 v = _safe_float(val, default=np.nan)
                 if pd.isna(v):
                     pct = 0.0
-                    v_disp = UI_PLACEHOLDER
+                    v_disp = "?"
                 else:
                     v = float(v)
                     pct = _clip(v / maxv * 100.0, 0.0, 100.0)
@@ -364,11 +422,11 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             setup_name = _safe_text(primary.get("Name")).strip()
             rr_val = _safe_float(primary.get("RR"), default=np.nan)
 
-            plan_status = UI_PLACEHOLDER
+            plan_status = "?"
             plan_tags: List[str] = []
             for p in (ap.get("TradePlans") or []):
-                if _safe_text(p.get("Name")).strip() == setup_name and setup_name and setup_name != UI_PLACEHOLDER:
-                    plan_status = _safe_text(p.get("Status") or UI_PLACEHOLDER)
+                if _safe_text(p.get("Name")).strip() == setup_name and setup_name and setup_name != "?":
+                    plan_status = _safe_text(p.get("Status") or "?")
                     plan_tags = list(p.get("ReasonTags") or [])
                     rr_val = _safe_float(p.get("RR"), default=rr_val)
                     break
@@ -376,7 +434,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             def _status_from_val(v: Any, good: float, warn: float) -> Tuple[str, str]:
                 x = _safe_float(v, default=np.nan)
                 if pd.isna(x):
-                    return (UI_PLACEHOLDER, "#9CA3AF")
+                    return ("?", "#9CA3AF")
                 if x >= good:
                     return ("PASS", "#22C55E")
                 if x >= warn:
@@ -393,9 +451,9 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             # Structure (Ceiling) Gate
             sq = ap.get("StructureQuality", {}) if isinstance(ap, dict) else {}
             cg = ((sq or {}).get("Gates", {}) or {}).get("CeilingGate", {}) if isinstance((sq or {}).get("Gates", {}), dict) else {}
-            s_struct = _safe_text(cg.get("Status") or UI_PLACEHOLDER).strip().upper()
+            s_struct = _safe_text(cg.get("Status") or "?").strip().upper()
             if s_struct not in ("PASS", "WAIT", "FAIL"):
-                s_struct = UI_PLACEHOLDER
+                s_struct = "?"
             c_struct = "#9CA3AF"
             if s_struct == "PASS": c_struct = "#22C55E"
             elif s_struct == "WAIT": c_struct = "#F59E0B"
@@ -407,7 +465,7 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
                       <li>{_dot(c_vol)} Volume: {s_vol}</li>
                       <li>{_dot(c_rr)} R:R: {s_rr}</li>
                       <li>{_dot(c_struct)} Structure: {s_struct}</li>
-                      <li>{_dot("#60A5FA")} Gate: {html.escape(str(gate_status or UI_PLACEHOLDER))} | Plan: {html.escape(str(setup_name or UI_PLACEHOLDER))} ({html.escape(str(plan_status or UI_PLACEHOLDER))})</li>
+                      <li>{_dot("#60A5FA")} Gate: {html.escape(str(gate_status or "?"))} | Plan: {html.escape(str(setup_name or "?"))} ({html.escape(str(plan_status or "?"))})</li>
                     </ul>""",
                 unsafe_allow_html=True
             )
@@ -475,12 +533,101 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
     
         with right_col:
             st.markdown("""<div style='border:1px dashed #E5E7EB;border-radius:14px;padding:14px;color:#64748B;font-weight:800;'>BIỂU ĐỒ (SẼ BỔ SUNG)</div>""", unsafe_allow_html=True)
-    # ============================================================
-    # 11. STRATEGIC INSIGHT GENERATION
-    # ============================================================
 
+def render_report_pretty(report_text: str, analysis_pack: dict):
+    sections = _split_sections(report_text)
+    a_items = _extract_a_items(sections.get("A", ""))
 
-# ------------------------------------------------------------
-# Deterministic Report A–D (Facts-only fallback)
-# - Ensures A–D sections always exist so UI split/render stays stable.
-# ------------------------------------------------------------
+    st.markdown('<div class="incept-wrap">', unsafe_allow_html=True)
+
+    ap = _ensure_dict(analysis_pack)
+    scenario_pack = ap.get("Scenario12") or {}
+    master_pack = ap.get("MasterScore") or {}
+    conviction_score = ap.get("Conviction", "?")
+
+    st.markdown(
+        f"""
+        <div class="report-header">
+          <h2 style="margin:0; padding:0;">{_val_or_na(ap.get("Ticker"))} - {_val_or_na(scenario_pack.get("Name"))}</h2>
+          <div style="font-size:16px; font-weight:700; margin-top:4px;">
+            Điểm tổng hợp: {_val_or_na(master_pack.get("Total"))} | Điểm tin cậy: {_val_or_na(conviction_score)}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="sec-title">TECHNICAL ANALYSIS</div>', unsafe_allow_html=True)
+    a_raw = sections.get("A", "").strip()
+    a_body = re.sub(r"(?mi)^A\..*\n?", "", a_raw).strip()
+    if a_items:
+        for i, body in enumerate(a_items, start=1):
+            if not body.strip():
+                continue
+            st.markdown(
+                f"""
+                <div class="incept-card">
+                  <div style="font-weight:800; margin-bottom:6px;">{i}.</div>
+                  <div>{body}</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+    else:
+        st.markdown(a_body, unsafe_allow_html=False)
+
+    st.markdown('<div class="sec-title">TRADE PLAN</div>', unsafe_allow_html=True)
+    c = sections.get("C", "").strip()
+    if c:
+        c_body = re.sub(r"(?m)^C\..*\n?", "", c).strip()
+        st.markdown(
+            f"""
+            <div class="incept-card">
+              <div>{c_body}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.info(UI_PLACEHOLDER)
+
+    st.markdown('<div class="sec-title">RỦI RO &amp; LỢI NHUẬN</div>', unsafe_allow_html=True)
+    ps = (_ensure_dict(analysis_pack)).get("PrimarySetup") or {}
+    risk = ps.get("RiskPct", None)
+    reward = ps.get("RewardPct", None)
+    rr = ps.get("RR", None)
+    prob = ps.get("Confidence (Tech)", ps.get("Probability", UI_PLACEHOLDER))
+
+    def _fmt_pct_local(x):
+        try:
+            if x is None or pd.isna(x) or not math.isfinite(float(x)):
+                return UI_PLACEHOLDER
+            return f"{float(x):.2f}%"
+        except Exception:
+            return UI_PLACEHOLDER
+
+    def _fmt_rr_local(x):
+        try:
+            if x is None or pd.isna(x) or not math.isfinite(float(x)):
+                return UI_PLACEHOLDER
+            return f"{float(x):.2f}"
+        except Exception:
+            return UI_PLACEHOLDER
+        try:
+            return f"{float(x):.2f}"
+        except Exception:
+            return UI_PLACEHOLDER
+
+    st.markdown(
+        f"""
+        <div class="incept-metrics">
+          <div class="incept-metric"><div class="k">Risk%:</div><div class="v">{_fmt_pct_local(risk)}</div></div>
+          <div class="incept-metric"><div class="k">Reward%:</div><div class="v">{_fmt_pct_local(reward)}</div></div>
+          <div class="incept-metric"><div class="k">RR:</div><div class="v">{_fmt_rr_local(rr)}</div></div>
+          <div class="incept-metric"><div class="k">Confidence (Tech):</div><div class="v">{prob}</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)

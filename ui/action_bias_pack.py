@@ -4,7 +4,6 @@ from __future__ import annotations
 
 Purpose
 - Bridge DNA bucket × ZonePack.zone_now → Action Bias + Position Size Guidance.
-- Provide deterministic, client-friendly expectation layer.
 - MUST NOT compute new signals; only transforms existing packs/labels.
 - MUST NOT override Decision Layer; bias/size are guidance only.
 
@@ -13,7 +12,6 @@ Notes
 """
 
 from typing import Any, Dict
-import hashlib
 
 
 def _safe_text(x: Any) -> str:
@@ -34,13 +32,6 @@ def _bucket_dna(class_name: str) -> str:
     if "DEF" in s or "SAFE" in s:
         return "Defensive"
     return "Balanced"
-
-
-def _stable_pick(key: str, options: list[str], salt: str = "") -> str:
-    if not options:
-        return ""
-    h = hashlib.md5(f"{salt}|{key}".encode("utf-8")).hexdigest()
-    return options[int(h, 16) % len(options)]
 
 
 def compute_action_bias_pack(
@@ -113,46 +104,6 @@ def compute_action_bias_pack(
             size_hint = "FLAT"      # reduce commitment posture
             rationale_keys += ["SIZE_REDUCE_RISK"]
 
-    # One-liner (client-facing, 1 sentence, deterministic rotation)
-    salt = _safe_text(ap.get("Ticker") or dsum.get("ticker") or "")
-    if bias == "DEFENSIVE":
-        one_liner = _stable_pick(
-            "one_liner_def",
-            [
-                "Khuynh hướng phù hợp là phòng thủ: ưu tiên giảm cam kết và chờ tái chiếm vùng an toàn trước khi chủ động hơn.",
-                "Bias nghiêng phòng thủ: giữ rủi ro trong tầm kiểm soát, chỉ nâng cam kết khi có xác nhận phục hồi rõ ràng.",
-            ],
-            salt=salt + "|" + dna_bucket + "|" + zone_now,
-        )
-    elif bias == "CAUTIOUS":
-        one_liner = _stable_pick(
-            "one_liner_caut",
-            [
-                "Khuynh hướng phù hợp là thận trọng: ưu tiên thăm dò/giữ nhỏ và chờ xác nhận theo đúng kỷ luật vùng giá.",
-                "Bias nghiêng thận trọng: đi chậm để tối ưu giá vốn và tránh vào sớm khi xác suất chưa đủ dày.",
-            ],
-            salt=salt + "|" + dna_bucket + "|" + zone_now,
-        )
-    else:
-        if riskier_bucket:
-            one_liner = _stable_pick(
-                "one_liner_aggr_risky",
-                [
-                    "Khuynh hướng tích cực nhưng nên kiểm soát quy mô: ưu tiên tham gia một phần và chỉ gia tăng khi tín hiệu xác nhận bền.",
-                    "Bias nghiêng chủ động, song nhóm này biến động cao: tham gia có kỷ luật và giữ dư địa xử lý rủi ro.",
-                ],
-                salt=salt + "|" + dna_bucket + "|" + zone_now,
-            )
-        else:
-            one_liner = _stable_pick(
-                "one_liner_aggr",
-                [
-                    "Khuynh hướng tích cực: có thể ưu tiên kịch bản thuận xu hướng, miễn là mốc rủi ro vẫn được giữ chặt.",
-                    "Bias nghiêng chủ động: phù hợp triển khai theo kế hoạch nếu điều kiện vùng giá được giữ vững.",
-                ],
-                salt=salt + "|" + dna_bucket + "|" + zone_now,
-            )
-
     return {
         "version": "1.0",
         "mode": mode,
@@ -160,6 +111,6 @@ def compute_action_bias_pack(
         "zone_now": zone_now,
         "bias": bias,
         "size_hint": size_hint,
-        "one_liner": one_liner,
+        "one_liner": "",
         "rationale_keys": rationale_keys,
     }
