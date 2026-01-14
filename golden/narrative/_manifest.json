@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "items": [
+    {
+      "ticker": "VCB",
+      "file": "golden/narrative/VCB.narrative.json",
+      "hash": "4bba79a39bda103357d10bce1c44573d"
+    },
+    {
+      "ticker": "CII",
+      "file": "golden/narrative/CII.narrative.json",
+      "hash": "18c099d1e138a350c4744dbde501992b"
+    },
+    {
+      "ticker": "MSN",
+      "file": "golden/narrative/MSN.narrative.json",
+      "hash": "ce1744818ab4dab46a63614731657e8b"
+    }
+  ]
+}

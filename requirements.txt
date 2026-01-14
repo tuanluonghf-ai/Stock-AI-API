@@ -3,4 +3,4 @@ openai
 pandas
 numpy
 openpyxl
-plotly
+plotly>=5.18.0

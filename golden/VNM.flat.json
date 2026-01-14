@@ -1,46 +1,2933 @@
 {
-  "contract": {
-    "issues": [],
-    "ok": true
-  },
-  "dashboard": {
-    "class": "",
-    "conviction_score": null,
-    "gate_status": "",
-    "master_score_total": null,
-    "scenario": "",
-    "style_tilt": ""
-  },
-  "generated_at_utc": "STATIC",
-  "meta": {
-    "error": "",
-    "has_error": false,
-    "module_errors": []
-  },
-  "narrative_validators": {
-    "dna_ok": true,
-    "dna_reasons": [],
-    "plan_ok": true,
-    "plan_reasons": [],
-    "status_ok": true,
-    "status_reasons": []
-  },
-  "schema": "GoldenSnapshot.v2",
-  "stability": {
-    "decision": {
-      "confidence_delta": 0.0,
-      "reason": "raw",
-      "stable_action": "WAIT"
+  "AnalysisPack": {
+    "ContractPack": {
+      "issues": [],
+      "ok": true,
+      "schema": "ResultContractPack.v1"
     },
-    "narrative": {
-      "anchor_phrase": "Cổ phiếu vận động theo xu hướng; ưu tiên kỷ luật hơn là phản ứng ngắn hạn.",
+    "Conviction": 9.5,
+    "ConvictionPack": {
+      "Components": [
+        {
+          "Hit": true,
+          "Key": "PriceAboveMA200",
+          "Weight": 2.0
+        },
+        {
+          "Hit": true,
+          "Key": "RSIAbove55",
+          "Weight": 1.0
+        },
+        {
+          "Hit": true,
+          "Key": "VolumeAboveAvg20",
+          "Weight": 1.0
+        },
+        {
+          "Hit": true,
+          "Key": "MACDAboveSignal",
+          "Weight": 0.5
+        }
+      ],
+      "Facts": {
+        "Close": 63.3,
+        "MA200": 57.479549999999996,
+        "MACD": 0.018353485505464562,
+        "RSI": 56.22270024999242,
+        "Signal": -0.04501174499218531,
+        "VolRatio": 1.9192099825147035
+      },
+      "Notes": [
+        "PriceAboveMA200=True (+2.0)",
+        "RSIAbove55=True (+1.0)",
+        "VolumeAboveAvg20=True (+1.0)",
+        "MACDAboveSignal=True (+0.5)"
+      ],
+      "Score": 9.5
+    },
+    "DNAPack": {
+      "class_primary": "Volatile Range",
+      "hard_gates": {
+        "gap_prone": false,
+        "illiquid": false
+      },
+      "modifiers": [
+        "HIVOL"
+      ],
+      "near_boundary": false,
+      "plan_prior_map": {
+        "notes": "Priors are class/style-based; hard gates (ILLIQ/GAP) override to DEFENSIVE bias.",
+        "plan_types": [
+          "PULLBACK",
+          "BREAKOUT",
+          "MEAN_REV",
+          "RECLAIM",
+          "DEFENSIVE"
+        ],
+        "priors": {
+          "BREAKOUT": {
+            "fit_score": 4.5,
+            "tier": "LOW"
+          },
+          "DEFENSIVE": {
+            "fit_score": 6.8,
+            "tier": "MED"
+          },
+          "MEAN_REV": {
+            "fit_score": 8.5,
+            "tier": "HIGH"
+          },
+          "PULLBACK": {
+            "fit_score": 6.8,
+            "tier": "MED"
+          },
+          "RECLAIM": {
+            "fit_score": 6.8,
+            "tier": "MED"
+          }
+        },
+        "schema": "PlanPriorMap.v1"
+      },
+      "risk_regime": "High",
+      "schema": "DNAPack.v1",
+      "style_primary": "Range",
+      "style_tilt_strength": "-",
+      "style_tilt_to": "-"
+    },
+    "DecisionPack": {
+      "Flags": {},
+      "Weakness": [],
+      "action": "WAIT",
+      "allocation": {
+        "max_size_pct_nav": null,
+        "notes": "-",
+        "target_size_pct_nav": null
+      },
+      "constraints": [
+        "No add while StructureGate is WAIT/FAIL; prioritize reclaim/confirm."
+      ],
+      "in_profit": false,
+      "mode": "FLAT",
+      "pnl_pct": NaN,
+      "rationale": "Ch\u01b0a \u0111\u1ee7 \u0111i\u1ec1u ki\u1ec7n cho mua m\u1edbi; \u01b0u ti\u00ean ch\u1edd th\u00eam x\u00e1c nh\u1eadn (\u0111\u1eb7c bi\u1ec7t l\u00e0 Structure/Volume).",
+      "schema": "DecisionPack.v1",
+      "urgency": "LOW"
+    },
+    "Fibonacci": {
+      "AltShort": {
+        "levels": {
+          "127.2": 68.8648,
+          "161.8": 72.6362,
+          "38.2": 61.736200000000004,
+          "50.0": 60.45,
+          "61.8": 59.1638
+        },
+        "swing_high": 65.9,
+        "swing_low": 55.0,
+        "window": 90
+      },
+      "Context": {
+        "Close": 63.3,
+        "ConfluenceLongWithMA": {
+          "MA20": [],
+          "MA200": [],
+          "MA50": []
+        },
+        "ConfluenceShortWithMA": {
+          "MA20": [],
+          "MA200": [],
+          "MA50": [
+            {
+              "DistPct": 0.15606748864374298,
+              "FibLevel": "38.2",
+              "FibValue": 61.736200000000004
+            }
+          ]
+        },
+        "FiboConflictFlag": false,
+        "FiboPriorityRuleApplied": "None",
+        "LongBand": "Above61.8",
+        "NearestLong": {
+          "Resistances": [
+            {
+              "DistPct": 12.04827804107427,
+              "Level": "127.2",
+              "Value": 70.92656000000001
+            },
+            {
+              "DistPct": 22.149510268562427,
+              "Level": "161.8",
+              "Value": 77.32064000000001
+            }
+          ],
+          "Supports": [
+            {
+              "DistPct": -7.044802527646113,
+              "Level": "38.2",
+              "Value": 58.84064000000001
+            },
+            {
+              "DistPct": -10.489731437598726,
+              "Level": "50.0",
+              "Value": 56.660000000000004
+            }
+          ]
+        },
+        "NearestShort": {
+          "Resistances": [
+            {
+              "DistPct": 8.791153238546611,
+              "Level": "127.2",
+              "Value": 68.8648
+            },
+            {
+              "DistPct": 14.749131121642979,
+              "Level": "161.8",
+              "Value": 72.6362
+            }
+          ],
+          "Supports": [
+            {
+              "DistPct": -2.470458135860969,
+              "Level": "38.2",
+              "Value": 61.736200000000004
+            },
+            {
+              "DistPct": -4.502369668246437,
+              "Level": "50.0",
+              "Value": 60.45
+            }
+          ]
+        },
+        "ShortBand": "Above61.8"
+      },
+      "Long": {
+        "levels": {
+          "127.2": 70.92656000000001,
+          "161.8": 77.32064000000001,
+          "38.2": 58.84064000000001,
+          "50.0": 56.660000000000004,
+          "61.8": 54.47936
+        },
+        "swing_high": 65.9,
+        "swing_low": 47.42
+      },
+      "LongWindow": {
+        "Band": "Above61.8",
+        "Value": 250
+      },
+      "SelectionReason": "AutoSelect=60 (higher relevance score)",
+      "Short": {
+        "levels": {
+          "127.2": 68.8648,
+          "161.8": 72.6362,
+          "38.2": 61.736200000000004,
+          "50.0": 60.45,
+          "61.8": 59.1638
+        },
+        "swing_high": 65.9,
+        "swing_low": 55.0
+      },
+      "ShortWindow": {
+        "Band": "Above61.8",
+        "Value": 60
+      }
+    },
+    "Fundamental": {
+      "Recommendation": "Overweight",
+      "TargetK": NaN,
+      "TargetVND": NaN,
+      "UpsidePct": NaN
+    },
+    "Last": {
+      "Avg20Vol": 3522960.0,
+      "Close": 63.3,
+      "MA20": 62.17,
+      "MA200": 57.479549999999996,
+      "MA50": 61.64,
+      "MACD": 0.018353485505464562,
+      "MACDHist": 0.06336523049764987,
+      "MACDSignal": -0.04501174499218531,
+      "RSI": 56.22270024999242,
+      "Volume": 6761300.0
+    },
+    "Market": {
+      "RelativeStrengthVsVNINDEX": "Weaker",
+      "StockChangePct": 0.9569377990430531,
+      "VN30": {
+        "ChangePct": 0.4312002461254593,
+        "Close": 2089.21,
+        "Regime": "Up",
+        "Ticker": "VN30"
+      },
+      "VNINDEX": {
+        "ChangePct": 1.363638784870009,
+        "Close": 1902.93,
+        "Regime": "Up",
+        "Ticker": "VNINDEX"
+      }
+    },
+    "MasterScore": {
+      "Components": {
+        "Fibonacci": 2.0,
+        "Momentum": 2.0,
+        "RRQuality": 2.0,
+        "Trend": 2.0,
+        "Volume": 1.6
+      },
+      "Notes": [
+        "TrendTag=Structure_Up_Strong",
+        "MomTag=Aligned_Bullish",
+        "VolTag=Above_Avg",
+        "RRTag=Excellent_Gt4"
+      ],
+      "PositionSizing": "\u2013",
+      "Tier": "\u2013",
+      "Total": 9.6
+    },
+    "NarrativeAnchorPack": {
+      "anchor_changed": true,
+      "anchor_phrase": "C\u1ed5 phi\u1ebfu \u0111ang \u1edf tr\u1ea1ng th\u00e1i ph\u00f2ng th\u1ee7; \u01b0u ti\u00ean b\u1ea3o to\u00e0n v\u1ed1n v\u00e0 gi\u1ea3m nh\u1ecbp giao d\u1ecbch cho \u0111\u1ebfn khi t\u00edn hi\u1ec7u h\u1ed3i ph\u1ee5c r\u00f5 r\u00e0ng h\u01a1n.",
+      "detected_regime": "Defensive",
+      "hysteresis": {
+        "candidate": "",
+        "confirm_n": 2,
+        "streak": 1
+      },
+      "prev_regime": "",
       "reason": "cold_start",
-      "regime": "Trend"
+      "regime": "Defensive",
+      "schema": "NarrativeAnchorPack.v1",
+      "source": "TradePlanPack.plan_primary.gates.structure"
     },
-    "trade_plan": {
+    "NarrativeDraftPack": {
+      "anchor": {
+        "phrase": "C\u1ed5 phi\u1ebfu \u0111ang \u1edf tr\u1ea1ng th\u00e1i ph\u00f2ng th\u1ee7; \u01b0u ti\u00ean b\u1ea3o to\u00e0n v\u1ed1n v\u00e0 gi\u1ea3m nh\u1ecbp giao d\u1ecbch cho \u0111\u1ebfn khi t\u00edn hi\u1ec7u h\u1ed3i ph\u1ee5c r\u00f5 r\u00e0ng h\u01a1n.",
+        "regime": "Defensive"
+      },
+      "comms_policy": {
+        "empathy_allowed": false,
+        "max_numbers_per_sentence": 2,
+        "no_slogans": true
+      },
+      "dna": {
+        "banned_words": [
+          "\u0111ang",
+          "hi\u1ec7n t\u1ea1i",
+          "t\u00edn hi\u1ec7u",
+          "h\u00f4m nay"
+        ],
+        "facts": {
+          "class_primary": "Volatile Range",
+          "discipline_rule": "gi\u1ea3m quy m\u00f4 v\u00e0 \u01b0u ti\u00ean ph\u1ea3n \u1ee9ng nhanh; ch\u1ec9 tham gia khi v\u00f9ng gi\u00e1 r\u00f5 r\u00e0ng, m\u1ea5t bi\u00ean l\u00e0 \u0111\u1ee9ng ngo\u00e0i",
+          "dna_mapping": "c\u1ed5 phi\u1ebfu \u0111i ngang nh\u01b0ng bi\u1ebfn \u0111\u1ed9ng m\u1ea1nh",
+          "edge": "bi\u00ean dao \u0111\u1ed9ng t\u1ea1o c\u01a1 h\u1ed9i trading ng\u1eafn h\u1ea1n",
+          "modifiers": [
+            "HIVOL"
+          ],
+          "risk_regime": "High",
+          "source": "DNAPack",
+          "style_primary": "Range",
+          "ticker": "VNM",
+          "variant": "C"
+        },
+        "forbid_tokens": [
+          "masterscore",
+          "conviction",
+          "\u0111i\u1ec3m t\u1ed5ng h\u1ee3p",
+          "\u0111i\u1ec3m tin c\u1eady",
+          "ms",
+          "cv"
+        ],
+        "line_draft": "VNM l\u00e0 ki\u1ec3u c\u1ed5 phi\u1ebfu \u0111i ngang nh\u01b0ng bi\u1ebfn \u0111\u1ed9ng m\u1ea1nh; l\u1ee3i th\u1ebf n\u1eb1m \u1edf bi\u00ean dao \u0111\u1ed9ng t\u1ea1o c\u01a1 h\u1ed9i trading ng\u1eafn h\u1ea1n; \u0111\u1ed5i l\u1ea1i, \u0111i\u1ec1u ki\u1ec7n b\u1eaft bu\u1ed9c l\u00e0 gi\u1ea3m quy m\u00f4 v\u00e0 \u01b0u ti\u00ean ph\u1ea3n \u1ee9ng nhanh; ch\u1ec9 tham gia khi v\u00f9ng gi\u00e1 r\u00f5 r\u00e0ng, m\u1ea5t bi\u00ean l\u00e0 \u0111\u1ee9ng ngo\u00e0i.",
+        "max_numbers_per_sentence": 2,
+        "variant_pref": "AUTO"
+      },
+      "plan": {
+        "facts": {
+          "blocker_code": "STRUCTURE_BROKEN",
+          "required_phrases": [
+            "RR 6.6",
+            "r\u1ee7i ro 2.1%"
+          ],
+          "risk_text": "2.1%",
+          "rr_text": "6.6",
+          "state": "WATCH",
+          "type": "MEAN_REV"
+        },
+        "forbid_price_levels": true,
+        "line_draft": "Trade Plan \u01b0u ti\u00ean Mean-reversion (tr\u1ea1ng th\u00e1i WATCH), \u0111i\u1ec3m ngh\u1ebdn ch\u00ednh: STRUCTURE_BROKEN. Tr\u1ecdng t\u00e2m k\u1ef7 lu\u1eadt: RR 6.6; r\u1ee7i ro 2.1%.",
+        "max_numbers_per_sentence": 2,
+        "max_sentences": 2
+      },
+      "schema": "NarrativeDraftPack.v1",
+      "status": {
+        "facts": {
+          "ma200_context": "ABOVE_MA200",
+          "momentum_context": "-",
+          "risk_context": "LOW",
+          "structure_context": "BROKEN",
+          "volume_context": "CONFIRM"
+        },
+        "line_draft": "C\u1ed5 phi\u1ebfu \u0111ang \u1edf tr\u1ea1ng th\u00e1i ph\u00f2ng th\u1ee7; \u01b0u ti\u00ean b\u1ea3o to\u00e0n v\u1ed1n v\u00e0 gi\u1ea3m nh\u1ecbp giao d\u1ecbch cho \u0111\u1ebfn khi t\u00edn hi\u1ec7u h\u1ed3i ph\u1ee5c r\u00f5 r\u00e0ng h\u01a1n. tr\u00ean MA200 (xu h\u01b0\u1edbng d\u00e0i h\u1ea1n thu\u1eadn); c\u1ea5u tr\u00fac b\u1ecb suy y\u1ebfu; d\u00f2ng ti\u1ec1n \u1ee7ng h\u1ed9. M\u1ee9c r\u1ee7i ro th\u1ea5p.",
+        "max_numbers_per_sentence": 2,
+        "max_sentences": 2
+      }
+    },
+    "PlanStabilityPack": {
+      "carryover_plan_id": "",
+      "notes": [],
       "plan_state": "PAUSED",
-      "reason": "still_paused"
+      "prev_plan_state": "",
+      "raw_plan_present": false,
+      "reason": "still_no_plan",
+      "schema": "PlanStabilityPack.v1"
+    },
+    "PositionManagerPack": {
+      "Levels": {},
+      "Notes": [],
+      "action": "WAIT",
+      "guidance": "Quan s\u00e1t th\u00eam; tr\u00e1nh h\u00e0nh \u0111\u1ed9ng khi ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn c\u1ea5u tr\u00fac/volume.",
+      "mode": "FLAT",
+      "position_size_pct_nav": null,
+      "schema": "PositionManagerPack.v1",
+      "size_cap_pct_nav": null,
+      "stop_suggest": 60.85,
+      "trim_pct_of_position": null,
+      "urgency": "LOW"
+    },
+    "PositionStatePack": {
+      "AvgCost": NaN,
+      "AvgCostGapPct": NaN,
+      "CurrentPrice": 63.3,
+      "DistressLevel": "-",
+      "HoldingHorizon": "SWING",
+      "InProfit": false,
+      "IsHolding": false,
+      "Mode": "FLAT",
+      "PnlPct": NaN,
+      "PositionSizePctNAV": NaN,
+      "RiskBudgetPctNAV": NaN,
+      "Timeframe": "D",
+      "UnderwaterPct": NaN,
+      "avg_cost": NaN,
+      "avg_cost_gap_pct": NaN,
+      "current_price": 63.3,
+      "distress_level": "-",
+      "holding_horizon": "SWING",
+      "in_profit": false,
+      "is_holding": false,
+      "mode": "FLAT",
+      "pnl_pct": NaN,
+      "position_size_pct_nav": NaN,
+      "risk_budget_pct_nav": NaN,
+      "timeframe": "D",
+      "underwater_pct": NaN
+    },
+    "PrimarySetup": {
+      "Confidence (Tech)": "High",
+      "Entry": 62.17,
+      "Name": "Pullback",
+      "RR": 6.6363636363636385,
+      "ReasonTags": [
+        "EntryAnchor=MA20",
+        "StopRef=FibS_38.2",
+        "VolRatio=1.92",
+        "Buffer=Dynamic(ATR/Proxy)",
+        "TP=Fib127.2"
+      ],
+      "RewardPct": 14.090397297732032,
+      "RiskPct": 2.1232105517130453,
+      "Status": "Watch",
+      "Stop": 60.85,
+      "TP1": 70.93,
+      "TP2": 76.186
+    },
+    "ProTech": {
+      "Bias": {
+        "Alignment": "Aligned_Positive",
+        "BiasCode": "Zone50_60__MACD_Above_Signal__Zero=Above__Hist=Sign_Flip__Cross=CrossUp__Align=Aligned_Positive",
+        "Facts": {
+          "MACDCrossBarsAgo": 0,
+          "MACDCrossEvent": "CrossUp",
+          "MACDHistState": "Sign_Flip",
+          "MACDRelation": "MACD_Above_Signal",
+          "MACDZeroLine": "Above",
+          "RSIDirection": "Rising",
+          "RSIDivergenceType": "None",
+          "RSIValue": 56.22270024999242,
+          "RSIZone": "Zone50_60"
+        },
+        "Notes": [
+          "Bias m\u00f4 t\u1ea3 b\u1eb1ng \u0111i\u1ec1u ki\u1ec7n (facts), kh\u00f4ng k\u1ebft lu\u1eadn t\u1ed1t/x\u1ea5u.",
+          "MACD_CrossEvent=CrossUp; BarsAgo=0"
+        ],
+        "Tags": [
+          "Zone50_60",
+          "MACD_Above_Signal",
+          "MACD_ZeroLine=Above",
+          "MACD_HistState=Sign_Flip",
+          "MACD_Cross=CrossUp",
+          "RSI_Direction=Rising",
+          "RSI_Divergence=None",
+          "Alignment=Aligned_Positive"
+        ]
+      },
+      "LevelContext": {
+        "NearestResistance": {
+          "DistPct": 12.04827804107427,
+          "Label": "127.2",
+          "Level": 70.92656000000001
+        },
+        "NearestSupport": {
+          "DistPct": -7.044802527646113,
+          "Label": "38.2",
+          "Level": 58.84064000000001
+        }
+      },
+      "MA": {
+        "Cross": {
+          "MA20VsMA50": {
+            "BarsAgo": 34,
+            "Event": "CrossUp"
+          },
+          "MA50VsMA200": {
+            "BarsAgo": 103,
+            "Event": "CrossUp"
+          },
+          "PriceVsMA200": {
+            "BarsAgo": 56,
+            "Event": "CrossUp"
+          },
+          "PriceVsMA50": {
+            "BarsAgo": 1,
+            "Event": "CrossUp"
+          }
+        },
+        "DistToMA200Pct": 10.126123116830248,
+        "DistToMA50Pct": 2.693056456846198,
+        "Regime": "Close>=MA50>=MA200",
+        "SlopeMA20": "Negative",
+        "SlopeMA200": "Positive",
+        "SlopeMA200Value": 0.2304499999999976,
+        "SlopeMA20Value": -0.7899999999999991,
+        "SlopeMA50": "Positive",
+        "SlopeMA50Value": 0.9440000000000026,
+        "Structure": {
+          "MA20AboveMA50": true,
+          "MA50AboveMA200": true,
+          "PriceAboveMA200": true,
+          "PriceAboveMA50": true
+        }
+      },
+      "MACD": {
+        "Cross": {
+          "BarsAgo": 0,
+          "Event": "CrossUp"
+        },
+        "Diff_MACD_Signal": 0.06336523049764987,
+        "Divergence": {
+          "Detail": "Price HH vs Osc LH (swings 50->56)",
+          "Type": "Bearish"
+        },
+        "Hist": 0.06336523049764987,
+        "HistState": "Sign_Flip",
+        "Hist_Series_6": [
+          -0.33472763170519565,
+          -0.30338078086407727,
+          -0.1852659422225963,
+          -0.17808028580661536,
+          -0.055322469672734145,
+          0.06336523049764987
+        ],
+        "Hist_Streak_Neg": 0,
+        "Hist_Streak_Pos": 1,
+        "MACD_Delta5": 0.2334218001857522,
+        "Signal": -0.04501174499218531,
+        "State": "MACD_Above_Signal",
+        "Value": 0.018353485505464562,
+        "ZeroLine": "Above"
+      },
+      "PriceAction": {
+        "Candle": {
+          "BodyPct": 19.047619047618902,
+          "Close": 63.3,
+          "CloseFromHighPct": 76.19047619047629,
+          "CloseFromLowPct": 23.809523809523714,
+          "Direction": "Bull",
+          "GapPct": 0.3189792663476806,
+          "High": 64.9,
+          "Low": 62.8,
+          "LowerWickPct": 4.76190476190481,
+          "Open": 62.9,
+          "RangePctOfClose": 3.31753554502371,
+          "RangePercentile60": 86.66666666666667,
+          "UpperWickPct": 76.19047619047629
+        },
+        "Context": {
+          "FiboConflictFlag": false,
+          "FiboPriorityRuleApplied": "None",
+          "NearFibLong": [],
+          "NearFibShort": [],
+          "NearMA": {
+            "MA20": {
+              "DistPct": 1.7851500789889345,
+              "Near": false,
+              "Value": 62.17
+            },
+            "MA200": {
+              "DistPct": 9.195023696682467,
+              "Near": false,
+              "Value": 57.479549999999996
+            },
+            "MA50": {
+              "DistPct": 2.622432859399679,
+              "Near": false,
+              "Value": 61.64
+            }
+          },
+          "VolumeRegime": "Spike"
+        },
+        "Notes": [
+          "Dir=Bull, BodyPct=19.047619047618902, WickU=76.19047619047629, WickL=4.76190476190481, RangePct=3.31753554502371",
+          "RangePercentile60=86.66666666666667",
+          "GapPct=0.3189792663476806",
+          "VolRegime=Spike"
+        ],
+        "Patterns": {
+          "BearishEngulfing": false,
+          "BullishEngulfing": false,
+          "Doji": false,
+          "Hammer": false,
+          "InsideBar": false,
+          "OutsideBar": false,
+          "ShootingStar": true
+        }
+      },
+      "RSI": {
+        "Delta5": 11.491817615490788,
+        "Direction": "Rising",
+        "Divergence": {
+          "Detail": "\u2013",
+          "Type": "None"
+        },
+        "Max20": 58.33208915413409,
+        "Min20": 42.05894207048537,
+        "RSI_Series_6": [
+          44.73088263450163,
+          45.27443985250248,
+          51.897496286412064,
+          46.324353336962226,
+          53.8803556847219,
+          56.22270024999242
+        ],
+        "State": "Zone50_60",
+        "StreakAbove70": 0,
+        "StreakBelow30": 0,
+        "Value": 56.22270024999242
+      },
+      "RSIContext": {
+        "Cross70BarsAgo": 120,
+        "Delta3": 4.325203963580357,
+        "Delta5": 11.491817615490788,
+        "Streak70": 0,
+        "Turning": "Rising"
+      },
+      "Volume": {
+        "Avg20Vol": 3522960.0,
+        "Ratio": 1.9192099825147035,
+        "Regime": "Spike",
+        "Vol": 6761300.0
+      },
+      "VolumeContext": {
+        "VolStreakUp": 1,
+        "VolTrend": "Rising"
+      }
+    },
+    "RRSim": {
+      "BestRR": 6.6363636363636385,
+      "Setups": [
+        {
+          "Confidence (Tech)": "High",
+          "Entry": 62.17,
+          "RR": 6.6363636363636385,
+          "ReasonTags": [
+            "EntryAnchor=MA20",
+            "StopRef=FibS_38.2",
+            "VolRatio=1.92",
+            "Buffer=Dynamic(ATR/Proxy)",
+            "TP=Fib127.2"
+          ],
+          "RewardPct": 14.090397297732032,
+          "RiskPct": 2.1232105517130453,
+          "Setup": "Pullback",
+          "Status": "Watch",
+          "Stop": 60.85,
+          "TP": 70.93
+        },
+        {
+          "Confidence (Tech)": "High",
+          "Entry": 62.17,
+          "RR": 5.068181818181816,
+          "ReasonTags": [
+            "EntryAnchor=MA20",
+            "StopRef=FibS_38.2",
+            "TPRef=FibS_127.2",
+            "VolRatio=1.92",
+            "Buffer=Dynamic(ATR/Proxy)"
+          ],
+          "RewardPct": 10.760817114363837,
+          "RiskPct": 2.1232105517130453,
+          "Setup": "MeanRev",
+          "Status": "Watch",
+          "Stop": 60.85,
+          "TP": 68.86
+        },
+        {
+          "Confidence (Tech)": "High",
+          "Entry": 69.0,
+          "RR": 1.8921568627451122,
+          "ReasonTags": [
+            "EntryAnchor=FibS_127.2",
+            "StopRef=FibS_127.2",
+            "TP=Fib127.2",
+            "VolRatio=1.92",
+            "Buffer=Dynamic(ATR/Proxy)"
+          ],
+          "RewardPct": 2.797101449275372,
+          "RiskPct": 1.4782608695652117,
+          "Setup": "Reclaim",
+          "Status": "Watch",
+          "Stop": 67.98,
+          "TP": 70.93
+        },
+        {
+          "Confidence (Tech)": "\u2013",
+          "Entry": NaN,
+          "RR": NaN,
+          "ReasonTags": [
+            "Defensive=NoTrade"
+          ],
+          "RewardPct": NaN,
+          "RiskPct": NaN,
+          "Setup": "Defensive",
+          "Status": "Watch",
+          "Stop": NaN,
+          "TP": NaN
+        }
+      ]
+    },
+    "Scenario12": {
+      "Code": 1,
+      "Flags": {
+        "Mom70Plus": false,
+        "MomAligned": true,
+        "TrendDown": false,
+        "TrendUp": true,
+        "VolHigh": true
+      },
+      "MomentumRegime": "Aligned",
+      "Name": "S1 \u2013 Uptrend + Momentum Aligned",
+      "RulesHit": [
+        "Trend=Up (Close>=MA50>=MA200)",
+        "Momentum=Aligned_Up (RSI>=55 & MACD>=Sig)",
+        "Volume=High (Vol > Avg20Vol)"
+      ],
+      "TrendRegime": "Up",
+      "VolumeRegime": "High"
+    },
+    "ScenarioBase": "Uptrend \u2013 Breakout Confirmation",
+    "StatusPack": {
+      "class_context": {
+        "class_primary": "Volatile Range",
+        "hard_gates": {
+          "gap_prone": false,
+          "illiquid": false
+        },
+        "risk_regime": "High",
+        "style_primary": "Range"
+      },
+      "schema": "StatusPack.v1",
+      "technicals": {
+        "climax_flag": false,
+        "gap_flag": false,
+        "ma200_context": "ABOVE_MA200",
+        "momentum_context": "-",
+        "range_context": "RANGE_MID",
+        "risk_context": "LOW",
+        "slope200": "POSITIVE",
+        "slope50": "POSITIVE",
+        "structure_context": "BROKEN",
+        "volume_context": "CONFIRM"
+      }
+    },
+    "StructureQuality": {
+      "Gates": {
+        "CeilingGate": {
+          "DistancePct": 0.17377567140600228,
+          "Horizon": "BOTH",
+          "NearestLevelPrice": 63.41,
+          "Reason": "Confluence ceiling too close",
+          "Status": "FAIL",
+          "Tier": "CONFLUENCE"
+        }
+      },
+      "Meta": {
+        "NearThresholdPct": 1.1216429699842037,
+        "Price": 63.3,
+        "VolPct_ATRProxy": 1.4020537124802546,
+        "ZoneWidthPct": 0.8412322274881527
+      },
+      "OverheadResistance": {
+        "Nearest": {
+          "Center": 63.41,
+          "ComponentsTop": [
+            {
+              "DistPct": 0.2053712480252805,
+              "Horizon": "STRUCTURAL",
+              "Price": 63.43,
+              "Type": "WEEKLY_SWING_LOW",
+              "Weight": 4.0
+            },
+            {
+              "DistPct": 0.15797788309636876,
+              "Horizon": "TACTICAL",
+              "Price": 63.4,
+              "Type": "DAILY_SWING_HIGH",
+              "Weight": 2.5
+            },
+            {
+              "DistPct": 0.15797788309636876,
+              "Horizon": "TACTICAL",
+              "Price": 63.4,
+              "Type": "DAILY_SWING_HIGH",
+              "Weight": 2.5
+            }
+          ],
+          "ConfluenceCount": 3,
+          "DistancePct": 0.17377567140600228,
+          "Horizon": "BOTH",
+          "QualityScore": 10.0,
+          "Tier": "CONFLUENCE",
+          "Zone": {
+            "High": 63.43,
+            "Low": 63.4
+          }
+        }
+      },
+      "UnderlyingSupport": {
+        "Nearest": {
+          "Center": 63.19499999999999,
+          "ComponentsTop": [
+            {
+              "DistPct": -0.11058451816745701,
+              "Horizon": "STRUCTURAL",
+              "Price": 63.23,
+              "Type": "WEEKLY_SWING_HIGH",
+              "Weight": 4.0
+            },
+            {
+              "DistPct": -0.22116903633491403,
+              "Horizon": "STRUCTURAL",
+              "Price": 63.16,
+              "Type": "WEEKLY_SWING_HIGH",
+              "Weight": 4.0
+            }
+          ],
+          "ConfluenceCount": 2,
+          "DistancePct": 0.16587677725119113,
+          "Horizon": "STRUCTURAL",
+          "QualityScore": 10.0,
+          "Tier": "CONFLUENCE",
+          "Zone": {
+            "High": 63.23,
+            "Low": 63.16
+          }
+        }
+      }
+    },
+    "Ticker": "VNM",
+    "TradePlanPack": {
+      "Plans": [],
+      "clear_winner": false,
+      "clear_winner_reason": "CW_NONE",
+      "clear_winner_thresholds": {
+        "abs_gap_floor": 1.0,
+        "gap_min": 1.2,
+        "rel_gap_min": 0.15,
+        "score1_min": 8.0
+      },
+      "display_mode": "TOP2",
+      "explain": "TradePlanBuilder: candidate plans are scored by (DNA priors + contextual status + RR + execution). Policy hint applied.",
+      "force_top2": false,
+      "force_top2_reason": "-",
+      "holding_overlay": {
+        "distress_level": "-",
+        "pnl_pct": NaN
+      },
+      "mode": "FLAT",
+      "plan_alt": {
+        "entry_zone": {
+          "High": 62.434000000000005,
+          "Low": 61.906
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          },
+          {
+            "code": "TRIGGER_NOT_READY",
+            "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd trigger"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "PASS",
+          "structure": "FAIL",
+          "trigger": "WAIT",
+          "volume": "PASS"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+          "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+          "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 6.552,
+        "rr_actual": 6.6363636363636385,
+        "rr_display": "6.6",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": 60.85,
+        "tp1": 70.93,
+        "tp2": 76.186,
+        "type": "PULLBACK"
+      },
+      "plan_completeness": {
+        "message": "-",
+        "missing": [],
+        "status": "PASS"
+      },
+      "plan_primary": {
+        "entry_zone": {
+          "High": 62.434000000000005,
+          "Low": 61.906
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          },
+          {
+            "code": "VOLUME_NEED_CONFIRM",
+            "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd volume"
+          },
+          {
+            "code": "TRIGGER_NOT_READY",
+            "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd trigger"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "PASS",
+          "structure": "FAIL",
+          "trigger": "WAIT",
+          "volume": "WAIT"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+          "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+          "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 7.224,
+        "rr_actual": 5.068181818181816,
+        "rr_display": "5.1",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": 60.85,
+        "tp1": 68.86,
+        "tp2": 72.874,
+        "type": "MEAN_REV"
+      },
+      "plans_all": [
+        {
+          "entry_zone": {
+            "High": 62.434000000000005,
+            "Low": 61.906
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            },
+            {
+              "code": "VOLUME_NEED_CONFIRM",
+              "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd volume"
+            },
+            {
+              "code": "TRIGGER_NOT_READY",
+              "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd trigger"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "PASS",
+            "structure": "FAIL",
+            "trigger": "WAIT",
+            "volume": "WAIT"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+            "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+            "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 7.224,
+          "rr_actual": 5.068181818181816,
+          "rr_display": "5.1",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": 60.85,
+          "tp1": 68.86,
+          "tp2": 72.874,
+          "type": "MEAN_REV"
+        },
+        {
+          "entry_zone": {
+            "High": 62.434000000000005,
+            "Low": 61.906
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            },
+            {
+              "code": "TRIGGER_NOT_READY",
+              "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd trigger"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "PASS",
+            "structure": "FAIL",
+            "trigger": "WAIT",
+            "volume": "PASS"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+            "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+            "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 6.552,
+          "rr_actual": 6.6363636363636385,
+          "rr_display": "6.6",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": 60.85,
+          "tp1": 70.93,
+          "tp2": 76.186,
+          "type": "PULLBACK"
+        },
+        {
+          "entry_zone": {
+            "High": 69.204,
+            "Low": 68.796
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            },
+            {
+              "code": "TRIGGER_NOT_READY",
+              "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd trigger"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "PASS",
+            "structure": "FAIL",
+            "trigger": "WAIT",
+            "volume": "PASS"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "Ch\u1edd reclaim m\u1ed1c c\u1ea5u tr\u00fac (gi\u00e1 l\u1ea5y l\u1ea1i kh\u00e1ng c\u1ef1 v\u00e0 gi\u1eef \u0111\u01b0\u1ee3c).",
+            "Stop: d\u01b0\u1edbi m\u1ed1c reclaim + buffer (\u0111\u1ed9ng).",
+            "N\u1ebfu reclaim fail \u2192 gi\u1ea3m/tho\u00e1t nhanh."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Reclaim",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 4.896,
+          "rr_actual": 1.8921568627451122,
+          "rr_display": "1.9",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": 67.98,
+          "tp1": 70.93,
+          "tp2": 72.08800000000001,
+          "type": "RECLAIM"
+        },
+        {
+          "defensive_hard_stop": 60.85,
+          "defensive_reclaim": 69.0,
+          "defensive_reclaim_level": 69.0,
+          "defensive_reclaim_zone": {
+            "High": 69.204,
+            "Low": 68.796
+          },
+          "entry_zone": {
+            "High": NaN,
+            "Low": NaN
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "PASS",
+            "structure": "FAIL",
+            "trigger": "PASS",
+            "volume": "PASS"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "\u01afu ti\u00ean \u0111\u1ee9ng ngo\u00e0i ho\u1eb7c gi\u1ea3m r\u1ee7i ro khi c\u1ea5u tr\u00fac/volume ch\u01b0a x\u00e1c nh\u1eadn.",
+            "Ch\u1ec9 chuy\u1ec3n sang plan ch\u1ee7 \u0111\u1ed9ng khi Structure/Volume/Trigger c\u1ea3i thi\u1ec7n."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Defensive",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 4.384,
+          "rr_actual": NaN,
+          "rr_display": "-",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": NaN,
+          "tp1": NaN,
+          "tp2": NaN,
+          "type": "DEFENSIVE"
+        },
+        {
+          "entry_zone": {
+            "High": 69.86399999999999,
+            "Low": 69.236
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            },
+            {
+              "code": "RR_BELOW_MIN",
+              "label": "R:R d\u01b0\u1edbi m\u1ee9c t\u1ed1i thi\u1ec3u theo policy; c\u1ea7n \u0111i\u1ec3m v\u00e0o t\u1ed1t h\u01a1n ho\u1eb7c stop h\u1ee3p l\u00fd h\u01a1n.",
+              "severity": 2,
+              "ui_short": "RR th\u1ea5p"
+            },
+            {
+              "code": "TRIGGER_INVALID",
+              "label": "Trigger b\u1ecb invalid theo setup; kh\u00f4ng tri\u1ec3n khai plan n\u00e0y.",
+              "severity": 2,
+              "ui_short": "Trigger invalid"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "FAIL",
+            "structure": "FAIL",
+            "trigger": "FAIL",
+            "volume": "PASS"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "Entry ch\u1ec9 khi gi\u00e1 v\u01b0\u1ee3t v\u00f9ng kh\u00e1ng c\u1ef1 v\u00e0 c\u00f3 follow-through.",
+            "Stop: d\u01b0\u1edbi v\u00f9ng breakout + buffer (\u0111\u1ed9ng theo ATR/vol proxy).",
+            "N\u1ebfu breakout fail (\u0111\u00f3ng c\u1eeda l\u1ea1i d\u01b0\u1edbi v\u00f9ng), \u01b0u ti\u00ean tho\u00e1t/gi\u1ea3m."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Breakout",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 4.196,
+          "rr_actual": 0.8789808917197552,
+          "rr_display": "-",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": 67.98,
+          "tp1": 70.93,
+          "tp2": 71.75800000000001,
+          "type": "BREAKOUT"
+        }
+      ],
+      "plans_display": [
+        {
+          "entry_zone": {
+            "High": 62.434000000000005,
+            "Low": 61.906
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            },
+            {
+              "code": "VOLUME_NEED_CONFIRM",
+              "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd volume"
+            },
+            {
+              "code": "TRIGGER_NOT_READY",
+              "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd trigger"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "PASS",
+            "structure": "FAIL",
+            "trigger": "WAIT",
+            "volume": "WAIT"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+            "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+            "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 7.224,
+          "rr_actual": 5.068181818181816,
+          "rr_display": "5.1",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": 60.85,
+          "tp1": 68.86,
+          "tp2": 72.874,
+          "type": "MEAN_REV"
+        },
+        {
+          "entry_zone": {
+            "High": 62.434000000000005,
+            "Low": 61.906
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            },
+            {
+              "code": "TRIGGER_NOT_READY",
+              "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd trigger"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "PASS",
+            "structure": "FAIL",
+            "trigger": "WAIT",
+            "volume": "PASS"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+            "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+            "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 6.552,
+          "rr_actual": 6.6363636363636385,
+          "rr_display": "6.6",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": 60.85,
+          "tp1": 70.93,
+          "tp2": 76.186,
+          "type": "PULLBACK"
+        }
+      ],
+      "policy_hint_line": "RR>=2.0 | Size<=70% | Overnight: Caution",
+      "schema": "TradePlanPack.v1"
+    },
+    "TradePlans": [
+      {
+        "Confidence (Tech)": "\u2013",
+        "Entry": 69.55,
+        "Name": "Breakout",
+        "RR": 0.8789808917197552,
+        "ReasonTags": [
+          "Anchor=FibS_127.2",
+          "StopRef=FibS_127.2",
+          "VolRatio=1.92",
+          "Buffer=Dynamic(ATR/Proxy)",
+          "TP=Fib127.2",
+          "Invalid=GeometryOrRR"
+        ],
+        "Status": "Invalid",
+        "Stop": 67.98,
+        "TP": 70.93
+      },
+      {
+        "Confidence (Tech)": "High",
+        "Entry": 62.17,
+        "Name": "Pullback",
+        "RR": 6.6363636363636385,
+        "ReasonTags": [
+          "EntryAnchor=MA20",
+          "StopRef=FibS_38.2",
+          "VolRatio=1.92",
+          "Buffer=Dynamic(ATR/Proxy)",
+          "TP=Fib127.2"
+        ],
+        "Status": "Watch",
+        "Stop": 60.85,
+        "TP": 70.93
+      },
+      {
+        "Confidence (Tech)": "High",
+        "Entry": 62.17,
+        "Name": "MeanRev",
+        "RR": 5.068181818181816,
+        "ReasonTags": [
+          "EntryAnchor=MA20",
+          "StopRef=FibS_38.2",
+          "TPRef=FibS_127.2",
+          "VolRatio=1.92",
+          "Buffer=Dynamic(ATR/Proxy)"
+        ],
+        "Status": "Watch",
+        "Stop": 60.85,
+        "TP": 68.86
+      },
+      {
+        "Confidence (Tech)": "High",
+        "Entry": 69.0,
+        "Name": "Reclaim",
+        "RR": 1.8921568627451122,
+        "ReasonTags": [
+          "EntryAnchor=FibS_127.2",
+          "StopRef=FibS_127.2",
+          "TP=Fib127.2",
+          "VolRatio=1.92",
+          "Buffer=Dynamic(ATR/Proxy)"
+        ],
+        "Status": "Watch",
+        "Stop": 67.98,
+        "TP": 70.93
+      },
+      {
+        "Confidence (Tech)": "\u2013",
+        "Entry": NaN,
+        "Name": "Defensive",
+        "RR": NaN,
+        "ReasonTags": [
+          "Defensive=NoTrade"
+        ],
+        "Status": "Watch",
+        "Stop": NaN,
+        "TP": NaN
+      }
+    ],
+    "_schema_version": "1.0"
+  },
+  "DashboardSummaryPack": {
+    "CurrentStatusCard": {
+      "close_px": 63.3,
+      "conviction": 9.5,
+      "data_quality": {
+        "error_count": 0,
+        "issues": [],
+        "schema": "DataQualityPack.v1",
+        "warn_count": 0
+      },
+      "decision": {
+        "action": "WAIT",
+        "constraint0": "No add while StructureGate is WAIT/FAIL; prioritize reclaim/confirm.",
+        "mode": "FLAT",
+        "pnl_pct": NaN,
+        "position_size_pct_nav": NaN,
+        "stop_suggest": 60.85,
+        "trim_pct_of_position": NaN,
+        "urgency": "LOW"
+      },
+      "gate_line": "Gate: \u2013 | Plan: MEAN_REV (WATCH) | PlanCompleteness: PASS",
+      "gate_status": "",
+      "insight_line": "C\u01a1 h\u1ed9i h\u1ea5p d\u1eabn v\u00e0 \u0111\u1ed9 tin c\u1eady cao; c\u00f3 th\u1ec3 tri\u1ec3n khai theo plan, t\u1eadp trung qu\u1ea3n tr\u1ecb r\u1ee7i ro.",
+      "master_total": 9.6,
+      "next_step": "Ch\u1edd reclaim m\u1ed1c c\u1ea5u tr\u00fac ph\u00eda tr\u00ean (Weekly pivot (prior LOW \u2014 now resistance)) tr\u01b0\u1edbc khi t\u0103ng x\u00e1c su\u1ea5t v\u00e0o l\u1ec7nh.",
+      "plan_reason": {
+        "code": "STRUCTURE_BROKEN",
+        "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+        "ui_short": "Structure g\u00e3y"
+      },
+      "plan_status": "WATCH",
+      "policy_hint_line": "RR>=2.0 | Size<=70% | Overnight: Caution",
+      "relative_strength_vs_vnindex": "Weaker",
+      "risk_flags": [
+        "[NearMajorResistance] Tr\u1ea7n c\u1ea5u tr\u00fac g\u1ea7n \u2013 upside ng\u1eafn b\u1ecb n\u00e9n (WEEKLY_SWING_LOW)"
+      ],
+      "scenario_name": "S1 \u2013 Uptrend + Momentum Aligned",
+      "setup_name": "MEAN_REV",
+      "state_capsule_line": "Pullback | Near Resistance | Vol: Spike",
+      "stock_chg_pct": 0.9569377990430531,
+      "structure_snapshot": {
+        "fib_conflict": false,
+        "fib_long_band": "Above61.8",
+        "fib_short_band": "Above61.8",
+        "ma_regime": "Close>=MA50>=MA200",
+        "macd_state": "MACD_Above_Signal",
+        "macd_zero": "Above",
+        "rsi_direction": "Rising",
+        "rsi_macd_alignment": "Aligned_Positive",
+        "rsi_state": "Zone50_60",
+        "vol_ratio": 1.9192099825147035
+      },
+      "ticker": "VNM",
+      "triggers": {
+        "breakout": "WAIT",
+        "rr": "PASS",
+        "structure": "FAIL",
+        "volume": "WAIT"
+      }
+    },
+    "schema": "DashboardSummaryPack.v1"
+  },
+  "DecisionPack": {
+    "Flags": {},
+    "Weakness": [],
+    "action": "WAIT",
+    "allocation": {
+      "max_size_pct_nav": null,
+      "notes": "-",
+      "target_size_pct_nav": null
+    },
+    "constraints": [
+      "No add while StructureGate is WAIT/FAIL; prioritize reclaim/confirm."
+    ],
+    "in_profit": false,
+    "mode": "FLAT",
+    "pnl_pct": NaN,
+    "rationale": "Ch\u01b0a \u0111\u1ee7 \u0111i\u1ec1u ki\u1ec7n cho mua m\u1edbi; \u01b0u ti\u00ean ch\u1edd th\u00eam x\u00e1c nh\u1eadn (\u0111\u1eb7c bi\u1ec7t l\u00e0 Structure/Volume).",
+    "schema": "DecisionPack.v1",
+    "urgency": "LOW"
+  },
+  "Modules": {
+    "character": {
+      "ActionTags": [
+        "Breakout attempt (needs follow-through)",
+        "Tight risk control near resistance"
+      ],
+      "AdjustedStats": {
+        "MomentumAdj": 4.022857142857143,
+        "ReliabilityAdj": 6.74233725774888,
+        "StabilityAdj": 6.359999999999999,
+        "TrendAdj": 10.0
+      },
+      "CharacterClass": "Volatile Range",
+      "Class": {
+        "Name": "Volatile Range"
+      },
+      "ClassName": "Volatile Range",
+      "CombatStats": {
+        "BreakoutForce": 8.0,
+        "DownsideRisk": 7.5,
+        "RREfficiency": 7.5,
+        "SupportResilience": 3.4000000000000004,
+        "UpsidePower": 7.5,
+        "UpsideQuality": 9.373995033733683,
+        "UpsideRoom": 7.5
+      },
+      "Conviction": {
+        "Points": 3.5,
+        "SizeGuidance": "Trade \u0111\u01b0\u1ee3c \u2014 30\u201350% size",
+        "Tier": 3
+      },
+      "CoreStats": {
+        "Liquidity": 8.5,
+        "Momentum": 4.3,
+        "Reliability": 7.0,
+        "Stability": 7.0,
+        "Trend": 10.0
+      },
+      "Flags": [
+        {
+          "code": "NearMajorResistance",
+          "meta": {
+            "DistancePct": 0.17377567140600228,
+            "Horizon": "BOTH",
+            "NearThPct": 1.1216429699842037,
+            "Tier": "CONFLUENCE",
+            "TypeLabel": "WEEKLY_SWING_LOW",
+            "TypeTop": "WEEKLY_SWING_LOW"
+          },
+          "note": "Tr\u1ea7n c\u1ea5u tr\u00fac g\u1ea7n \u2013 upside ng\u1eafn b\u1ecb n\u00e9n (WEEKLY_SWING_LOW)",
+          "severity": 3
+        }
+      ],
+      "Meta": {
+        "ATR14": 1.321428571428571,
+        "Close": 63.3,
+        "ConfidenceTech": "High",
+        "DenomUsed": "ATR14",
+        "DownsideNorm": 0.7755457834689767,
+        "DownsideRaw": 1.1299999999999955,
+        "LevelCtxKeys": "",
+        "LevelCtxSource": "Local.Infer",
+        "NearestRes": 65.9,
+        "NearestSup": 62.17,
+        "RR": 2.3008849557522293,
+        "UpsideNorm": 1.7844416256808444,
+        "UpsideQualityMult": 1.2498660044978245,
+        "UpsideRaw": 2.6000000000000085,
+        "VolProxy": 0.8875000000000011
+      },
+      "Notes": {},
+      "Risks": {},
+      "StockTraits": {
+        "BreakoutQuality": 5.142857142857143,
+        "Confidence": {
+          "BreakoutQuality": 1.0
+        },
+        "DNA": {
+          "Groups": {
+            "BehaviorSetup": [
+              "BreakoutQuality",
+              "MeanReversionWhipsaw",
+              "AutoCorrMomentum"
+            ],
+            "DrawdownRecovery": [
+              "MaxDrawdownRisk",
+              "RecoverySlownessRisk",
+              "DrawdownFrequencyRisk"
+            ],
+            "LiquidityTradability": [
+              "LiquidityTradability",
+              "LiquidityLevel",
+              "LiquidityConsistency"
+            ],
+            "TrendStructure": [
+              "TrendIntegrity",
+              "TrendPersistence",
+              "TrendChurnControl"
+            ],
+            "VolatilityTail": [
+              "VolRisk",
+              "TailGapRisk",
+              "VolOfVolRisk"
+            ]
+          },
+          "Params": {
+            "AutoCorrMomentum": 4.0,
+            "BreakoutQuality": 5.142857142857143,
+            "DrawdownFrequencyRisk": 4.0,
+            "LiquidityConsistency": 2.7115229653505235,
+            "LiquidityLevel": 5.3263497179693795,
+            "LiquidityTradability": 4.162334290764472,
+            "MaxDrawdownRisk": 10.0,
+            "MeanReversionWhipsaw": 7.999999999999999,
+            "RecoverySlownessRisk": 5.0,
+            "TailGapRisk": 5.2,
+            "TrendChurnControl": 6.0,
+            "TrendIntegrity": 6.4,
+            "TrendPersistence": 4.0,
+            "VolOfVolRisk": 6.0,
+            "VolRisk": 6.0
+          },
+          "StyleHybrid": {
+            "DisabledReason": "",
+            "Enabled": true,
+            "NearBoundary": false,
+            "NearThreshold": 0.835,
+            "Primary": "Range",
+            "RunnerUp2": {
+              "Score": 6.4,
+              "Style": "Trend"
+            },
+            "RunnerUp3": {
+              "Score": 4.806857142857143,
+              "Style": "Momentum"
+            },
+            "ScoreGap12": 1.9499999999999993,
+            "Scores": {
+              "Momentum": 4.806857142857143,
+              "Range": 8.35,
+              "Trend": 6.4
+            },
+            "TiltStrength": "-",
+            "TiltTo": "-",
+            "Version": "StyleHybrid_v1.0"
+          },
+          "Tier1": {
+            "ClassLockFlag": true,
+            "DNAConfidence": 45.0,
+            "Modifiers": [
+              "HIVOL"
+            ],
+            "PrimaryModifier": "HIVOL",
+            "RiskRegime": "High",
+            "RiskScore": 6.55,
+            "StyleAxis": "Range",
+            "StyleHybrid": {
+              "DisabledReason": "",
+              "Enabled": true,
+              "NearBoundary": false,
+              "NearThreshold": 0.835,
+              "Primary": "Range",
+              "RunnerUp2": {
+                "Score": 6.4,
+                "Style": "Trend"
+              },
+              "RunnerUp3": {
+                "Score": 4.806857142857143,
+                "Style": "Momentum"
+              },
+              "ScoreGap12": 1.9499999999999993,
+              "Scores": {
+                "Momentum": 4.806857142857143,
+                "Range": 8.35,
+                "Trend": 6.4
+              },
+              "TiltStrength": "-",
+              "TiltTo": "-",
+              "Version": "StyleHybrid_v1.0"
+            }
+          }
+        },
+        "LiquidityTradability": 4.162334290764472,
+        "MeanReversionWhipsaw": 7.999999999999999,
+        "Raw": {
+          "ADXMedian": 20.675618446837063,
+          "ATRpct": 2.087564883773414,
+          "Amihud20": 6.37957740178887e-11,
+          "AutoCorr1": -0.08200390330888124,
+          "AutocorrMean": -0.05079912030443051,
+          "CrashClusters": 4.0,
+          "CrossChurn": 7.0,
+          "DollarVolMedian20": 188011070.0,
+          "DrawdownEpisodesPerYear": 0.6,
+          "ES5AbsPct": 3.6858549437774197,
+          "FalseBreakRate": 0.42857142857142855,
+          "FollowThroughRate": 0.7142857142857143,
+          "GapFreq": 0.027777777777777776,
+          "HalfLife": 5.200236072735614,
+          "LeftTailFreq": 0.01984126984126984,
+          "MAStackConsistency": 0.6547619047619048,
+          "MaxDrawdownAbsPct": 45.78435804701628,
+          "PctAboveMA200": 0.45932539682539686,
+          "RangeExpansionRate": 0.48333333333333334,
+          "RealizedVol": 28.22011515698901,
+          "RealizedVolPct": 28.22011515698901,
+          "RecoveryDaysMedian": NaN,
+          "RetestSuccessRate": 0.14285714285714285,
+          "TRExpansionRate": 0.48333333333333334,
+          "TrendFlipRatePerYear": 7.0,
+          "VarianceRatio": 0.6852956308505175,
+          "VolOfVol": 10.251578362543583,
+          "VolumeCV20": 0.4352660496333413
+        },
+        "TailGapRisk": 5.2,
+        "TrendIntegrity": 6.4,
+        "VolRisk": 6.0
+      },
+      "StructureQuality": {
+        "Gates": {
+          "CeilingGate": {
+            "DistancePct": 0.17377567140600228,
+            "Horizon": "BOTH",
+            "NearestLevelPrice": 63.41,
+            "Reason": "Confluence ceiling too close",
+            "Status": "FAIL",
+            "Tier": "CONFLUENCE"
+          }
+        },
+        "Meta": {
+          "NearThresholdPct": 1.1216429699842037,
+          "Price": 63.3,
+          "VolPct_ATRProxy": 1.4020537124802546,
+          "ZoneWidthPct": 0.8412322274881527
+        },
+        "OverheadResistance": {
+          "Nearest": {
+            "Center": 63.41,
+            "ComponentsTop": [
+              {
+                "DistPct": 0.2053712480252805,
+                "Horizon": "STRUCTURAL",
+                "Price": 63.43,
+                "Type": "WEEKLY_SWING_LOW",
+                "Weight": 4.0
+              },
+              {
+                "DistPct": 0.15797788309636876,
+                "Horizon": "TACTICAL",
+                "Price": 63.4,
+                "Type": "DAILY_SWING_HIGH",
+                "Weight": 2.5
+              },
+              {
+                "DistPct": 0.15797788309636876,
+                "Horizon": "TACTICAL",
+                "Price": 63.4,
+                "Type": "DAILY_SWING_HIGH",
+                "Weight": 2.5
+              }
+            ],
+            "ConfluenceCount": 3,
+            "DistancePct": 0.17377567140600228,
+            "Horizon": "BOTH",
+            "QualityScore": 10.0,
+            "Tier": "CONFLUENCE",
+            "Zone": {
+              "High": 63.43,
+              "Low": 63.4
+            }
+          }
+        },
+        "UnderlyingSupport": {
+          "Nearest": {
+            "Center": 63.19499999999999,
+            "ComponentsTop": [
+              {
+                "DistPct": -0.11058451816745701,
+                "Horizon": "STRUCTURAL",
+                "Price": 63.23,
+                "Type": "WEEKLY_SWING_HIGH",
+                "Weight": 4.0
+              },
+              {
+                "DistPct": -0.22116903633491403,
+                "Horizon": "STRUCTURAL",
+                "Price": 63.16,
+                "Type": "WEEKLY_SWING_HIGH",
+                "Weight": 4.0
+              }
+            ],
+            "ConfluenceCount": 2,
+            "DistancePct": 0.16587677725119113,
+            "Horizon": "STRUCTURAL",
+            "QualityScore": 10.0,
+            "Tier": "CONFLUENCE",
+            "Zone": {
+              "High": 63.23,
+              "Low": 63.16
+            }
+          }
+        }
+      },
+      "StyleHybrid": {
+        "DisabledReason": "",
+        "Enabled": true,
+        "NearBoundary": false,
+        "NearThreshold": 0.835,
+        "Primary": "Range",
+        "RunnerUp2": {
+          "Score": 6.4,
+          "Style": "Trend"
+        },
+        "RunnerUp3": {
+          "Score": 4.806857142857143,
+          "Style": "Momentum"
+        },
+        "ScoreGap12": 1.9499999999999993,
+        "Scores": {
+          "Momentum": 4.806857142857143,
+          "Range": 8.35,
+          "Trend": 6.4
+        },
+        "TiltStrength": "-",
+        "TiltTo": "-",
+        "Version": "StyleHybrid_v1.0"
+      },
+      "TradePlanPack": {
+        "Plans": [],
+        "clear_winner": false,
+        "clear_winner_reason": "CW_NONE",
+        "clear_winner_thresholds": {
+          "abs_gap_floor": 1.0,
+          "gap_min": 1.2,
+          "rel_gap_min": 0.15,
+          "score1_min": 8.0
+        },
+        "display_mode": "TOP2",
+        "explain": "TradePlanBuilder: candidate plans are scored by (DNA priors + contextual status + RR + execution). Policy hint applied.",
+        "force_top2": false,
+        "force_top2_reason": "-",
+        "holding_overlay": {
+          "distress_level": "-",
+          "pnl_pct": NaN
+        },
+        "mode": "FLAT",
+        "plan_alt": {
+          "entry_zone": {
+            "High": 62.434000000000005,
+            "Low": 61.906
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            },
+            {
+              "code": "TRIGGER_NOT_READY",
+              "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd trigger"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "PASS",
+            "structure": "FAIL",
+            "trigger": "WAIT",
+            "volume": "PASS"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+            "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+            "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 6.552,
+          "rr_actual": 6.6363636363636385,
+          "rr_display": "6.6",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": 60.85,
+          "tp1": 70.93,
+          "tp2": 76.186,
+          "type": "PULLBACK"
+        },
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "plan_primary": {
+          "entry_zone": {
+            "High": 62.434000000000005,
+            "Low": 61.906
+          },
+          "fail_reasons": [
+            {
+              "code": "STRUCTURE_BROKEN",
+              "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+              "severity": 3,
+              "ui_short": "Structure g\u00e3y"
+            },
+            {
+              "code": "VOLUME_NEED_CONFIRM",
+              "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd volume"
+            },
+            {
+              "code": "TRIGGER_NOT_READY",
+              "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+              "severity": 1,
+              "ui_short": "Ch\u1edd trigger"
+            }
+          ],
+          "gates": {
+            "breakout": "PASS",
+            "exec": "PASS",
+            "plan": "PASS",
+            "rr": "PASS",
+            "structure": "FAIL",
+            "trigger": "WAIT",
+            "volume": "WAIT"
+          },
+          "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+          "management_rules": [
+            "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+            "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+            "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+          ],
+          "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+          "plan_completeness": {
+            "message": "-",
+            "missing": [],
+            "status": "PASS"
+          },
+          "rank_score": 7.224,
+          "rr_actual": 5.068181818181816,
+          "rr_display": "5.1",
+          "rr_min": 1.5,
+          "state": "WATCH",
+          "stop": 60.85,
+          "tp1": 68.86,
+          "tp2": 72.874,
+          "type": "MEAN_REV"
+        },
+        "plans_all": [
+          {
+            "entry_zone": {
+              "High": 62.434000000000005,
+              "Low": 61.906
+            },
+            "fail_reasons": [
+              {
+                "code": "STRUCTURE_BROKEN",
+                "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+                "severity": 3,
+                "ui_short": "Structure g\u00e3y"
+              },
+              {
+                "code": "VOLUME_NEED_CONFIRM",
+                "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+                "severity": 1,
+                "ui_short": "Ch\u1edd volume"
+              },
+              {
+                "code": "TRIGGER_NOT_READY",
+                "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+                "severity": 1,
+                "ui_short": "Ch\u1edd trigger"
+              }
+            ],
+            "gates": {
+              "breakout": "PASS",
+              "exec": "PASS",
+              "plan": "PASS",
+              "rr": "PASS",
+              "structure": "FAIL",
+              "trigger": "WAIT",
+              "volume": "WAIT"
+            },
+            "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+            "management_rules": [
+              "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+              "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+              "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+            ],
+            "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+            "plan_completeness": {
+              "message": "-",
+              "missing": [],
+              "status": "PASS"
+            },
+            "rank_score": 7.224,
+            "rr_actual": 5.068181818181816,
+            "rr_display": "5.1",
+            "rr_min": 1.5,
+            "state": "WATCH",
+            "stop": 60.85,
+            "tp1": 68.86,
+            "tp2": 72.874,
+            "type": "MEAN_REV"
+          },
+          {
+            "entry_zone": {
+              "High": 62.434000000000005,
+              "Low": 61.906
+            },
+            "fail_reasons": [
+              {
+                "code": "STRUCTURE_BROKEN",
+                "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+                "severity": 3,
+                "ui_short": "Structure g\u00e3y"
+              },
+              {
+                "code": "TRIGGER_NOT_READY",
+                "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+                "severity": 1,
+                "ui_short": "Ch\u1edd trigger"
+              }
+            ],
+            "gates": {
+              "breakout": "PASS",
+              "exec": "PASS",
+              "plan": "PASS",
+              "rr": "PASS",
+              "structure": "FAIL",
+              "trigger": "WAIT",
+              "volume": "PASS"
+            },
+            "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+            "management_rules": [
+              "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+              "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+              "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+            ],
+            "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+            "plan_completeness": {
+              "message": "-",
+              "missing": [],
+              "status": "PASS"
+            },
+            "rank_score": 6.552,
+            "rr_actual": 6.6363636363636385,
+            "rr_display": "6.6",
+            "rr_min": 1.5,
+            "state": "WATCH",
+            "stop": 60.85,
+            "tp1": 70.93,
+            "tp2": 76.186,
+            "type": "PULLBACK"
+          },
+          {
+            "entry_zone": {
+              "High": 69.204,
+              "Low": 68.796
+            },
+            "fail_reasons": [
+              {
+                "code": "STRUCTURE_BROKEN",
+                "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+                "severity": 3,
+                "ui_short": "Structure g\u00e3y"
+              },
+              {
+                "code": "TRIGGER_NOT_READY",
+                "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+                "severity": 1,
+                "ui_short": "Ch\u1edd trigger"
+              }
+            ],
+            "gates": {
+              "breakout": "PASS",
+              "exec": "PASS",
+              "plan": "PASS",
+              "rr": "PASS",
+              "structure": "FAIL",
+              "trigger": "WAIT",
+              "volume": "PASS"
+            },
+            "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+            "management_rules": [
+              "Ch\u1edd reclaim m\u1ed1c c\u1ea5u tr\u00fac (gi\u00e1 l\u1ea5y l\u1ea1i kh\u00e1ng c\u1ef1 v\u00e0 gi\u1eef \u0111\u01b0\u1ee3c).",
+              "Stop: d\u01b0\u1edbi m\u1ed1c reclaim + buffer (\u0111\u1ed9ng).",
+              "N\u1ebfu reclaim fail \u2192 gi\u1ea3m/tho\u00e1t nhanh."
+            ],
+            "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Reclaim",
+            "plan_completeness": {
+              "message": "-",
+              "missing": [],
+              "status": "PASS"
+            },
+            "rank_score": 4.896,
+            "rr_actual": 1.8921568627451122,
+            "rr_display": "1.9",
+            "rr_min": 1.5,
+            "state": "WATCH",
+            "stop": 67.98,
+            "tp1": 70.93,
+            "tp2": 72.08800000000001,
+            "type": "RECLAIM"
+          },
+          {
+            "defensive_hard_stop": 60.85,
+            "defensive_reclaim": 69.0,
+            "defensive_reclaim_level": 69.0,
+            "defensive_reclaim_zone": {
+              "High": 69.204,
+              "Low": 68.796
+            },
+            "entry_zone": {
+              "High": NaN,
+              "Low": NaN
+            },
+            "fail_reasons": [
+              {
+                "code": "STRUCTURE_BROKEN",
+                "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+                "severity": 3,
+                "ui_short": "Structure g\u00e3y"
+              }
+            ],
+            "gates": {
+              "breakout": "PASS",
+              "exec": "PASS",
+              "plan": "PASS",
+              "rr": "PASS",
+              "structure": "FAIL",
+              "trigger": "PASS",
+              "volume": "PASS"
+            },
+            "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+            "management_rules": [
+              "\u01afu ti\u00ean \u0111\u1ee9ng ngo\u00e0i ho\u1eb7c gi\u1ea3m r\u1ee7i ro khi c\u1ea5u tr\u00fac/volume ch\u01b0a x\u00e1c nh\u1eadn.",
+              "Ch\u1ec9 chuy\u1ec3n sang plan ch\u1ee7 \u0111\u1ed9ng khi Structure/Volume/Trigger c\u1ea3i thi\u1ec7n."
+            ],
+            "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Defensive",
+            "plan_completeness": {
+              "message": "-",
+              "missing": [],
+              "status": "PASS"
+            },
+            "rank_score": 4.384,
+            "rr_actual": NaN,
+            "rr_display": "-",
+            "rr_min": 1.5,
+            "state": "WATCH",
+            "stop": NaN,
+            "tp1": NaN,
+            "tp2": NaN,
+            "type": "DEFENSIVE"
+          },
+          {
+            "entry_zone": {
+              "High": 69.86399999999999,
+              "Low": 69.236
+            },
+            "fail_reasons": [
+              {
+                "code": "STRUCTURE_BROKEN",
+                "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+                "severity": 3,
+                "ui_short": "Structure g\u00e3y"
+              },
+              {
+                "code": "RR_BELOW_MIN",
+                "label": "R:R d\u01b0\u1edbi m\u1ee9c t\u1ed1i thi\u1ec3u theo policy; c\u1ea7n \u0111i\u1ec3m v\u00e0o t\u1ed1t h\u01a1n ho\u1eb7c stop h\u1ee3p l\u00fd h\u01a1n.",
+                "severity": 2,
+                "ui_short": "RR th\u1ea5p"
+              },
+              {
+                "code": "TRIGGER_INVALID",
+                "label": "Trigger b\u1ecb invalid theo setup; kh\u00f4ng tri\u1ec3n khai plan n\u00e0y.",
+                "severity": 2,
+                "ui_short": "Trigger invalid"
+              }
+            ],
+            "gates": {
+              "breakout": "PASS",
+              "exec": "PASS",
+              "plan": "PASS",
+              "rr": "FAIL",
+              "structure": "FAIL",
+              "trigger": "FAIL",
+              "volume": "PASS"
+            },
+            "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+            "management_rules": [
+              "Entry ch\u1ec9 khi gi\u00e1 v\u01b0\u1ee3t v\u00f9ng kh\u00e1ng c\u1ef1 v\u00e0 c\u00f3 follow-through.",
+              "Stop: d\u01b0\u1edbi v\u00f9ng breakout + buffer (\u0111\u1ed9ng theo ATR/vol proxy).",
+              "N\u1ebfu breakout fail (\u0111\u00f3ng c\u1eeda l\u1ea1i d\u01b0\u1edbi v\u00f9ng), \u01b0u ti\u00ean tho\u00e1t/gi\u1ea3m."
+            ],
+            "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Breakout",
+            "plan_completeness": {
+              "message": "-",
+              "missing": [],
+              "status": "PASS"
+            },
+            "rank_score": 4.196,
+            "rr_actual": 0.8789808917197552,
+            "rr_display": "-",
+            "rr_min": 1.5,
+            "state": "WATCH",
+            "stop": 67.98,
+            "tp1": 70.93,
+            "tp2": 71.75800000000001,
+            "type": "BREAKOUT"
+          }
+        ],
+        "plans_display": [
+          {
+            "entry_zone": {
+              "High": 62.434000000000005,
+              "Low": 61.906
+            },
+            "fail_reasons": [
+              {
+                "code": "STRUCTURE_BROKEN",
+                "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+                "severity": 3,
+                "ui_short": "Structure g\u00e3y"
+              },
+              {
+                "code": "VOLUME_NEED_CONFIRM",
+                "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+                "severity": 1,
+                "ui_short": "Ch\u1edd volume"
+              },
+              {
+                "code": "TRIGGER_NOT_READY",
+                "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+                "severity": 1,
+                "ui_short": "Ch\u1edd trigger"
+              }
+            ],
+            "gates": {
+              "breakout": "PASS",
+              "exec": "PASS",
+              "plan": "PASS",
+              "rr": "PASS",
+              "structure": "FAIL",
+              "trigger": "WAIT",
+              "volume": "WAIT"
+            },
+            "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+            "management_rules": [
+              "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+              "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+              "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+            ],
+            "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+            "plan_completeness": {
+              "message": "-",
+              "missing": [],
+              "status": "PASS"
+            },
+            "rank_score": 7.224,
+            "rr_actual": 5.068181818181816,
+            "rr_display": "5.1",
+            "rr_min": 1.5,
+            "state": "WATCH",
+            "stop": 60.85,
+            "tp1": 68.86,
+            "tp2": 72.874,
+            "type": "MEAN_REV"
+          },
+          {
+            "entry_zone": {
+              "High": 62.434000000000005,
+              "Low": 61.906
+            },
+            "fail_reasons": [
+              {
+                "code": "STRUCTURE_BROKEN",
+                "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+                "severity": 3,
+                "ui_short": "Structure g\u00e3y"
+              },
+              {
+                "code": "TRIGGER_NOT_READY",
+                "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+                "severity": 1,
+                "ui_short": "Ch\u1edd trigger"
+              }
+            ],
+            "gates": {
+              "breakout": "PASS",
+              "exec": "PASS",
+              "plan": "PASS",
+              "rr": "PASS",
+              "structure": "FAIL",
+              "trigger": "WAIT",
+              "volume": "PASS"
+            },
+            "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+            "management_rules": [
+              "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+              "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+              "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+            ],
+            "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+            "plan_completeness": {
+              "message": "-",
+              "missing": [],
+              "status": "PASS"
+            },
+            "rank_score": 6.552,
+            "rr_actual": 6.6363636363636385,
+            "rr_display": "6.6",
+            "rr_min": 1.5,
+            "state": "WATCH",
+            "stop": 60.85,
+            "tp1": 70.93,
+            "tp2": 76.186,
+            "type": "PULLBACK"
+          }
+        ],
+        "policy_hint_line": "RR>=2.0 | Size<=70% | Overnight: Caution",
+        "schema": "TradePlanPack.v1"
+      },
+      "Traits": {}
     }
   },
-  "ticker": "VNM"
+  "NarrativeDraftPack": {
+    "anchor": {
+      "phrase": "C\u1ed5 phi\u1ebfu \u0111ang \u1edf tr\u1ea1ng th\u00e1i ph\u00f2ng th\u1ee7; \u01b0u ti\u00ean b\u1ea3o to\u00e0n v\u1ed1n v\u00e0 gi\u1ea3m nh\u1ecbp giao d\u1ecbch cho \u0111\u1ebfn khi t\u00edn hi\u1ec7u h\u1ed3i ph\u1ee5c r\u00f5 r\u00e0ng h\u01a1n.",
+      "regime": "Defensive"
+    },
+    "comms_policy": {
+      "empathy_allowed": false,
+      "max_numbers_per_sentence": 2,
+      "no_slogans": true
+    },
+    "dna": {
+      "banned_words": [
+        "\u0111ang",
+        "hi\u1ec7n t\u1ea1i",
+        "t\u00edn hi\u1ec7u",
+        "h\u00f4m nay"
+      ],
+      "facts": {
+        "class_primary": "Volatile Range",
+        "discipline_rule": "gi\u1ea3m quy m\u00f4 v\u00e0 \u01b0u ti\u00ean ph\u1ea3n \u1ee9ng nhanh; ch\u1ec9 tham gia khi v\u00f9ng gi\u00e1 r\u00f5 r\u00e0ng, m\u1ea5t bi\u00ean l\u00e0 \u0111\u1ee9ng ngo\u00e0i",
+        "dna_mapping": "c\u1ed5 phi\u1ebfu \u0111i ngang nh\u01b0ng bi\u1ebfn \u0111\u1ed9ng m\u1ea1nh",
+        "edge": "bi\u00ean dao \u0111\u1ed9ng t\u1ea1o c\u01a1 h\u1ed9i trading ng\u1eafn h\u1ea1n",
+        "modifiers": [
+          "HIVOL"
+        ],
+        "risk_regime": "High",
+        "source": "DNAPack",
+        "style_primary": "Range",
+        "ticker": "VNM",
+        "variant": "C"
+      },
+      "forbid_tokens": [
+        "masterscore",
+        "conviction",
+        "\u0111i\u1ec3m t\u1ed5ng h\u1ee3p",
+        "\u0111i\u1ec3m tin c\u1eady",
+        "ms",
+        "cv"
+      ],
+      "line_draft": "VNM l\u00e0 ki\u1ec3u c\u1ed5 phi\u1ebfu \u0111i ngang nh\u01b0ng bi\u1ebfn \u0111\u1ed9ng m\u1ea1nh; l\u1ee3i th\u1ebf n\u1eb1m \u1edf bi\u00ean dao \u0111\u1ed9ng t\u1ea1o c\u01a1 h\u1ed9i trading ng\u1eafn h\u1ea1n; \u0111\u1ed5i l\u1ea1i, \u0111i\u1ec1u ki\u1ec7n b\u1eaft bu\u1ed9c l\u00e0 gi\u1ea3m quy m\u00f4 v\u00e0 \u01b0u ti\u00ean ph\u1ea3n \u1ee9ng nhanh; ch\u1ec9 tham gia khi v\u00f9ng gi\u00e1 r\u00f5 r\u00e0ng, m\u1ea5t bi\u00ean l\u00e0 \u0111\u1ee9ng ngo\u00e0i.",
+      "max_numbers_per_sentence": 2,
+      "variant_pref": "AUTO"
+    },
+    "plan": {
+      "facts": {
+        "blocker_code": "STRUCTURE_BROKEN",
+        "required_phrases": [
+          "RR 6.6",
+          "r\u1ee7i ro 2.1%"
+        ],
+        "risk_text": "2.1%",
+        "rr_text": "6.6",
+        "state": "WATCH",
+        "type": "MEAN_REV"
+      },
+      "forbid_price_levels": true,
+      "line_draft": "Trade Plan \u01b0u ti\u00ean Mean-reversion (tr\u1ea1ng th\u00e1i WATCH), \u0111i\u1ec3m ngh\u1ebdn ch\u00ednh: STRUCTURE_BROKEN. Tr\u1ecdng t\u00e2m k\u1ef7 lu\u1eadt: RR 6.6; r\u1ee7i ro 2.1%.",
+      "max_numbers_per_sentence": 2,
+      "max_sentences": 2
+    },
+    "schema": "NarrativeDraftPack.v1",
+    "status": {
+      "facts": {
+        "ma200_context": "ABOVE_MA200",
+        "momentum_context": "-",
+        "risk_context": "LOW",
+        "structure_context": "BROKEN",
+        "volume_context": "CONFIRM"
+      },
+      "line_draft": "C\u1ed5 phi\u1ebfu \u0111ang \u1edf tr\u1ea1ng th\u00e1i ph\u00f2ng th\u1ee7; \u01b0u ti\u00ean b\u1ea3o to\u00e0n v\u1ed1n v\u00e0 gi\u1ea3m nh\u1ecbp giao d\u1ecbch cho \u0111\u1ebfn khi t\u00edn hi\u1ec7u h\u1ed3i ph\u1ee5c r\u00f5 r\u00e0ng h\u01a1n. tr\u00ean MA200 (xu h\u01b0\u1edbng d\u00e0i h\u1ea1n thu\u1eadn); c\u1ea5u tr\u00fac b\u1ecb suy y\u1ebfu; d\u00f2ng ti\u1ec1n \u1ee7ng h\u1ed9. M\u1ee9c r\u1ee7i ro th\u1ea5p.",
+      "max_numbers_per_sentence": 2,
+      "max_sentences": 2
+    }
+  },
+  "TradePlanPack": {
+    "Plans": [],
+    "clear_winner": false,
+    "clear_winner_reason": "CW_NONE",
+    "clear_winner_thresholds": {
+      "abs_gap_floor": 1.0,
+      "gap_min": 1.2,
+      "rel_gap_min": 0.15,
+      "score1_min": 8.0
+    },
+    "display_mode": "TOP2",
+    "explain": "TradePlanBuilder: candidate plans are scored by (DNA priors + contextual status + RR + execution). Policy hint applied.",
+    "force_top2": false,
+    "force_top2_reason": "-",
+    "holding_overlay": {
+      "distress_level": "-",
+      "pnl_pct": NaN
+    },
+    "mode": "FLAT",
+    "plan_alt": {
+      "entry_zone": {
+        "High": 62.434000000000005,
+        "Low": 61.906
+      },
+      "fail_reasons": [
+        {
+          "code": "STRUCTURE_BROKEN",
+          "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+          "severity": 3,
+          "ui_short": "Structure g\u00e3y"
+        },
+        {
+          "code": "TRIGGER_NOT_READY",
+          "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+          "severity": 1,
+          "ui_short": "Ch\u1edd trigger"
+        }
+      ],
+      "gates": {
+        "breakout": "PASS",
+        "exec": "PASS",
+        "plan": "PASS",
+        "rr": "PASS",
+        "structure": "FAIL",
+        "trigger": "WAIT",
+        "volume": "PASS"
+      },
+      "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+      "management_rules": [
+        "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+        "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+        "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+      ],
+      "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+      "plan_completeness": {
+        "message": "-",
+        "missing": [],
+        "status": "PASS"
+      },
+      "rank_score": 6.552,
+      "rr_actual": 6.6363636363636385,
+      "rr_display": "6.6",
+      "rr_min": 1.5,
+      "state": "WATCH",
+      "stop": 60.85,
+      "tp1": 70.93,
+      "tp2": 76.186,
+      "type": "PULLBACK"
+    },
+    "plan_completeness": {
+      "message": "-",
+      "missing": [],
+      "status": "PASS"
+    },
+    "plan_primary": {
+      "entry_zone": {
+        "High": 62.434000000000005,
+        "Low": 61.906
+      },
+      "fail_reasons": [
+        {
+          "code": "STRUCTURE_BROKEN",
+          "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+          "severity": 3,
+          "ui_short": "Structure g\u00e3y"
+        },
+        {
+          "code": "VOLUME_NEED_CONFIRM",
+          "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+          "severity": 1,
+          "ui_short": "Ch\u1edd volume"
+        },
+        {
+          "code": "TRIGGER_NOT_READY",
+          "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+          "severity": 1,
+          "ui_short": "Ch\u1edd trigger"
+        }
+      ],
+      "gates": {
+        "breakout": "PASS",
+        "exec": "PASS",
+        "plan": "PASS",
+        "rr": "PASS",
+        "structure": "FAIL",
+        "trigger": "WAIT",
+        "volume": "WAIT"
+      },
+      "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+      "management_rules": [
+        "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+        "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+        "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+      ],
+      "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+      "plan_completeness": {
+        "message": "-",
+        "missing": [],
+        "status": "PASS"
+      },
+      "rank_score": 7.224,
+      "rr_actual": 5.068181818181816,
+      "rr_display": "5.1",
+      "rr_min": 1.5,
+      "state": "WATCH",
+      "stop": 60.85,
+      "tp1": 68.86,
+      "tp2": 72.874,
+      "type": "MEAN_REV"
+    },
+    "plans_all": [
+      {
+        "entry_zone": {
+          "High": 62.434000000000005,
+          "Low": 61.906
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          },
+          {
+            "code": "VOLUME_NEED_CONFIRM",
+            "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd volume"
+          },
+          {
+            "code": "TRIGGER_NOT_READY",
+            "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd trigger"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "PASS",
+          "structure": "FAIL",
+          "trigger": "WAIT",
+          "volume": "WAIT"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+          "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+          "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 7.224,
+        "rr_actual": 5.068181818181816,
+        "rr_display": "5.1",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": 60.85,
+        "tp1": 68.86,
+        "tp2": 72.874,
+        "type": "MEAN_REV"
+      },
+      {
+        "entry_zone": {
+          "High": 62.434000000000005,
+          "Low": 61.906
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          },
+          {
+            "code": "TRIGGER_NOT_READY",
+            "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd trigger"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "PASS",
+          "structure": "FAIL",
+          "trigger": "WAIT",
+          "volume": "PASS"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+          "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+          "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 6.552,
+        "rr_actual": 6.6363636363636385,
+        "rr_display": "6.6",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": 60.85,
+        "tp1": 70.93,
+        "tp2": 76.186,
+        "type": "PULLBACK"
+      },
+      {
+        "entry_zone": {
+          "High": 69.204,
+          "Low": 68.796
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          },
+          {
+            "code": "TRIGGER_NOT_READY",
+            "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd trigger"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "PASS",
+          "structure": "FAIL",
+          "trigger": "WAIT",
+          "volume": "PASS"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "Ch\u1edd reclaim m\u1ed1c c\u1ea5u tr\u00fac (gi\u00e1 l\u1ea5y l\u1ea1i kh\u00e1ng c\u1ef1 v\u00e0 gi\u1eef \u0111\u01b0\u1ee3c).",
+          "Stop: d\u01b0\u1edbi m\u1ed1c reclaim + buffer (\u0111\u1ed9ng).",
+          "N\u1ebfu reclaim fail \u2192 gi\u1ea3m/tho\u00e1t nhanh."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Reclaim",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 4.896,
+        "rr_actual": 1.8921568627451122,
+        "rr_display": "1.9",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": 67.98,
+        "tp1": 70.93,
+        "tp2": 72.08800000000001,
+        "type": "RECLAIM"
+      },
+      {
+        "defensive_hard_stop": 60.85,
+        "defensive_reclaim": 69.0,
+        "defensive_reclaim_level": 69.0,
+        "defensive_reclaim_zone": {
+          "High": 69.204,
+          "Low": 68.796
+        },
+        "entry_zone": {
+          "High": NaN,
+          "Low": NaN
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "PASS",
+          "structure": "FAIL",
+          "trigger": "PASS",
+          "volume": "PASS"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "\u01afu ti\u00ean \u0111\u1ee9ng ngo\u00e0i ho\u1eb7c gi\u1ea3m r\u1ee7i ro khi c\u1ea5u tr\u00fac/volume ch\u01b0a x\u00e1c nh\u1eadn.",
+          "Ch\u1ec9 chuy\u1ec3n sang plan ch\u1ee7 \u0111\u1ed9ng khi Structure/Volume/Trigger c\u1ea3i thi\u1ec7n."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Defensive",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 4.384,
+        "rr_actual": NaN,
+        "rr_display": "-",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": NaN,
+        "tp1": NaN,
+        "tp2": NaN,
+        "type": "DEFENSIVE"
+      },
+      {
+        "entry_zone": {
+          "High": 69.86399999999999,
+          "Low": 69.236
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          },
+          {
+            "code": "RR_BELOW_MIN",
+            "label": "R:R d\u01b0\u1edbi m\u1ee9c t\u1ed1i thi\u1ec3u theo policy; c\u1ea7n \u0111i\u1ec3m v\u00e0o t\u1ed1t h\u01a1n ho\u1eb7c stop h\u1ee3p l\u00fd h\u01a1n.",
+            "severity": 2,
+            "ui_short": "RR th\u1ea5p"
+          },
+          {
+            "code": "TRIGGER_INVALID",
+            "label": "Trigger b\u1ecb invalid theo setup; kh\u00f4ng tri\u1ec3n khai plan n\u00e0y.",
+            "severity": 2,
+            "ui_short": "Trigger invalid"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "FAIL",
+          "structure": "FAIL",
+          "trigger": "FAIL",
+          "volume": "PASS"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "Entry ch\u1ec9 khi gi\u00e1 v\u01b0\u1ee3t v\u00f9ng kh\u00e1ng c\u1ef1 v\u00e0 c\u00f3 follow-through.",
+          "Stop: d\u01b0\u1edbi v\u00f9ng breakout + buffer (\u0111\u1ed9ng theo ATR/vol proxy).",
+          "N\u1ebfu breakout fail (\u0111\u00f3ng c\u1eeda l\u1ea1i d\u01b0\u1edbi v\u00f9ng), \u01b0u ti\u00ean tho\u00e1t/gi\u1ea3m."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Breakout",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 4.196,
+        "rr_actual": 0.8789808917197552,
+        "rr_display": "-",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": 67.98,
+        "tp1": 70.93,
+        "tp2": 71.75800000000001,
+        "type": "BREAKOUT"
+      }
+    ],
+    "plans_display": [
+      {
+        "entry_zone": {
+          "High": 62.434000000000005,
+          "Low": 61.906
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          },
+          {
+            "code": "VOLUME_NEED_CONFIRM",
+            "label": "Ch\u01b0a c\u00f3 volume x\u00e1c nh\u1eadn; \u01b0u ti\u00ean ch\u1edd t\u0103ng x\u00e1c su\u1ea5t.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd volume"
+          },
+          {
+            "code": "TRIGGER_NOT_READY",
+            "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd trigger"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "PASS",
+          "structure": "FAIL",
+          "trigger": "WAIT",
+          "volume": "WAIT"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "Ch\u1ec9 tri\u1ec3n khai khi c\u00f3 range r\u00f5; \u01b0u ti\u00ean v\u00e0o g\u1ea7n h\u1ed7 tr\u1ee3 v\u00e0 tho\u00e1t g\u1ea7n kh\u00e1ng c\u1ef1.",
+          "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+          "Kh\u00f4ng \u0111u\u1ed5i theo breakout trong regime range n\u1ebfu ch\u01b0a c\u00f3 x\u00e1c nh\u1eadn."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: MeanRev",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 7.224,
+        "rr_actual": 5.068181818181816,
+        "rr_display": "5.1",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": 60.85,
+        "tp1": 68.86,
+        "tp2": 72.874,
+        "type": "MEAN_REV"
+      },
+      {
+        "entry_zone": {
+          "High": 62.434000000000005,
+          "Low": 61.906
+        },
+        "fail_reasons": [
+          {
+            "code": "STRUCTURE_BROKEN",
+            "label": "C\u1ea5u tr\u00fac b\u1ecb ph\u00e1 v\u1ee1; \u01b0u ti\u00ean ph\u00f2ng th\u1ee7 v\u00e0 ch\u1edd t\u00e1i l\u1eadp c\u1ea5u tr\u00fac.",
+            "severity": 3,
+            "ui_short": "Structure g\u00e3y"
+          },
+          {
+            "code": "TRIGGER_NOT_READY",
+            "label": "Trigger ch\u01b0a k\u00edch ho\u1ea1t; \u01b0u ti\u00ean ch\u1edd x\u00e1c nh\u1eadn.",
+            "severity": 1,
+            "ui_short": "Ch\u1edd trigger"
+          }
+        ],
+        "gates": {
+          "breakout": "PASS",
+          "exec": "PASS",
+          "plan": "PASS",
+          "rr": "PASS",
+          "structure": "FAIL",
+          "trigger": "WAIT",
+          "volume": "PASS"
+        },
+        "invalidation": "Invalidation: th\u1ee7ng stop/\u0111\u00f3ng c\u1eeda d\u01b0\u1edbi v\u00f9ng c\u1ea5u tr\u00fac neo stop.",
+        "management_rules": [
+          "\u01afu ti\u00ean h\u1ed3i v\u1ec1 h\u1ed7 tr\u1ee3 (MA/Fib) r\u1ed3i m\u1edbi v\u00e0o; tr\u00e1nh mua \u0111u\u1ed5i.",
+          "Stop: d\u01b0\u1edbi h\u1ed7 tr\u1ee3 neo + buffer (\u0111\u1ed9ng).",
+          "Khi h\u1ed3i l\u00ean kh\u00e1ng c\u1ef1 g\u1ea7n, \u01b0u ti\u00ean ch\u1ed1t m\u1ed9t ph\u1ea7n/si\u1ebft stop."
+        ],
+        "notes_short": "Scenario: S1 \u2013 Uptrend + Momentum Aligned | Setup: Pullback",
+        "plan_completeness": {
+          "message": "-",
+          "missing": [],
+          "status": "PASS"
+        },
+        "rank_score": 6.552,
+        "rr_actual": 6.6363636363636385,
+        "rr_display": "6.6",
+        "rr_min": 1.5,
+        "state": "WATCH",
+        "stop": 60.85,
+        "tp1": 70.93,
+        "tp2": 76.186,
+        "type": "PULLBACK"
+      }
+    ],
+    "policy_hint_line": "RR>=2.0 | Size<=70% | Overnight: Caution",
+    "schema": "TradePlanPack.v1"
+  },
+  "_ModuleErrors": null,
+  "_Warnings": null
 }

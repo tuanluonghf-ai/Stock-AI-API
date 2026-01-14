@@ -1,0 +1,32 @@
+{
+  "ticker": "MSN",
+  "context": {
+    "ticker": "MSN",
+    "mode": "UNKNOWN",
+    "dna_bucket": "Balanced",
+    "zone_now": "NEUTRAL",
+    "bias": "CAUTIOUS",
+    "size_hint": "PROBE",
+    "primary_action": "UNKNOWN",
+    "reclaim": "",
+    "risk": "",
+    "trigger": ""
+  },
+  "keys": [
+    "DNA_BALANCED",
+    "ZONE_NEUTRAL",
+    "BIAS_CAUTIOUS",
+    "SIZE_PROBE",
+    "DECISION_UNKNOWN",
+    "SAFETY_LINE"
+  ],
+  "lines": [
+    "MSN là nhóm cân bằng: thuận lợi khi đi đúng cấu trúc, nhưng hiệu quả vẫn phụ thuộc kỷ luật điểm rủi ro.",
+    "Giá ở vùng trung tính; chiến lược hợp lý là kiên nhẫn chờ điểm xác nhận tốt hơn.",
+    "Bias nghiêng thận trọng: đi chậm để tối ưu xác suất và tránh tăng cam kết khi chưa đủ điều kiện.",
+    "Gợi ý quy mô: thăm dò nhỏ để quan sát phản ứng tại vùng giá, trước khi nâng cam kết.",
+    "Decision Layer chưa đủ rõ ràng; nên ưu tiên quan sát và giữ kỷ luật rủi ro."
+  ],
+  "warnings": [],
+  "hash": "ce1744818ab4dab46a63614731657e8b"
+}
