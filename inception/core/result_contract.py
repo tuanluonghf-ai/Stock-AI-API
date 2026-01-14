@@ -32,6 +32,18 @@ def _schema_is(pack: Any, schema: str) -> bool:
     return _safe_text(p.get("schema") or "").strip() == schema
 
 
+def _replace_na(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.replace("N/A", "–")
+    if isinstance(value, list):
+        return [_replace_na(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_replace_na(v) for v in value)
+    if isinstance(value, dict):
+        return {k: _replace_na(v) for k, v in value.items()}
+    return value
+
+
 def _stub_tradeplan_pack_v1(ap: Dict[str, Any]) -> Dict[str, Any]:
     """Safe stub that keeps UI rendering stable.
 
@@ -268,4 +280,11 @@ def finalize_result_pack_v1(result_in: Any) -> Dict[str, Any]:
         pass
 
     result["AnalysisPack"] = ap
+
+    # Final UI-safe cleanup: remove any "N/A" tokens from UI-facing strings.
+    try:
+        result = _replace_na(result)
+    except Exception:
+        pass
+
     return result
