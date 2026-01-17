@@ -66,6 +66,21 @@ def _is_empty(v: Any) -> bool:
     return False
 
 
+def _is_number(v: Any) -> bool:
+    if isinstance(v, bool):
+        return False
+    if not isinstance(v, (int, float)):
+        return False
+    return v == v
+
+
+def _first_key(d: Dict[str, Any], keys: Sequence[str]) -> Tuple[bool, Any, str]:
+    for k in keys:
+        if k in d:
+            return True, d.get(k), k
+    return False, None, ""
+
+
 def _add_issue(
     issues: List[Dict[str, Any]],
     severity: str,
@@ -89,6 +104,7 @@ def collect_data_quality_pack(
     analysis_pack: Any,
     character_pack: Any,
     extra: Optional[Dict[str, Any]] = None,
+    require_investor_mapping: bool = False,
     max_issues: int = 10,
 ) -> Dict[str, Any]:
     """Return a JSON-safe DataQualityPack.v1.
@@ -151,6 +167,14 @@ def collect_data_quality_pack(
             if not isinstance(pdict.get("schema"), str) or _is_empty(pdict.get("schema")):
                 _add_issue(issues, "WARN", f"{name}.schema", "schema missing", "MISSING")
 
+    # InvestorMappingPack contract validation (facts-first)
+    inv_path = "AnalysisPack.InvestorMappingPack"
+    inv_pack = ap.get("InvestorMappingPack")
+    if isinstance(inv_pack, dict):
+        _validate_investor_mapping_pack(inv_pack, issues, inv_path)
+    elif require_investor_mapping:
+        _add_issue(issues, "ERROR", inv_path, "InvestorMappingPack missing", "MISSING")
+
     # deterministic ordering: ERROR first then WARN, then by path
     def _k(i: Dict[str, Any]) -> Tuple[int, str]:
         sev = i.get("severity") or "WARN"
@@ -168,6 +192,158 @@ def collect_data_quality_pack(
         "warn_count": int(warn),
         "issues": issues_sorted[: max(0, int(max_issues))],
     }
+
+
+def _validate_investor_mapping_pack(pack: Dict[str, Any], issues: List[Dict[str, Any]], base_path: str) -> None:
+    meta_ok, meta, meta_key = _first_key(pack, ["Meta", "meta"])
+    if not meta_ok or not isinstance(meta, dict):
+        _add_issue(issues, "ERROR", f"{base_path}.Meta", "Meta missing", "MISSING")
+        return
+
+    labels_ok, labels, _ = _first_key(meta, ["labels", "Labels"])
+    if not labels_ok or not isinstance(labels, dict):
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.labels", "labels missing", "MISSING")
+        return
+
+    match_ok, match_min, _ = _first_key(labels, ["match_min", "matchMin", "MatchMin"])
+    if not match_ok:
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.labels.match_min", "match_min missing", "MISSING")
+    elif not _is_number(match_min):
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.labels.match_min", "match_min type", "TYPE", value=match_min)
+    elif abs(float(match_min) - 7.5) > 1e-9:
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.labels.match_min", "match_min value", "VALUE", value=match_min)
+
+    partial_ok, partial_min, _ = _first_key(labels, ["partial_min", "partialMin", "PartialMin"])
+    if not partial_ok:
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.labels.partial_min", "partial_min missing", "MISSING")
+    elif not _is_number(partial_min):
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.labels.partial_min", "partial_min type", "TYPE", value=partial_min)
+    elif abs(float(partial_min) - 4.5) > 1e-9:
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.labels.partial_min", "partial_min value", "VALUE", value=partial_min)
+
+    if _is_number(match_min) and _is_number(partial_min):
+        if float(match_min) <= float(partial_min):
+            _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.labels", "match_min <= partial_min", "VALUE")
+
+    scale_ok, scale, _ = _first_key(meta, ["scale", "Scale"])
+    if not scale_ok:
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.scale", "scale missing", "MISSING")
+    elif not isinstance(scale, str):
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.scale", "scale type", "TYPE", value=scale)
+    elif scale != "0-10":
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.scale", "scale value", "VALUE", value=scale)
+
+    version_ok, version, _ = _first_key(meta, ["version", "Version"])
+    if not version_ok:
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.version", "version missing", "MISSING")
+    elif not isinstance(version, str):
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.version", "version type", "TYPE", value=version)
+    elif version != "v1":
+        _add_issue(issues, "ERROR", f"{base_path}.{meta_key}.version", "version value", "VALUE", value=version)
+
+    pent_ok, pent, _ = _first_key(pack, ["Pentagon", "pentagon"])
+    if not pent_ok:
+        _add_issue(issues, "ERROR", f"{base_path}.Pentagon", "Pentagon missing", "MISSING")
+    elif not isinstance(pent, dict):
+        _add_issue(issues, "ERROR", f"{base_path}.Pentagon", "Pentagon type", "TYPE", value=pent)
+    else:
+        axes = {
+            "TrendPower": ["TrendPower", "Trend Power"],
+            "Explosive": ["Explosive"],
+            "SafetyShield": ["SafetyShield", "Safety Shield"],
+            "TradingFlow": ["TradingFlow", "Trading Flow"],
+            "Adrenaline": ["Adrenaline"],
+        }
+        for axis, keys in axes.items():
+            ok, val, key = _first_key(pent, keys)
+            if not ok:
+                _add_issue(issues, "ERROR", f"{base_path}.Pentagon.{axis}", "axis missing", "MISSING")
+                continue
+            if not _is_number(val):
+                _add_issue(issues, "ERROR", f"{base_path}.Pentagon.{key}", "axis type", "TYPE", value=val)
+                continue
+            if float(val) < 0.0 or float(val) > 10.0:
+                _add_issue(issues, "ERROR", f"{base_path}.Pentagon.{key}", "axis range", "RANGE", value=val)
+
+    def _check_persona_item(item: Dict[str, Any], path: str, persona_name: str | None = None) -> None:
+        name = None
+        if isinstance(item, dict):
+            ok, name_val, _ = _first_key(item, ["name", "Name", "Persona"])
+            if ok and isinstance(name_val, str):
+                name = name_val
+        if not name and persona_name:
+            name = persona_name
+        if not name:
+            _add_issue(issues, "ERROR", f"{path}.name", "persona name missing", "MISSING")
+
+        score_ok, score, _ = _first_key(item, ["score_10", "Score10", "score"])
+        if score_ok:
+            if not _is_number(score):
+                _add_issue(issues, "ERROR", f"{path}.score", "score type", "TYPE", value=score)
+            elif float(score) < 0.0 or float(score) > 10.0:
+                _add_issue(issues, "ERROR", f"{path}.score", "score range", "RANGE", value=score)
+
+        label_ok, label, _ = _first_key(item, ["label", "Label"])
+        if label_ok:
+            if not isinstance(label, str):
+                _add_issue(issues, "ERROR", f"{path}.label", "label type", "TYPE", value=label)
+            elif label not in {"Match", "Partial", "Partial Match", "Mismatch"}:
+                _add_issue(issues, "ERROR", f"{path}.label", "label value", "VALUE", value=label)
+
+        if label_ok and score_ok and _is_number(score) and isinstance(label, str):
+            hi = 7.5
+            lo = 4.5
+            if _is_number(match_min) and _is_number(partial_min):
+                hi = float(match_min)
+                lo = float(partial_min)
+            score_val = float(score)
+            label_norm = "Partial" if label == "Partial Match" else label
+            expected = "Match" if score_val >= hi else "Partial" if score_val >= lo else "Mismatch"
+            if label_norm != expected:
+                _add_issue(issues, "WARN", f"{path}.label", "label mismatch vs score", "MISMATCH", value=label)
+
+        veto_ok, vetoed, _ = _first_key(item, ["vetoed", "Vetoed"])
+        if veto_ok and not isinstance(vetoed, bool):
+            _add_issue(issues, "ERROR", f"{path}.vetoed", "vetoed type", "TYPE", value=vetoed)
+
+        for key in ("reasons", "tags", "Reasons", "Tags"):
+            if key in item:
+                val = item.get(key)
+                if not isinstance(val, list) or any(not isinstance(x, str) for x in val):
+                    _add_issue(issues, "ERROR", f"{path}.{key}", "list[str] required", "TYPE", value=val)
+
+    personas_key = None
+    personas_val = None
+    for k in ("Personas", "personas", "Compatibility", "compatibility", "PersonaMatch", "persona_match"):
+        if k in pack:
+            personas_key = k
+            personas_val = pack.get(k)
+            break
+
+    if personas_key is not None:
+        ppath = f"{base_path}.{personas_key}"
+        if isinstance(personas_val, list):
+            for i, item in enumerate(personas_val):
+                if not isinstance(item, dict):
+                    _add_issue(issues, "ERROR", f"{ppath}[{i}]", "persona item type", "TYPE", value=item)
+                    continue
+                _check_persona_item(item, f"{ppath}[{i}]")
+        elif isinstance(personas_val, dict):
+            for key, item in personas_val.items():
+                if not isinstance(item, dict):
+                    _add_issue(issues, "ERROR", f"{ppath}.{key}", "persona item type", "TYPE", value=item)
+                    continue
+                _check_persona_item(item, f"{ppath}.{key}", persona_name=str(key))
+        else:
+            _add_issue(issues, "ERROR", ppath, "personas type", "TYPE", value=personas_val)
+
+    if "vetoed" in pack and not isinstance(pack.get("vetoed"), bool):
+        _add_issue(issues, "ERROR", f"{base_path}.vetoed", "vetoed type", "TYPE", value=pack.get("vetoed"))
+    for key in ("reasons", "tags"):
+        if key in pack:
+            val = pack.get(key)
+            if not isinstance(val, list) or any(not isinstance(x, str) for x in val):
+                _add_issue(issues, "ERROR", f"{base_path}.{key}", "list[str] required", "TYPE", value=val)
 
 # ---------------------------------------------------------------------
 # Narrative validation (DNA tone guardrails)

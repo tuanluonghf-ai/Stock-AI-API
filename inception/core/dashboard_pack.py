@@ -363,7 +363,8 @@ def compute_dashboard_summary_pack_v1(
         'DecisionPack': ap.get('DecisionPack'),
         'PositionManagerPack': ap.get('PositionManagerPack'),
     }
-    dq = collect_data_quality_pack(ap, cp, extra=dq_extra, max_issues=8)
+    # Enforce InvestorMappingPack presence/schema at the stable dashboard stage only.
+    dq = collect_data_quality_pack(ap, cp, extra=dq_extra, require_investor_mapping=True, max_issues=8)
 
     out = {
         "schema": "DashboardSummaryPack.v1",

@@ -42,11 +42,54 @@ _FORBID_MS_CV_TOKENS = [
     "ms",
     "cv",
 ]
+_TRADEOFF_KEYWORDS = [
+    "biên",
+    "biên độ",
+    "payoff",
+    "opportunity cost",
+    "đáng để",
+    "không đủ biên",
+    "biên hạn chế",
+]
 
 
 def _as_text(x: Any, fallback: str = "-") -> str:
     s = _safe_text(x).strip()
     return s if s else fallback
+
+
+def _has_tradeoff_cue(text: str) -> bool:
+    t = (text or "").lower()
+    return any(k in t for k in _TRADEOFF_KEYWORDS)
+
+
+def _primary_persona_from_pack(ap: Dict[str, Any]) -> str:
+    pack = ap.get("InvestorMappingPack") if isinstance(ap.get("InvestorMappingPack"), dict) else {}
+    src = None
+    for key in ("Personas", "PersonaMatch", "Compatibility", "personas", "persona_match", "compatibility"):
+        if key in pack:
+            src = pack.get(key)
+            break
+    items: list[Dict[str, Any]] = []
+    if isinstance(src, list):
+        for it in src:
+            if isinstance(it, dict):
+                items.append(it)
+    elif isinstance(src, dict):
+        for k, it in src.items():
+            if isinstance(it, dict):
+                it = dict(it)
+                it.setdefault("name", k)
+                items.append(it)
+
+    def _score(item: Dict[str, Any]) -> float:
+        return _safe_float(item.get("score_10"), default=np.nan)
+
+    def _name(item: Dict[str, Any]) -> str:
+        return _as_text(item.get("name") or item.get("Name") or item.get("Persona"), fallback="").strip()
+
+    items.sort(key=lambda it: (-( _score(it) if _score(it) == _score(it) else -1e9), _name(it)))
+    return _name(items[0]) if items else ""
 
 
 def _stable_pick_variant(ticker: str, class_primary: str, style_primary: str, risk_regime: str) -> str:
@@ -343,6 +386,20 @@ def build_narrative_draft_pack_v1(analysis_pack: Dict[str, Any], ctx: Dict[str, 
     dna_line, dna_facts = _dna_line(ap, ctxd)
     status_line = _status_line(ap)
     plan_line = _plan_line(ap)
+
+    payoff = ap.get("payoff") if isinstance(ap.get("payoff"), dict) else {}
+    payoff_tier = _as_text(payoff.get("payoff_tier"), fallback="").upper()
+    persona = _primary_persona_from_pack(ap)
+    persona_u = persona.strip().upper()
+    if payoff_tier in {"LOW", "MEDIUM"} and persona_u in {"SPECULATOR", "ALPHAHUNTER", "COMPOUNDER"}:
+        combined = f"{dna_line} {status_line} {plan_line}"
+        if not _has_tradeoff_cue(combined):
+            anchor = (
+                f"Biên độ khai thác thuộc nhóm {payoff_tier}, vì vậy ưu tiên kỷ luật chọn điểm và cân nhắc chi phí cơ hội."
+            )
+            if dna_line and dna_line[-1] not in ".!?":
+                dna_line = dna_line.rstrip() + "."
+            dna_line = f"{dna_line} {anchor}".strip()
 
     # Minimal facts for rewrite-only payloads (Phase 3)
     sp = ap.get("StatusPack") or {}

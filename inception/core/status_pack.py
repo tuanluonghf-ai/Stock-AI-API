@@ -88,6 +88,16 @@ def compute_status_pack_v1(
     hard_gap = bool((dna.get("hard_gates") or {}).get("gap_prone"))
     risk_regime = _safe_text(dna.get("risk_regime") or "-").strip() or "-"
 
+    payoff = ap.get("payoff") if isinstance(ap.get("payoff"), dict) else {}
+    payoff_tier = _safe_text(payoff.get("payoff_tier")).strip().upper()
+    payoff_span_norm = payoff.get("payoff_span_norm")
+    payoff_note_map = {
+        "LOW": "Biên độ khai thác hạn chế; ưu tiên kỷ luật chọn điểm và cân nhắc chi phí cơ hội.",
+        "MEDIUM": "Biên độ khai thác vừa phải; cần chọn kèo có lợi thế rõ để bù nhiễu/chi phí.",
+        "HIGH": "Biên độ khai thác rộng; phù hợp cho chiến lược chủ động nếu quản trị rủi ro tốt.",
+    }
+    payoff_note = payoff_note_map.get(payoff_tier)
+
     # MA200 contextual label
     d200 = _pct_diff(close, ma200)
     if not np.isfinite(d200):
@@ -184,6 +194,16 @@ def compute_status_pack_v1(
             "risk_regime": risk_regime,
             "hard_gates": {"illiquid": bool(hard_ill), "gap_prone": bool(hard_gap)},
         },
+        "payoff": (
+            {
+                "tier": payoff_tier,
+                "span_norm": payoff_span_norm,
+                "label": f"Payoff (Tier): {payoff_tier}",
+                "note": payoff_note,
+            }
+            if payoff_tier in payoff_note_map
+            else {}
+        ),
         "technicals": {
             "ma200_context": ma200_ctx,
             "structure_context": struct_ctx,

@@ -27,8 +27,10 @@ from inception.infra.datahub import DataHub, DataError
 from inception.core.analysis_builder import build_base_result_v1
 from inception.core.contracts import normalize_analysis_pack
 from inception.core.dashboard_pack import compute_dashboard_summary_pack_v1
-from inception.core.helpers import _safe_float
+from inception.core.helpers import _safe_float, _safe_text
+from inception.core.payoff_tier_pack import LookbackCfg, compute_payoff_tier_v1
 from inception.core.narrative_draft_pack import build_narrative_draft_pack_v1
+from inception.core.investor_mapping import build_investor_mapping_pack
 import os
 from inception.core.result_contract import finalize_result_pack_v1
 from inception.core.stability.decision_stability import apply_decision_stability
@@ -167,6 +169,15 @@ def build_result(
     except Exception:
         pass
 
+    # 3.1) Payoff tier (OHLC-only, deterministic)
+    try:
+        if isinstance(analysis_pack, dict) and "payoff" not in analysis_pack:
+            ref_price = _safe_float((analysis_pack.get("Last") or {}).get("Close"), default=np.nan)
+            lookback_cfg = LookbackCfg(id="PAYOFF_V1_250D", window=250)
+            analysis_pack["payoff"] = compute_payoff_tier_v1(df=df, reference_price=ref_price, lookback_cfg=lookback_cfg)
+    except Exception:
+        pass
+
     # 4) Inject PositionStatePack BEFORE Character computes TradePlan/Decision packs
     try:
         last_close = _safe_float(analysis_pack.get("Last", {}).get("Close"))
@@ -237,6 +248,25 @@ def build_result(
     result["Modules"] = modules_out
     if module_errors:
         result["_ModuleErrors"] = module_errors
+
+    # 5.1) Investor Mapping Pack (UI-ready; no LLM)
+    try:
+        cp = modules_out.get("character", {}) if isinstance(modules_out, dict) else {}
+        st = cp.get("StockTraits") if isinstance(cp.get("StockTraits"), dict) else {}
+        cs = cp.get("CoreStats") if isinstance(cp.get("CoreStats"), dict) else {}
+        cb = cp.get("CombatStats") if isinstance(cp.get("CombatStats"), dict) else {}
+        dna = analysis_pack.get("DNAPack") if isinstance(analysis_pack.get("DNAPack"), dict) else {}
+        payoff_tier = None
+        try:
+            payoff_tier = _safe_text((analysis_pack.get("payoff") or {}).get("payoff_tier")).strip().upper()
+        except Exception:
+            payoff_tier = None
+        inv = build_investor_mapping_pack(st, cs, cb, dna, payoff_tier=payoff_tier)
+        if isinstance(analysis_pack, dict):
+            analysis_pack["InvestorMappingPack"] = inv
+        result["InvestorMappingPack"] = inv
+    except Exception:
+        pass
 
     # 5.5) NarrativeDraftPack (Engine-built; no LLM). Attach to behavioural/UI layers.
     try:
