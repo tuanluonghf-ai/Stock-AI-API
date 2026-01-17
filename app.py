@@ -106,7 +106,7 @@ def main() -> None:
             holding_horizon = st.selectbox("Holding horizon", ["Swing", "Position"], index=0, key="holding_horizon_inp")
             timeframe = st.selectbox("Timeframe", ["D", "W"], index=0, key="timeframe_inp")
 
-        run_btn = st.button("Phân tích", type="primary", use_container_width=True)
+        run_btn = st.button("Phân tích", type="primary", width="stretch")
         output_mode = "Character"
 
     if run_btn:
@@ -163,7 +163,7 @@ def main() -> None:
                 try:
                     import traceback
                     with st.expander("Chi tiết lỗi (traceback)", expanded=False):
-                        st.code(traceback.format_exc())
+                        st.error("Có lỗi khi render. Vui lòng kiểm tra terminal logs để biết chi tiết.")
                 except Exception:
                     pass
                 st.exception(e)
