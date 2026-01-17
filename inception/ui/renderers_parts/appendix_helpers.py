@@ -19,6 +19,8 @@ from inception.ui.renderers_parts.dna_status import (
     render_stock_dna_insight,
 )
 from inception.ui.renderers_parts.trade_plan import _trade_plan_gate, render_trade_plan_conditional
+from inception.core.battle_map_pack import compute_battle_map_pack_v1
+from inception.ui.render_charts import render_battle_map_chart_v1, render_price_map_chart_v1
 from .utils import (
     _ensure_dict,
     _safe_text,
@@ -29,6 +31,284 @@ from .utils import (
 )
 
 
+def render_decision_orientation_dashboard_v11(result: Dict[str, Any], analysis_pack: Dict[str, Any]) -> None:
+    """Dashboard #2 (Decision Orientation Layer) - persona-first, pack-only."""
+    r = _ensure_dict(result)
+    ap = _ensure_dict(r.get("AnalysisPack") or analysis_pack)
+    modules = r.get("Modules") if isinstance(r.get("Modules"), dict) else {}
+    cp = _ensure_dict((modules or {}).get("character") or {})
+
+    class_name = _safe_text(cp.get("ClassName") or cp.get("CharacterClass") or cp.get("Class") or "").strip()
+    if not class_name:
+        class_name = "Data unavailable."
+    if class_name == "Illiquid / Noisy":
+        class_name = "Thanh khoản mỏng – Biến động nhiễu"
+
+    st.markdown("## Decision Orientation")
+    row1 = st.columns(2, gap="large")
+    row2 = st.columns(2, gap="large")
+
+    with row1[0]:
+        tile = st.container()
+        with tile:
+            st.markdown(f"**{html.escape(class_name)}**")
+            st.caption("Defines the stock's dominant long-term behavior.")
+
+            pack = None
+            if isinstance(ap.get("InvestorMappingPack"), dict):
+                pack = ap.get("InvestorMappingPack")
+            elif isinstance(r.get("InvestorMappingPack"), dict):
+                pack = r.get("InvestorMappingPack")
+            pentagon = pack.get("Pentagon") if isinstance(pack, dict) and isinstance(pack.get("Pentagon"), dict) else None
+            has_pack = isinstance(pack, dict) and isinstance(pentagon, dict)
+            if not has_pack:
+                st.markdown("Data unavailable.")
+                pack = {}
+                pentagon = {}
+
+            if has_pack:
+                st.caption("Investor fit and risk appetite (0-10).")
+
+            axis_map = [
+                ("Trend Power", ["TrendPower", "Trend Power"]),
+                ("Explosive", ["Explosive"]),
+                ("Safety Shield", ["SafetyShield", "Safety Shield"]),
+                ("Trading Flow", ["TradingFlow", "Trading Flow"]),
+                ("Adrenaline", ["Adrenaline"]),
+            ]
+            axis_display = {
+                "Trend Power": ("Sức mạnh", "Tính bền vững của xu hướng dài hạn"),
+                "Explosive": ("Sức bật", "Đánh giá khả năng bứt tốc ngắn hạn"),
+                "Safety Shield": ("An toàn", "Khả năng phòng thủ trước các cú sập"),
+                "Trading Flow": ("Lướt sóng", "Mức độ vào/thoát hàng dễ dàng và hiệu quả"),
+                "Adrenaline": ("Cảm giác mạnh", "Khả năng biến động cực mạnh"),
+            }
+
+            def _axis_vi(axis_key: str) -> str:
+                return axis_display.get(axis_key, (axis_key, ""))[0]
+
+            def _pick_val(d: Dict[str, Any], keys: List[str]) -> float:
+                for k in keys:
+                    if k in d:
+                        return _safe_float(d.get(k), default=np.nan)
+                return np.nan
+
+            def _bar(label: str, value: Any) -> None:
+                v = _safe_float(value, default=np.nan)
+                if pd.isna(v):
+                    pct = 0.0
+                    v_disp = "?"
+                else:
+                    v10 = float(max(0.0, min(10.0, float(v))))
+                    pct = _clip(v10 / 10.0 * 100.0, 0.0, 100.0)
+                    v_disp = f"{v10:.1f}/10"
+                label_vi, caption = axis_display.get(label, (label, ""))
+                caption_html = (
+                    f"<div style=\"font-size:11px;font-style:italic;color:#6B7280;margin-top:2px;\">"
+                    f"{html.escape(caption)}</div>"
+                    if caption
+                    else ""
+                )
+                st.markdown(
+                    f"""
+                    <div class="gc-row">
+                      <div class="gc-k">
+                        <div style="font-weight:700;">{html.escape(str(label_vi))}</div>
+                        {caption_html}
+                      </div>
+                      <div class="gc-bar"><div class="gc-fill" style="width:{pct:.0f}%"></div></div>
+                      <div class="gc-v">{html.escape(str(v_disp))}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+            if has_pack:
+                for label, keys in axis_map:
+                    _bar(label, _pick_val(pentagon, keys))
+
+            def _persona_items(p: Dict[str, Any]) -> List[Dict[str, Any]]:
+                src = None
+                for key in ("Personas", "PersonaMatch", "Compatibility", "personas", "persona_match", "compatibility"):
+                    if key in p:
+                        src = p.get(key)
+                        break
+                items: List[Dict[str, Any]] = []
+                if isinstance(src, list):
+                    for it in src:
+                        if isinstance(it, dict):
+                            items.append(it)
+                elif isinstance(src, dict):
+                    for k, it in src.items():
+                        if isinstance(it, dict):
+                            it = dict(it)
+                            it.setdefault("name", k)
+                            items.append(it)
+                return items
+
+            personas_raw = _persona_items(pack) if isinstance(pack, dict) else []
+            personas = [p for p in personas_raw if isinstance(p, dict)] if isinstance(personas_raw, list) else []
+
+            def _score(item: Dict[str, Any]) -> float:
+                return _safe_float(item.get("score_10") or item.get("Score10") or item.get("score"), default=np.nan)
+
+            def _is_vetoed(item: Dict[str, Any]) -> bool:
+                return bool(item.get("vetoed") or item.get("Vetoed"))
+
+            persona_display = {
+                "Compounder": "Tích sản/Lãi kép",
+                "AlphaHunter": "Săn sóng lớn",
+                "CashFlowTrader": "Lướt sóng ngắn",
+                "Speculator": "Đầu cơ",
+            }
+            persona_pref = {
+                "Compounder": "xu hướng bền và an toàn, ít thích cảm giác mạnh",
+                "AlphaHunter": "bùng nổ và xu hướng mạnh, chấp nhận biến động vừa phải",
+                "CashFlowTrader": "lướt sóng nhanh và biến động khá, thường không đặt nặng an toàn",
+                "Speculator": "biến động cực mạnh, các yếu tố khác chỉ mang tính phụ",
+            }
+
+            def _persona_name(p: Dict[str, Any]) -> str:
+                return _safe_text(p.get("name") or p.get("Name") or p.get("Persona") or "").strip()
+
+            def _persona_display_name(name: str) -> str:
+                return persona_display.get(name, name)
+
+            def _persona_pref(name: str) -> str:
+                return persona_pref.get(name, "khẩu vị riêng, không nhất thiết hợp với mọi hồ sơ")
+
+            def _persona_brief(p: Dict[str, Any]) -> str:
+                b = _safe_text(p.get("brief") or "").strip()
+                return b if b else "Profile details unavailable."
+
+            ranked = [p for p in personas if isinstance(p, dict)]
+            ranked.sort(key=lambda x: (_safe_float(_score(x), default=-1e9)), reverse=True)
+            non_veto = [p for p in ranked if not _is_vetoed(p)]
+            top_persona = non_veto[0] if non_veto else (ranked[0] if ranked else {})
+            bottom_persona = ranked[-1] if ranked else {}
+
+            persona_rows = [p for p in ranked if _persona_name(p)]
+            persona_rows = persona_rows[:4]
+
+            if persona_rows:
+                for item in persona_rows:
+                    name = _persona_display_name(_persona_name(item))
+                    score = _score(item)
+                    label = _safe_text(item.get("Label") or item.get("label") or "").strip()
+                    vetoed = _is_vetoed(item)
+                    pct = 0.0 if pd.isna(score) else float(max(0.0, min(100.0, (float(score) / 10.0) * 100.0)))
+                    val_txt = "?" if pd.isna(score) else f"{float(score):.1f}/10"
+                    tag_label = label
+                    if not tag_label and not pd.isna(score) and isinstance(pack, dict):
+                        meta = pack.get("Meta") if isinstance(pack.get("Meta"), dict) else {}
+                        labels = meta.get("labels") if isinstance(meta.get("labels"), dict) else {}
+                        match_min = _safe_float(labels.get("match_min"), default=7.5)
+                        partial_min = _safe_float(labels.get("partial_min"), default=4.5)
+                        if float(score) >= match_min:
+                            tag_label = "Match"
+                        elif float(score) >= partial_min:
+                            tag_label = "Partial"
+                        else:
+                            tag_label = "Mismatch"
+                    color = "#9CA3AF"
+                    if tag_label == "Match":
+                        color = "#22C55E"
+                    elif tag_label == "Partial":
+                        color = "#F59E0B"
+                    if vetoed:
+                        color = "#64748B"
+                    badge_labels = {"Match": "Phù hợp", "Partial": "Cân nhắc", "Mismatch": "Không phù hợp"}
+                    tag_label_vi = badge_labels.get(tag_label, tag_label)
+                    if vetoed:
+                        tag_label_vi = f"{tag_label_vi} (Chặn)" if tag_label_vi else "Không phù hợp (Chặn)"
+                        tag_label_vi = f"⚠ {tag_label_vi}"
+                    tag = tag_label_vi or ("⚠ Không phù hợp (Chặn)" if vetoed else "")
+                    badge = f"<span style='padding:2px 8px;border-radius:999px;border:1px solid {color};color:{color};font-size:12px;font-weight:800;'>{html.escape(tag)}</span>" if tag else ""
+                    st.markdown(
+                        f"""
+                        <div style="display:flex;gap:10px;align-items:center;margin:6px 0;">
+                          <div style="width:150px;font-size:14px;color:#374151;font-weight:700;">{html.escape(name)}</div>
+                          <div style="flex:1;height:12px;background:#F3F4F6;border-radius:999px;overflow:hidden;">
+                            <div style="height:12px;width:{pct:.0f}%;background:{color};border-radius:999px;opacity:{'0.45' if vetoed else '1'};"></div>
+                          </div>
+                          <div style="width:70px;text-align:right;font-size:13px;color:#111827;font-weight:800;">{html.escape(val_txt)}</div>
+                        </div>
+                        {badge}
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.markdown("Persona mapping: Data unavailable.")
+
+            if top_persona and bottom_persona:
+                st.markdown(f"**Phù hợp nhất:** {html.escape(_persona_display_name(_persona_name(top_persona)))}")
+                st.markdown(f"**Ít phù hợp:** {html.escape(_persona_display_name(_persona_name(bottom_persona)))}")
+            else:
+                st.markdown("**Phù hợp nhất:** Data unavailable.")
+                st.markdown("**Ít phù hợp:** Data unavailable.")
+
+            tp = _pick_val(pentagon, ["TrendPower", "Trend Power"])
+            ss = _pick_val(pentagon, ["SafetyShield", "Safety Shield"])
+            tf = _pick_val(pentagon, ["TradingFlow", "Trading Flow"])
+            ad = _pick_val(pentagon, ["Adrenaline"])
+
+            if has_pack and top_persona and bottom_persona:
+                axes = [
+                    ("Trend Power", tp),
+                    ("Explosive", _pick_val(pentagon, ["Explosive"])),
+                    ("Safety Shield", ss),
+                    ("Trading Flow", tf),
+                    ("Adrenaline", ad),
+                ]
+                top_axes = sorted(
+                    axes,
+                    key=lambda x: (float(x[1]) if not pd.isna(x[1]) else -1e9),
+                    reverse=True,
+                )
+                low_axes = sorted(
+                    axes,
+                    key=lambda x: (float(x[1]) if not pd.isna(x[1]) else 1e9),
+                )
+                best_axis_1 = top_axes[0][0] if top_axes else "Compatibility"
+                best_axis_2 = top_axes[1][0] if len(top_axes) > 1 else ""
+                low_axis = low_axes[0][0] if low_axes else "Compatibility"
+                best_axis_1_vi = _axis_vi(best_axis_1)
+                best_axis_2_vi = _axis_vi(best_axis_2) if best_axis_2 else ""
+                low_axis_vi = _axis_vi(low_axis)
+                top_name = _persona_name(top_persona)
+                bottom_name = _persona_name(bottom_persona)
+                top_display = _persona_display_name(top_name)
+                bottom_display = _persona_display_name(bottom_name)
+                top_pref = _persona_pref(top_name)
+                bottom_pref = _persona_pref(bottom_name)
+                if best_axis_2_vi and best_axis_2_vi != best_axis_1_vi:
+                    st.markdown(
+                        f"{best_axis_1_vi} và {best_axis_2_vi} là hai nét nổi bật, nên hợp với {html.escape(top_display)} — nhóm thường thích {html.escape(top_pref)}."
+                    )
+                else:
+                    st.markdown(
+                        f"{best_axis_1_vi} là nét nổi bật, nên hợp với {html.escape(top_display)} — nhóm thường thích {html.escape(top_pref)}."
+                    )
+                st.markdown(
+                    f"{low_axis_vi} ở mức khiêm tốn hơn, nên {html.escape(bottom_display)} — nhóm thường thích {html.escape(bottom_pref)} — có thể thấy không \"đúng gu\"."
+                )
+            else:
+                st.markdown("Data unavailable.")
+
+            st.markdown(
+                "If this profile aligns with how you usually invest,\n"
+                "you may continue to the detailed analysis to explore structure, risk considerations, and timing context.\n\n"
+                "If this profile does not reflect your typical approach,\n"
+                "it’s reasonable to stop here and focus on opportunities better aligned with your style.\n\n"
+                "Market conditions remain uncertain, and compatibility does not imply timing."
+            )
+
+    with row1[1]:
+        st.caption("(Reserved)")
+    with row2[0]:
+        st.caption("(Reserved)")
+    with row2[1]:
+        st.caption("(Reserved)")
 def _get_stable_action(analysis_pack: Dict[str, Any]) -> str:
     ap = _ensure_dict(analysis_pack)
     dsp = _ensure_dict(ap.get("DecisionStabilityPack"))
@@ -149,6 +429,59 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
         action_bias_pack = {}
         ap["_ActionBiasPack"] = action_bias_pack
 
+    def _resolve_df_for_battle_map() -> Any:
+        df = None
+        if isinstance(r, dict):
+            df = r.get("_DF")
+        if df is None and isinstance(ap, dict):
+            df = ap.get("_DF") or ap.get("df") or ap.get("DF")
+        if df is None:
+            return None
+        if isinstance(df, pd.DataFrame):
+            return df
+        try:
+            return pd.DataFrame(df)
+        except Exception:
+            return None
+
+    def _infer_trend_label(last_close_val: float) -> str:
+        last = ap.get("Last") if isinstance(ap.get("Last"), dict) else {}
+        ma50 = _safe_float(last.get("MA50"), default=math.nan)
+        ma200 = _safe_float(last.get("MA200"), default=math.nan)
+        if math.isfinite(last_close_val) and math.isfinite(ma50) and math.isfinite(ma200):
+            if last_close_val > ma50 > ma200:
+                return "Tăng"
+            if last_close_val < ma50 < ma200:
+                return "Giảm"
+            return "Đi ngang"
+        df_tmp = _resolve_df_for_battle_map()
+        if df_tmp is None or df_tmp.empty or "Close" not in df_tmp.columns:
+            return "Đi ngang"
+        close_s = pd.to_numeric(df_tmp["Close"], errors="coerce").dropna()
+        if close_s.empty:
+            return "Đi ngang"
+        tail = close_s.tail(60)
+        if tail.empty:
+            return "Đi ngang"
+        first = float(tail.iloc[0])
+        last_val = float(tail.iloc[-1])
+        if first <= 0:
+            return "Đi ngang"
+        if last_val > first * 1.03:
+            return "Tăng"
+        if last_val < first * 0.97:
+            return "Giảm"
+        return "Đi ngang"
+
+    def _zone_label(z: Dict[str, Any], side: str) -> str:
+        zt = str(z.get("zone_type") or "")
+        side_norm = str(side or "").upper()
+        if zt == "EXPECTATION_TARGET":
+            return "mốc kỳ vọng (target)"
+        if zt == "EXPECTATION_POTENTIAL":
+            return "mốc tiềm năng"
+        return "vùng hỗ trợ (wall)" if side_norm == "SUPPORT" else "vùng cản (wall)"
+
     def _format_zone_line(zp: Dict[str, Any]) -> str:
         zones = zp.get("zones") if isinstance(zp.get("zones"), list) else []
 
@@ -186,9 +519,192 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
     # Trade-plan gate (for execution / anti-FOMO posture)
     gate_status, _meta = _trade_plan_gate(ap, cp)
 
-    # ---------- EXECUTIVE SNAPSHOT (single source of truth: DashboardSummaryPack) ----------
-    # render_executive_snapshot is backward-compatible: it can accept the full result pack as its first argument.
-    render_executive_snapshot(r, cp, gate_status)
+    # ---------- Dashboard #1 (Battle Map) ----------
+    df_battle = _resolve_df_for_battle_map()
+    battle_map_pack = None
+    if df_battle is not None:
+        try:
+            battle_map_pack = compute_battle_map_pack_v1(df_battle, analysis_pack=analysis_pack)
+        except Exception as exc:
+            st.info(f"Không thể tạo Battle Map: {exc.__class__.__name__}")
+            battle_map_pack = None
+
+    def _bm_safe_float(x):
+        try:
+            if x is None:
+                return None
+            return float(x)
+        except Exception:
+            return None
+
+    def _bm_fmt(x, nd=2):
+        v = _bm_safe_float(x)
+        return None if v is None else f"{v:.{nd}f}"
+
+    def render_battle_map_header_v1(ticker_input, df_1y):
+        import streamlit as st
+
+        # ---------- HARD NORMALIZE TICKER ----------
+        ticker = (ticker_input or "").strip().upper()
+        if not ticker:
+            ticker = "--"
+
+        # ---------- PRICE ----------
+        last_close = None
+        prev_close = None
+
+        if df_1y is not None and "Close" in df_1y.columns:
+            if len(df_1y) >= 1:
+                last_close = float(df_1y["Close"].iloc[-1])
+            if len(df_1y) >= 2:
+                prev_close = float(df_1y["Close"].iloc[-2])
+
+        if last_close is None:
+            st.markdown(
+                f"<div style='font-size:32px;font-weight:800;color:#fff'>{ticker} - --</div>",
+                unsafe_allow_html=True,
+            )
+            return
+
+        # ---------- CHANGE ----------
+        chg = None
+        chg_pct = None
+        if prev_close and prev_close != 0:
+            chg = last_close - prev_close
+            chg_pct = chg / prev_close * 100
+
+        if chg is None:
+            color = "#F5C542"  # yellow
+            chg_txt = "[-]"
+        else:
+            if chg > 0:
+                color = "#7CFF00"  # green
+                sign = "+"
+            elif chg < 0:
+                color = "#FF2D2D"  # red
+                sign = ""
+            else:
+                color = "#F5C542"
+                sign = ""
+            chg_txt = f"{sign}{chg:.2f} [{sign}{chg_pct:.2f}%]"
+
+        # ---------- RENDER ----------
+        st.markdown(
+            f"""
+            <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;">
+              <span style="font-size:34px;font-weight:800;color:#ffffff;">{ticker}</span>
+              <span style="font-size:34px;font-weight:800;color:#ffffff;">-</span>
+              <span style="font-size:34px;font-weight:800;color:#ffffff;">{last_close:.2f}</span>
+              <span style="font-size:34px;font-weight:800;color:{color};
+                           text-shadow:0 0 10px rgba(255,255,255,0.2);">
+                {chg_txt}
+              </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    col1, col2 = st.columns([2, 1], gap="large")
+    with col1:
+        ticker_input = _safe_text(st.session_state.get("ticker_input") or "").strip().upper()
+        render_battle_map_header_v1(ticker_input, df_battle)
+        if isinstance(battle_map_pack, dict):
+            render_battle_map_chart_v1(df_battle, battle_map_pack)
+        elif df_battle is not None:
+            render_price_map_chart_v1(df_battle, analysis_pack=analysis_pack)
+        else:
+            st.info("Chưa có dữ liệu giá để hiển thị Battle Map.")
+
+    with col2:
+        st.markdown("### Advisor Lens")
+        if isinstance(battle_map_pack, dict):
+            zs = (battle_map_pack.get("zones_selected") or {}) if isinstance(battle_map_pack.get("zones_selected"), dict) else {}
+            supports = zs.get("supports") or []
+            resists = zs.get("resistances") or []
+            ref_price = _safe_float(battle_map_pack.get("reference_price"), default=math.nan)
+            last_close = _safe_float(ref_price, default=math.nan)
+            trend_label = _infer_trend_label(last_close)
+            ticker = _safe_text(ap.get("Symbol") or ap.get("symbol") or ap.get("ticker") or "").upper()
+
+            def _zone_center(z: Dict[str, Any]) -> float:
+                return _safe_float(z.get("center"), default=math.nan)
+
+            support_0 = supports[0] if supports else {}
+            resist_0 = resists[0] if resists else {}
+            support_px = _zone_center(support_0)
+            resist_px = _zone_center(resist_0)
+            support_label = _zone_label(support_0, "SUPPORT") if support_0 else "vùng hỗ trợ (wall)"
+            resist_label = _zone_label(resist_0, "RESISTANCE") if resist_0 else "vùng cản (wall)"
+            support_tier = _safe_text(support_0.get("tier") or "").strip().upper()
+            resist_tier = _safe_text(resist_0.get("tier") or "").strip().upper()
+            support_reason = _safe_text((support_0.get("reasons") or [""])[0]).strip()
+            resist_reason = _safe_text((resist_0.get("reasons") or [""])[0]).strip()
+
+            lines = []
+            if math.isfinite(last_close) and math.isfinite(resist_px):
+                near_high = abs(last_close - resist_px) / max(resist_px, 1e-9) < 0.08
+            else:
+                near_high = False
+            if math.isfinite(last_close) and math.isfinite(support_px):
+                near_low = abs(last_close - support_px) / max(support_px, 1e-9) < 0.08
+            else:
+                near_low = False
+            if near_high:
+                context_line = "giá đang vận động gần vùng cao của biên 1 năm."
+            elif near_low:
+                context_line = "giá đang vận động gần vùng thấp của biên 1 năm."
+            else:
+                context_line = "giá đang ở vùng giữa biên 1 năm."
+            lines.append(f"Bối cảnh: Xu hướng {trend_label.lower()}, {context_line}")
+            lines.append("")
+            lines.append("Mốc chính:")
+            if math.isfinite(support_px):
+                tier_note = f"tier {support_tier}" if support_tier else "tier ?"
+                reason_note = f", {support_reason}" if support_reason else ""
+                lines.append(f"  – Hỗ trợ gần: {support_px:.1f} ({tier_note}{reason_note}).")
+            if math.isfinite(resist_px):
+                tier_note = f"tier {resist_tier}" if resist_tier else "tier ?"
+                reason_note = f", {resist_reason}" if resist_reason else ""
+                lines.append(f"  – Phía trên: {resist_label} {resist_px:.1f} ({tier_note}{reason_note}).")
+            else:
+                lines.append("  – Phía trên chưa có 'wall' gần; thị trường có thể chạy theo kỳ vọng, nhưng dễ rung lắc.")
+
+            lines.append("")
+            lines.append("Kịch bản giảm:")
+            if math.isfinite(support_px):
+                lines.append(f"  – Giữ trên {support_px:.1f}: có thể hình thành nhịp hồi kỹ thuật.")
+                lines.append(f"  – Đóng cửa dưới {support_px:.1f}: rủi ro trượt sâu hơn, ưu tiên phòng thủ.")
+            else:
+                lines.append("  – Chờ phản ứng rõ tại vùng hỗ trợ.")
+                lines.append("  – Mất hỗ trợ: ưu tiên phòng thủ.")
+            lines.append("")
+            lines.append("Kịch bản tăng:")
+            if math.isfinite(resist_px):
+                lines.append(f"  – Tiệm cận {resist_px:.1f}: dễ rung lắc hoặc chững lại.")
+                lines.append(f"  – Vượt và giữ trên {resist_px:.1f}: cấu trúc cho phép mở rộng đà tăng.")
+            else:
+                lines.append("  – Quan sát nhịp mở rộng khi không có wall gần.")
+                lines.append("  – Rung lắc mạnh trước khi hình thành kháng cự rõ.")
+            lines.append("")
+            lines.append("Lưu ý: Thị trường không chắc chắn; vùng giá cao thường đi kèm biến động lớn.")
+            lines.append("")
+            lines.append("Gợi ý theo khẩu vị:")
+            lines.append("  – Ưu tiên an toàn: chờ phản ứng rõ tại hỗ trợ.")
+            lines.append("  – Chấp nhận biến động: quan sát hành vi giá tại vùng cản phía trên.")
+
+            for line in lines[:14]:
+                if line:
+                    st.markdown(f"- {line}")
+                else:
+                    st.markdown("")
+        else:
+            st.caption("Chưa đủ dữ liệu để tạo narrative.")
+
+    # ---------- Dashboard #2 (Decision Orientation Layer) ----------
+    render_decision_orientation_dashboard_v11(r, ap)
+
+    # Optional legacy dashboard view
+    with st.expander("Legacy dashboard (Executive Snapshot)", expanded=False):
+        render_executive_snapshot(r, cp, gate_status)
 
     # Pre-split legacy report once for reuse
     exp_label = "BẤM ĐỂ XEM CHI TIẾT PHÂN TÍCH & BIỂU ĐỒ"
@@ -304,6 +820,40 @@ def render_appendix_e(result: Dict[str, Any], report_text: str, analysis_pack: D
             _policy_hint = _safe_text(card.get("policy_hint_line") if card else "").strip() or get_class_policy_hint_line(_final_class)
             if _policy_hint:
                 st.markdown(f"**Policy:** {_policy_hint}")
+
+            st.markdown("<div style='margin:6px 0 0 0;'></div>", unsafe_allow_html=True)
+
+            # Payoff Tier (economic viability only; no gating)
+            sp = ap.get("StatusPack") if isinstance(ap.get("StatusPack"), dict) else {}
+            payoff = sp.get("payoff") if isinstance(sp.get("payoff"), dict) else {}
+            payoff_tier = _safe_text(payoff.get("tier") or "").strip().upper()
+            payoff_note = _safe_text(payoff.get("note") or "").strip()
+            if payoff_tier:
+                st.markdown(
+                    f"<div style='font-weight:600;'>Payoff (Tier): {html.escape(payoff_tier)}</div>",
+                    unsafe_allow_html=True,
+                )
+                if payoff_note:
+                    st.markdown(
+                        f"<div style='margin-top:4px;color:#6B7280;font-size:12px;line-height:1.3;'>"
+                        f"{html.escape(payoff_note)}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+            st.markdown("<div style='margin:8px 0 0 0;'></div>", unsafe_allow_html=True)
+
+            st.markdown("### Đồ thị giá")
+            show_legacy_chart = st.checkbox("Render chart here (legacy)", value=False, key="legacy_battle_map_chart")
+            if not show_legacy_chart:
+                st.caption("Legacy view (details).")
+            else:
+
+                if df_battle is None:
+                    st.info("Chưa có dữ liệu giá để hiển thị đồ thị.")
+                elif isinstance(battle_map_pack, dict):
+                    render_battle_map_chart_v1(df_battle, battle_map_pack)
+                else:
+                    render_price_map_chart_v1(df_battle, analysis_pack=analysis_pack)
 
             # 2.3 State Capsule (Facts-only, compact)
             st.markdown("**Structure Summary (MA/Fibo/RSI/MACD/Volume)**")

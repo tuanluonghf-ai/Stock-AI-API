@@ -59,7 +59,7 @@ def render_character_card(character_pack: Dict[str, Any]) -> None:
         tb = cp.get("Traceback")
         if tb:
             with st.expander("Character traceback (debug)"):
-                st.code(str(tb))
+                st.error("Có lỗi hiển thị. Vui lòng kiểm tra logs.")
 
 
     def _radar_svg(stats: List[Tuple[str, float]], maxv: float = 10.0, size: int = 220) -> str:

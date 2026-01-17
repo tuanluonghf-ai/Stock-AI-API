@@ -247,6 +247,254 @@ def render_stock_dna_insight(character_pack: Dict[str, Any]) -> None:
 
     st.markdown(f"- Fit: {html.escape(fit)}")
 
+
+def render_investor_mapping_v1(analysis_pack: Dict[str, Any], mode: str = "teaser") -> None:
+    """Render Investor Fit & Risk Appetite (pack-only)."""
+    ap_in = analysis_pack if isinstance(analysis_pack, dict) else {}
+    ap = _ensure_dict(ap_in.get("AnalysisPack") if isinstance(ap_in.get("AnalysisPack"), dict) else ap_in)
+    pack = ap.get("InvestorMappingPack") if isinstance(ap.get("InvestorMappingPack"), dict) else None
+
+    st.markdown("### Investor Fit & Risk Appetite")
+    st.caption("Compatibility across investment styles, normalized on a 0-10 scale.")
+
+    if not isinstance(pack, dict):
+        st.markdown("Data unavailable.")
+        return
+
+    meta = pack.get("Meta") if isinstance(pack.get("Meta"), dict) else None
+    pentagon = pack.get("Pentagon") if isinstance(pack.get("Pentagon"), dict) else None
+    if not isinstance(meta, dict) or not isinstance(pentagon, dict):
+        st.markdown("Data unavailable.")
+        return
+
+    labels = meta.get("labels") if isinstance(meta.get("labels"), dict) else {}
+    match_min = _safe_float(labels.get("match_min"), default=7.5)
+    partial_min = _safe_float(labels.get("partial_min"), default=4.5)
+
+    axis_map = [
+        ("Trend Power", ["TrendPower", "Trend Power"]),
+        ("Explosive", ["Explosive"]),
+        ("Safety Shield", ["SafetyShield", "Safety Shield"]),
+        ("Trading Flow", ["TradingFlow", "Trading Flow"]),
+        ("Adrenaline", ["Adrenaline"]),
+    ]
+
+    def _pick_val(d: Dict[str, Any], keys: List[str]) -> float:
+        for k in keys:
+            if k in d:
+                return _safe_float(d.get(k), default=np.nan)
+        return np.nan
+
+    stats: List[Tuple[str, float]] = [(label, _pick_val(pentagon, keys)) for label, keys in axis_map]
+
+    def _radar_svg(stats_in: List[Tuple[str, float]], maxv: float = 10.0, size: int = 220) -> str:
+        n = len(stats_in)
+        if n < 3:
+            return ""
+        cx = cy = size / 2.0
+        r = size * 0.34
+        angles = [(-math.pi / 2.0) + i * (2.0 * math.pi / n) for i in range(n)]
+
+        def pt(angle: float, radius: float) -> Tuple[float, float]:
+            return (cx + radius * math.cos(angle), cy + radius * math.sin(angle))
+
+        vals: List[float] = []
+        for _, v in stats_in:
+            vv = 0.0 if pd.isna(v) else float(v)
+            vv = float(_clip(vv, 0.0, maxv))
+            vals.append(vv)
+
+        grid_levels = [2, 4, 6, 8, 10]
+        grid_polys = []
+        for lv in grid_levels:
+            rr = r * (lv / maxv)
+            pts = [pt(a, rr) for a in angles]
+            grid_polys.append(" ".join([f"{x:.1f},{y:.1f}" for x, y in pts]))
+
+        axis_pts = [pt(a, r) for a in angles]
+        data_pts = [pt(angles[i], r * (vals[i] / maxv)) for i in range(n)]
+        data_points = " ".join([f"{x:.1f},{y:.1f}" for x, y in data_pts])
+        label_pts = [pt(a, r + 26) for a in angles]
+
+        parts: List[str] = []
+        parts.append(f'<svg class="gc-radar-svg" viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg">')
+        for poly in grid_polys:
+            parts.append(f'<polygon points="{poly}" fill="none" stroke="#E5E7EB" stroke-width="1" />')
+        for (x, y) in axis_pts:
+            parts.append(f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{x:.1f}" y2="{y:.1f}" stroke="#CBD5E1" stroke-width="1" />')
+        parts.append(f'<polygon points="{data_points}" fill="rgba(15,23,42,0.10)" stroke="#0F172A" stroke-width="2" />')
+        for (x, y) in data_pts:
+            parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.2" fill="#0F172A" />')
+        for i, (lx, ly) in enumerate(label_pts):
+            lab = html.escape(str(stats_in[i][0]))
+            anchor = "middle"
+            if lx < cx - 10:
+                anchor = "end"
+            elif lx > cx + 10:
+                anchor = "start"
+            parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" font-size="12" font-weight="700" fill="#334155">{lab}</text>')
+        parts.append('</svg>')
+        return "".join(parts)
+
+    def _label_from_score(v: float) -> str:
+        if pd.isna(v):
+            return "Mismatch"
+        if v >= match_min:
+            return "Match"
+        if v >= partial_min:
+            return "Partial"
+        return "Mismatch"
+
+    def _persona_list(p: Dict[str, Any]) -> List[Dict[str, Any]]:
+        src = None
+        for key in ("Personas", "PersonaMatch", "Compatibility", "personas", "persona_match", "compatibility"):
+            if key in p:
+                src = p.get(key)
+                break
+        items: List[Dict[str, Any]] = []
+        if isinstance(src, list):
+            for it in src:
+                if isinstance(it, dict):
+                    items.append(it)
+        elif isinstance(src, dict):
+            for k, it in src.items():
+                if isinstance(it, dict):
+                    it = dict(it)
+                    it.setdefault("name", k)
+                    items.append(it)
+        return items
+
+    personas = _persona_list(pack)
+
+    def _persona_sort_key(item: Dict[str, Any]) -> Tuple[float, str]:
+        score = _safe_float(item.get("score_10") or item.get("Score10") or item.get("score"), default=np.nan)
+        s_key = -float(score) if not pd.isna(score) else 1e9
+        name = _safe_text(item.get("name") or item.get("Name") or item.get("Persona") or "").strip()
+        return (s_key, name)
+
+    if mode == "teaser" and personas:
+        personas = sorted(personas, key=_persona_sort_key)[:4]
+
+    def _persona_label(item: Dict[str, Any]) -> str:
+        raw = _safe_text(item.get("label") or item.get("Label") or "").strip()
+        if raw == "Partial Match":
+            raw = "Partial"
+        if raw:
+            return raw
+        score = _safe_float(item.get("score_10") or item.get("Score10") or item.get("score"), default=np.nan)
+        return _label_from_score(score)
+
+    def _persona_score(item: Dict[str, Any]) -> float:
+        return _safe_float(item.get("score_10") or item.get("Score10") or item.get("score"), default=np.nan)
+
+    def _persona_name(item: Dict[str, Any]) -> str:
+        return _safe_text(item.get("name") or item.get("Name") or item.get("Persona") or "").strip()
+
+    def _color_for_label(label: str, vetoed: bool) -> str:
+        if vetoed:
+            return "#64748B"
+        if label == "Match":
+            return "#22C55E"
+        if label == "Partial":
+            return "#F59E0B"
+        return "#9CA3AF"
+
+    def _bar_row(label: str, score: float, color: str, dim: bool) -> str:
+        pct = 0.0 if pd.isna(score) else float(max(0.0, min(100.0, (score / 10.0) * 100.0)))
+        val_txt = "?" if pd.isna(score) else f"{score:.1f}/10"
+        opacity = "0.45" if dim else "1"
+        return (
+            "<div style='display:flex;gap:10px;align-items:center;margin:6px 0;'>"
+            f"<div style='width:150px;font-size:14px;color:#374151;font-weight:700;'>{html.escape(label)}</div>"
+            f"<div style='flex:1;height:12px;background:#F3F4F6;border-radius:999px;overflow:hidden;'>"
+            f"<div style='height:12px;width:{pct:.0f}%;background:{color};opacity:{opacity};border-radius:999px;'></div>"
+            "</div>"
+            f"<div style='width:70px;text-align:right;font-size:13px;color:#111827;font-weight:800;'>{html.escape(val_txt)}</div>"
+            "</div>"
+        )
+
+    def _badge(label: str, vetoed: bool) -> str:
+        txt = "Mismatch (Veto)" if vetoed else label
+        color = _color_for_label(label, vetoed)
+        return f"<span style='padding:2px 8px;border-radius:999px;border:1px solid {color};color:{color};font-size:12px;font-weight:800;'>{html.escape(txt)}</span>"
+
+    def _collect_tags() -> List[str]:
+        tags: List[str] = []
+        for key in ("reasons", "tags"):
+            val = pack.get(key)
+            if isinstance(val, list):
+                for x in val:
+                    if isinstance(x, str) and x.strip():
+                        tags.append(x.strip())
+        for item in personas:
+            for key in ("reasons", "tags", "Reasons", "Tags"):
+                val = item.get(key)
+                if isinstance(val, list):
+                    for x in val:
+                        if isinstance(x, str) and x.strip():
+                            tags.append(x.strip())
+        seen = set()
+        out: List[str] = []
+        for t in tags:
+            if t in seen:
+                continue
+            out.append(t)
+            seen.add(t)
+        return out
+
+    # Pentagon
+    if mode == "full":
+        svg = _radar_svg(stats, maxv=10.0, size=240)
+        st.markdown(
+            f"""
+            <div class="gc-sec">
+              <div class="gc-sec-t">PENTAGON (0-10)</div>
+              <div class="gc-radar-wrap">
+                {svg}
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        for label, value in stats:
+            val = _safe_float(value, default=np.nan)
+            bar_html = _bar_row(label, val, "#2563EB", False)
+            st.markdown(bar_html, unsafe_allow_html=True)
+
+    # Personas
+    if personas:
+        st.markdown("**Compatibility**")
+        for item in personas:
+            name = _persona_name(item)
+            if not name:
+                continue
+            score = _persona_score(item)
+            label = _persona_label(item)
+            vetoed = bool(item.get("vetoed") or item.get("Vetoed"))
+            color = _color_for_label(label, vetoed)
+            row = _bar_row(name, score, color, vetoed)
+            st.markdown(row, unsafe_allow_html=True)
+            st.markdown(_badge(label, vetoed), unsafe_allow_html=True)
+
+    tags = _collect_tags()
+    tag_limit = 8 if mode == "full" else 4
+    if tags:
+        chips = "".join(
+            [
+                f"<span style='display:inline-block;padding:3px 8px;margin:2px 6px 2px 0;border-radius:999px;background:#111827;color:#FFFFFF;font-size:12px;font-weight:700;'>"
+                f"{html.escape(t)}</span>"
+                for t in tags[:tag_limit]
+            ]
+        )
+        st.markdown(chips, unsafe_allow_html=True)
+
+    if mode == "full":
+        st.caption("Higher scores indicate stronger compatibility with the corresponding style.")
+        st.caption("Market conditions remain uncertain; compatibility does not imply timing.")
+    else:
+        st.caption("Market conditions remain uncertain; compatibility does not imply timing.")
+
 def render_current_status_insight(master_score_total: Any, conviction_score: Any, gate_status: Optional[str] = None) -> None:
     """Current Status Insight — concise interpretation of MasterScore & Conviction (single block).
     Note: This is intentionally short and belongs directly under the two score bars.

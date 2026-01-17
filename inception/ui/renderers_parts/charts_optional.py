@@ -57,7 +57,7 @@ def render_game_card(data: Dict[str, Any]):
         st.metric("Class", archetype)
         st.metric("Power Level", f"{avg}/10")
     with c2:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 def render_price_map_chart_v1(df: Any, analysis_pack: Dict[str, Any]) -> None:
     """Render a dark professional price map chart.
@@ -369,4 +369,4 @@ def render_price_map_chart_v1(df: Any, analysis_pack: Dict[str, Any]) -> None:
     fig.update_xaxes(rangeslider_visible=False)
     fig.update_yaxes(side="right")
 
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "displaylogo": False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": True, "displaylogo": False})
