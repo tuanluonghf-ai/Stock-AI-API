@@ -375,4 +375,4 @@ else:
     fig.update_xaxes(rangeslider_visible=False)
     fig.update_yaxes(side="right")
 
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "displaylogo": False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": True, "displaylogo": False})
