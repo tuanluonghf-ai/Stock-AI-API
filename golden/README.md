@@ -16,6 +16,13 @@ Expected files:
 - golden/MSN.flat.json
 - golden/_manifest.json
 
+## Contract semantics
+
+The golden manifest includes a `packs.InvestorMappingPack` block that locks v1
+semantics (scale, labels, required sections). Validation is enforced at the
+DashboardSummary stage; earlier stages only validate when present to avoid
+false failures.
+
 ## Compare against baselines
 
 ```bash

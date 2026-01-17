@@ -1,0 +1,209 @@
+{
+  "artifacts": {
+    "selection_debug": "C:\\Users\\PC\\OneDrive\\Desktop\\Stock-AI-API\\audits\\payoff_challenge_set_selection_debug.json",
+    "universe_distribution_csv": "C:\\Users\\PC\\OneDrive\\Desktop\\Stock-AI-API\\audits\\payoff_universe_tier_distribution.csv",
+    "universe_distribution_summary": "C:\\Users\\PC\\OneDrive\\Desktop\\Stock-AI-API\\audits\\payoff_universe_tier_distribution_summary.json"
+  },
+  "available_per_tier": {
+    "HIGH": 268,
+    "LOW": 1,
+    "MEDIUM": 31
+  },
+  "counts": {
+    "HIGH": 19,
+    "LOW": 1,
+    "MEDIUM": 10
+  },
+  "generated_at": "2026-01-16T09:15:09Z",
+  "notes": "selection is deterministic; tier buckets from OHLC-only PayoffTier v1",
+  "payoff_failures": [],
+  "selected": [
+    {
+      "payoff_span_norm": 0.145244,
+      "payoff_tier": "LOW",
+      "shape": null,
+      "ticker": "KOS"
+    },
+    {
+      "payoff_span_norm": 0.156818,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "QTP"
+    },
+    {
+      "payoff_span_norm": 0.173662,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "QNS"
+    },
+    {
+      "payoff_span_norm": 0.207037,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "VC3"
+    },
+    {
+      "payoff_span_norm": 0.323529,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "PPT"
+    },
+    {
+      "payoff_span_norm": 0.326246,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "PVP"
+    },
+    {
+      "payoff_span_norm": 0.338211,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "TIP"
+    },
+    {
+      "payoff_span_norm": 0.340702,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "BAF"
+    },
+    {
+      "payoff_span_norm": 0.382745,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "VIP"
+    },
+    {
+      "payoff_span_norm": 0.386406,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "IMP"
+    },
+    {
+      "payoff_span_norm": 0.390732,
+      "payoff_tier": "MEDIUM",
+      "shape": null,
+      "ticker": "PVT"
+    },
+    {
+      "payoff_span_norm": 0.401114,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "SSB"
+    },
+    {
+      "payoff_span_norm": 0.401936,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "D2D"
+    },
+    {
+      "payoff_span_norm": 0.403992,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "BFC"
+    },
+    {
+      "payoff_span_norm": 0.405115,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "FUEVFVND"
+    },
+    {
+      "payoff_span_norm": 0.405172,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "DXP"
+    },
+    {
+      "payoff_span_norm": 0.405906,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "VLB"
+    },
+    {
+      "payoff_span_norm": 0.60535,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "DPM"
+    },
+    {
+      "payoff_span_norm": 0.607619,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "DPG"
+    },
+    {
+      "payoff_span_norm": 0.611905,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "MSB"
+    },
+    {
+      "payoff_span_norm": 0.612427,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "GAS"
+    },
+    {
+      "payoff_span_norm": 0.612857,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "DRI"
+    },
+    {
+      "payoff_span_norm": 0.614786,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "HHV"
+    },
+    {
+      "payoff_span_norm": 0.616113,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "NAF"
+    },
+    {
+      "payoff_span_norm": 1.466472,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "SGR"
+    },
+    {
+      "payoff_span_norm": 1.514808,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "KSV"
+    },
+    {
+      "payoff_span_norm": 1.549407,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "BCG"
+    },
+    {
+      "payoff_span_norm": 1.667247,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "HID"
+    },
+    {
+      "payoff_span_norm": 1.898426,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "HSL"
+    },
+    {
+      "payoff_span_norm": 1.917526,
+      "payoff_tier": "HIGH",
+      "shape": null,
+      "ticker": "AAS"
+    }
+  ],
+  "shortfalls": {},
+  "source": "pinned_dataset",
+  "targets_per_tier": {
+    "HIGH": 19,
+    "LOW": 1,
+    "MEDIUM": 10
+  }
+}

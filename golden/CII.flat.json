@@ -217,6 +217,87 @@
       "TargetVND": NaN,
       "UpsidePct": NaN
     },
+    "InvestorMappingPack": {
+      "Meta": {
+        "labels": {
+          "match_min": 7.5,
+          "partial_min": 4.5
+        },
+        "scale": "0-10",
+        "version": "v1"
+      },
+      "Pentagon": {
+        "Adrenaline": 7.575,
+        "Explosive": 5.744999999999999,
+        "SafetyShield": 3.0900000000000003,
+        "TradingFlow": 7.305226306828521,
+        "TrendPower": 5.91845238095238
+      },
+      "Personas": {
+        "AlphaHunter": {
+          "brief": "Seeks breakout energy and alpha within strong trends.",
+          "ideal": {
+            "Adrenaline": 6.5,
+            "Explosive": 8.5,
+            "SafetyShield": 5.5,
+            "TradingFlow": 6.5,
+            "TrendPower": 8.0
+          },
+          "label": "Match",
+          "name": "AlphaHunter",
+          "reasons": [],
+          "score_10": 8.0,
+          "vetoed": false
+        },
+        "CashFlowTrader": {
+          "brief": "Prefers liquidity, execution consistency, and cash flow.",
+          "ideal": {
+            "Adrenaline": 3.5,
+            "Explosive": 4.5,
+            "SafetyShield": 7.5,
+            "TradingFlow": 8.5,
+            "TrendPower": 6.5
+          },
+          "label": "Match",
+          "name": "CashFlowTrader",
+          "reasons": [],
+          "score_10": 7.7,
+          "vetoed": false
+        },
+        "Compounder": {
+          "brief": "Prioritizes durability, stability, and clear trends.",
+          "ideal": {
+            "Adrenaline": 3.5,
+            "Explosive": 5.5,
+            "SafetyShield": 8.5,
+            "TradingFlow": 7.5,
+            "TrendPower": 8.5
+          },
+          "label": "Partial Match",
+          "name": "Compounder",
+          "reasons": [
+            "DNA_SOFT_GAP_PRONE"
+          ],
+          "score_10": 5.8999999999999995,
+          "vetoed": false
+        },
+        "Speculator": {
+          "brief": "Accepts higher risk for fast, explosive moves.",
+          "ideal": {
+            "Adrenaline": 8.5,
+            "Explosive": 9.0,
+            "SafetyShield": 3.5,
+            "TradingFlow": 5.5,
+            "TrendPower": 6.0
+          },
+          "label": "Match",
+          "name": "Speculator",
+          "reasons": [],
+          "score_10": 8.3,
+          "vetoed": false
+        }
+      }
+    },
     "Last": {
       "Avg20Vol": 18132525.0,
       "Close": 19.05,
@@ -443,14 +524,14 @@
           "MACD_CrossEvent=CrossDown; BarsAgo=22"
         ],
         "Tags": [
-          "ZoneBelow30",
+          "Alignment=RSI_Below30",
           "MACD_Below_Signal",
-          "MACD_ZeroLine=Below",
-          "MACD_HistState=Contracting_Negative",
           "MACD_Cross=CrossDown",
+          "MACD_HistState=Contracting_Negative",
+          "MACD_ZeroLine=Below",
           "RSI_Direction=Rising",
           "RSI_Divergence=None",
-          "Alignment=RSI_Below30"
+          "ZoneBelow30"
         ]
       },
       "LevelContext": {
@@ -1403,6 +1484,87 @@
     "rationale": "Ch\u01b0a \u0111\u1ee7 \u0111i\u1ec1u ki\u1ec7n cho mua m\u1edbi; \u01b0u ti\u00ean ch\u1edd th\u00eam x\u00e1c nh\u1eadn (\u0111\u1eb7c bi\u1ec7t l\u00e0 Structure/Volume).",
     "schema": "DecisionPack.v1",
     "urgency": "MED"
+  },
+  "InvestorMappingPack": {
+    "Meta": {
+      "labels": {
+        "match_min": 7.5,
+        "partial_min": 4.5
+      },
+      "scale": "0-10",
+      "version": "v1"
+    },
+    "Pentagon": {
+      "Adrenaline": 7.575,
+      "Explosive": 5.744999999999999,
+      "SafetyShield": 3.0900000000000003,
+      "TradingFlow": 7.305226306828521,
+      "TrendPower": 5.91845238095238
+    },
+    "Personas": {
+      "AlphaHunter": {
+        "brief": "Seeks breakout energy and alpha within strong trends.",
+        "ideal": {
+          "Adrenaline": 6.5,
+          "Explosive": 8.5,
+          "SafetyShield": 5.5,
+          "TradingFlow": 6.5,
+          "TrendPower": 8.0
+        },
+        "label": "Match",
+        "name": "AlphaHunter",
+        "reasons": [],
+        "score_10": 8.0,
+        "vetoed": false
+      },
+      "CashFlowTrader": {
+        "brief": "Prefers liquidity, execution consistency, and cash flow.",
+        "ideal": {
+          "Adrenaline": 3.5,
+          "Explosive": 4.5,
+          "SafetyShield": 7.5,
+          "TradingFlow": 8.5,
+          "TrendPower": 6.5
+        },
+        "label": "Match",
+        "name": "CashFlowTrader",
+        "reasons": [],
+        "score_10": 7.7,
+        "vetoed": false
+      },
+      "Compounder": {
+        "brief": "Prioritizes durability, stability, and clear trends.",
+        "ideal": {
+          "Adrenaline": 3.5,
+          "Explosive": 5.5,
+          "SafetyShield": 8.5,
+          "TradingFlow": 7.5,
+          "TrendPower": 8.5
+        },
+        "label": "Partial Match",
+        "name": "Compounder",
+        "reasons": [
+          "DNA_SOFT_GAP_PRONE"
+        ],
+        "score_10": 5.8999999999999995,
+        "vetoed": false
+      },
+      "Speculator": {
+        "brief": "Accepts higher risk for fast, explosive moves.",
+        "ideal": {
+          "Adrenaline": 8.5,
+          "Explosive": 9.0,
+          "SafetyShield": 3.5,
+          "TradingFlow": 5.5,
+          "TrendPower": 6.0
+        },
+        "label": "Match",
+        "name": "Speculator",
+        "reasons": [],
+        "score_10": 8.3,
+        "vetoed": false
+      }
+    }
   },
   "Modules": {
     "character": {

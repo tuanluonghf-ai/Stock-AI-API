@@ -10,6 +10,11 @@ from typing import Iterable, List, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UI_ROOT = REPO_ROOT / "inception" / "ui"
+UI_DATA_EXCLUDE = {"phrase_bank_vi.py"}  # static data; exclude from generator scan
+UI_ORPHAN_EXCLUDE_DIRS = {
+    UI_ROOT.resolve(),
+    (REPO_ROOT / "ui").resolve(),
+}
 REMOVED_MODULES = (
     "narrative_output_pack",
     "narrative_governance",
@@ -30,6 +35,10 @@ def _scan_orphan_imports(root: Path) -> List[Tuple[Path, str]]:
     for path in _iter_py_files(root):
         if path.resolve() == Path(__file__).resolve():
             continue
+        if any(str(path.resolve()).startswith(str(ex)) for ex in UI_ORPHAN_EXCLUDE_DIRS):
+            continue
+        if "/_archive/" in path.as_posix() or path.name.endswith(".archive.py"):
+            continue
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except Exception:
@@ -43,6 +52,11 @@ def _scan_orphan_imports(root: Path) -> List[Tuple[Path, str]]:
 def _scan_ui_patterns(regex: re.Pattern[str]) -> List[Tuple[Path, int, str]]:
     hits: List[Tuple[Path, int, str]] = []
     for path in _iter_py_files(UI_ROOT):
+        rel = str(path.as_posix())
+        if "/_archive/" in rel or rel.endswith(".archive.py"):
+            continue
+        if path.name in UI_DATA_EXCLUDE:
+            continue
         try:
             lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         except Exception:

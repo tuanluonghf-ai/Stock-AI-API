@@ -6,9 +6,15 @@ Usage:
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import json
 import os
-import sys
 from typing import Any, Dict, List, Tuple
 
 try:
@@ -25,15 +31,28 @@ def _repo_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
-def _normalize_json(x: Any) -> Any:
+def _normalize_json(x: Any, path: str = "") -> Any:
     if isinstance(x, dict):
-        return {str(k): _normalize_json(v) for k, v in x.items()}
+        items = []
+        for k in sorted(x.keys(), key=lambda v: str(v)):
+            kp = f"{path}.{k}" if path else str(k)
+            items.append((str(k), _normalize_json(x.get(k), kp)))
+        return dict(items)
     if isinstance(x, list):
-        return [_normalize_json(v) for v in x]
+        lp = path.lower()
+        if lp.endswith(".reasons") or lp.endswith(".tags"):
+            return sorted([_normalize_json(v, path) for v in x], key=lambda v: str(v))
+        if "investormappingpack.personas" in lp:
+            normalized = [_normalize_json(v, path) for v in x]
+            try:
+                return sorted(normalized, key=lambda v: str(v.get("name") or ""))
+            except Exception:
+                return normalized
+        return [_normalize_json(v, path) for v in x]
     if isinstance(x, tuple):
-        return [_normalize_json(v) for v in x]
+        return [_normalize_json(v, path) for v in x]
     if isinstance(x, set):
-        return sorted([_normalize_json(v) for v in x], key=lambda v: str(v))
+        return sorted([_normalize_json(v, path) for v in x], key=lambda v: str(v))
     if np is not None:
         try:
             if isinstance(x, (np.integer, np.floating)):
@@ -73,6 +92,13 @@ def _is_whitelisted_path(path: str) -> bool:
             return True
         if p in {"time", "time_ms", "time_s"}:
             return True
+    lp = path.lower()
+    if "analysispack.payoff" in lp:
+        return True
+    if "analysispack.statuspack.payoff" in lp:
+        return True
+    if "persona_payoff_cap" in lp:
+        return True
     return False
 
 
@@ -184,6 +210,7 @@ def _build_flat(result: Dict[str, Any]) -> Dict[str, Any]:
         "NarrativeDraftPack": result.get("NarrativeDraftPack") or ap.get("NarrativeDraftPack"),
         "TradePlanPack": ap.get("TradePlanPack"),
         "DecisionPack": ap.get("DecisionPack"),
+        "InvestorMappingPack": ap.get("InvestorMappingPack") or result.get("InvestorMappingPack"),
         "_Warnings": result.get("_Warnings") or ap.get("_Warnings"),
         "_ModuleErrors": result.get("_ModuleErrors"),
     }

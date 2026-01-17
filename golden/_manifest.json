@@ -5,6 +5,39 @@
   "generated_at_utc": "STATIC",
   "hsc_target": "Tickers Target Price.xlsx",
   "mode": "FLAT",
+  "packs": {
+    "InvestorMappingPack": {
+      "labels": {
+        "match_min": 7.5,
+        "partial_min": 4.5
+      },
+      "meta_required": [
+        "labels.match_min",
+        "labels.partial_min",
+        "scale",
+        "version"
+      ],
+      "pentagon_rules": {
+        "max": 10.0,
+        "min": 0.0,
+        "value_type": "number"
+      },
+      "persona_rules": {
+        "label_policy": "label-cross-check-warning",
+        "optional": true,
+        "score_range": [
+          0.0,
+          10.0
+        ]
+      },
+      "required": [
+        "Meta",
+        "Pentagon"
+      ],
+      "scale": "0-10",
+      "schema_version": "v1"
+    }
+  },
   "price_vol": "Price_Vol.xlsx",
   "schema": "GoldenManifest.v1",
   "tickers": [
